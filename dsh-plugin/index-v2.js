@@ -1200,7 +1200,8 @@ class ProjectService {
   /** The Composer is a long-lived queue manager; start it once and keep talking to it. */
   async ensureComposer({ projectId, agent }) {
     const project = this.get(projectId);
-    const existing = (project?.agents ?? []).filter((item) => item.role === 'composer' && item.childId).pop();
+    // Reuse a live Composer session; a failed one is replaced instead of resuming a broken child.
+    const existing = (project?.agents ?? []).filter((item) => item.role === 'composer' && item.childId && item.status !== 'failed').pop();
     if (existing?.childId) return { projectId, childId: existing.childId, started: false };
     const started = await this.runComposer({ projectId, agent });
     return { projectId, childId: started.childId, started: true };
@@ -1210,7 +1211,7 @@ class ProjectService {
   async notifyComposer({ projectId, agent, event, detail }) {
     const project = this.get(projectId);
     if (!project) return { delivered: false, reason: 'no project' };
-    const record = (project.agents ?? []).filter((item) => item.role === 'composer' && item.childId).pop();
+    const record = (project.agents ?? []).filter((item) => item.role === 'composer' && item.childId && item.status !== 'failed').pop();
     if (!record?.childId) {
       const ensured = await this.ensureComposer({ projectId, agent }).catch(() => null);
       return { delivered: Boolean(ensured), started: true, childId: ensured?.childId ?? null };
