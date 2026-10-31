@@ -1244,6 +1244,7 @@ class ProjectService {
       `The Leader created your initial research scaffold. Provided data is already copied under data/ in ${worktree}; use it directly. Do not read data.zip, testsets, the original project or DSH state.`,
       `The runtime is prepared for you: your shared interpreter is ${project.pythonPath ?? 'python3'} and mission code receives ALEPH_PYTHON with the same runtime, so numpy, pandas, scipy, scikit-learn and lightgbm are already importable. Do not inspect or install anything.`,
       'Mission code reads the provided data through ALEPH_VISIBLE_DATA, which the runner also exposes as ./data inside the mission directory. Do not copy the data into a mission and do not guess its path. A mission writes results to ALEPH_OUTPUT_DIR.',
+      'Evaluation runs your predict.py with the same interpreter and the same provided data, so anything importable in your shell is importable there, and ALEPH_VISIBLE_DATA points at the same directory.',
       'Declare extra dependencies in the mission pyproject; the Host checks them against the runtime before running.',
       'Small bounded analysis can use the shared interpreter; full training must still be a mission.',
       'Do not read problem/data.zip, any testsets directory, /home/hapenia/Projects/kunlungpt-comp, /home/hapenia/Projects/aleph-research, /home/hapenia/.dsh or any DSH profile/state. Run commands from your worktree, not from the project root; use canonical visible data only.' ,

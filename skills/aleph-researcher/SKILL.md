@@ -62,6 +62,8 @@ Do not guess these, and do not spend steps discovering them:
   use either.
 - `ALEPH_OUTPUT_DIR` is where a mission writes results; whatever lands there is
   committed to `results/<mission-id>/` on the mission branch.
+- The evaluator runs `predict.py` with the same interpreter and the same data, so
+  a model saved by a mission can be loaded by a submission without conversion.
 
 Never copy the data into a mission, and never declare dependencies the runtime
 already has.
