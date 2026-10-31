@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -326,6 +327,49 @@ test('machine load is an observed list, not a boolean', async () => {
     // Unknown kinds are normalised instead of rejected.
     const normalised = await service.setMachineLoad({ projectId: project.id, loads: [{ id: 'x', kind: 'weird' }] });
     assert.equal(normalised.loads[0].kind, 'other');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a researcher can adopt a finished mission code and results', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-adopt-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    const missionRepo = project.missionRoot;
+    const branch = 'missions/adoptable';
+    git(missionRepo, ['switch', '-c', branch, 'template']);
+    await mkdir(join(missionRepo, 'missions', 'adoptable'), { recursive: true });
+    await writeFile(join(missionRepo, 'missions', 'adoptable', 'mission.json'), JSON.stringify({ id: 'adoptable', entrypoint: 'run.sh' }));
+    await writeFile(join(missionRepo, 'missions', 'adoptable', 'run.sh'), '#!/usr/bin/env bash\nset -e\nprintf \'{"ok":true}\\n\' > "$ALEPH_OUTPUT_DIR/result.json"\nprintf \'{"w":1}\\n\' > "$ALEPH_OUTPUT_DIR/metrics.json"\n');
+    await writeFile(join(missionRepo, 'missions', 'adoptable', 'predict.py'), 'print("inference")\n');
+    git(missionRepo, ['add', '-A']);
+    git(missionRepo, [...identity(missionRepo), 'commit', '-m', 'adoptable mission']);
+    git(missionRepo, ['switch', 'template']);
+
+    let current = await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
+    const missionId = current.missions[0].id;
+    await service.approve({ projectId: project.id, missionId });
+    current = await service.formBatch({ projectId: project.id });
+    await service.runBatch({ projectId: project.id, batchId: current.batches[0].id });
+
+    // Give the researcher a worktree to adopt into.
+    await service.scaffoldResearch({ projectId: project.id });
+    const research = project.researchRoot;
+    const worktree = join(workspace, 'researcher-wt');
+    git(research, ['worktree', 'add', '-b', 'research/adopter', worktree, 'HEAD']);
+    await service.mutate(project.id, (state) => ({
+      ...state,
+      agents: [...(state.agents ?? []), { role: 'researcher', childId: 'child-adopt', status: 'running', summary: null, branch: 'research/adopter', worktree, updatedAt: new Date().toISOString() }],
+    }));
+
+    const adopted = await service.adoptMission({ projectId: project.id, missionId, agent: { id: 'child-adopt' } });
+    assert.ok(existsSync(join(adopted.missionDir, 'predict.py')), 'mission source is copied');
+    assert.ok(existsSync(join(adopted.resultsDir, 'metrics.json')), 'mission results are copied');
+    assert.ok(adopted.files.length > 0);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -321,7 +321,23 @@ class ProjectService {
     await ensureRepo(researchRoot, 'main', { 'README.md': '# Research repository\n' });
     const missionRoot = join(target, 'missions');
     await ensureRepo(missionRoot, 'template', {
-      'README.md': '# Mission repository template\n',
+      'README.md': [
+        '# Mission repository template',
+        '',
+        'Each mission lives in `missions/<mission-id>/` and must contain:',
+        '',
+        '- `mission.json` with `id`, `entrypoint`, and any `outputs`.',
+        '- the entrypoint script plus its training code and an uv project.',
+        '- `predict.py`: the inference deliverable. It must accept `--input-dir` and',
+        '  `--output` exactly like the research submission contract, so a validated',
+        '  mission result can be adopted by a researcher without rewriting inference.',
+        '',
+        'Training writes into `$ALEPH_OUTPUT_DIR`, which becomes `results/<mission-id>/`',
+        'on the mission branch. Put the model bundle and metrics there so they are',
+        'readable from the mission branch after the batch ends.',
+        '',
+      ].join('\n'),
+
       'batch_runner.py': TEMPLATE_BATCH_RUNNER,
       'pyproject.toml': '[project]\nname = "aleph-missions"\nversion = "0.1.0"\nrequires-python = ">=3.10"\n',
       // A shared ignore list keeps missions from colliding on .gitignore and from committing bytecode.
@@ -438,6 +454,50 @@ class ProjectService {
 
   async mutateProject(projectId, updater) {
     return this.mutate(projectId, updater);
+  }
+
+  /**
+   * Copy a finished mission's code and results into a research worktree so its
+   * submission can be adopted without hand-copying files out of git.
+   */
+  async adoptMission({ projectId, missionId, agent, dir = null }) {
+    const project = this.get(projectId);
+    if (!project) throw new Error(`project not found: ${projectId}`);
+    const mission = project.missions.find((item) => item.id === missionId);
+    if (!mission) throw new Error(`mission not found: ${missionId}`);
+    const record = (project.agents ?? []).find((item) => item.role === 'researcher' && item.childId === (agent?.id ?? null) && item.worktree);
+    const worktree = record?.worktree;
+    if (!worktree || !(await pathExists(worktree))) throw new Error('a researcher worktree is required to adopt a mission');
+    const missionDir = mission.manifestPath ? mission.manifestPath.split('/')[1] : null;
+    if (!missionDir) throw new Error('mission has no manifest path recorded');
+    const target = join(worktree, dir ?? 'adopted', missionId);
+    await mkdir(target, { recursive: true });
+    const paths = [`missions/${missionDir}`];
+    if (mission.manifestId) paths.push(`results/${mission.manifestId}`);
+    // git archive keeps the checkout untouched and copies exactly what the branch holds.
+    const archive = await new Promise((resolve, reject) => {
+      const child = execFile('git', ['-C', project.missionRoot, 'archive', '--format=tar', mission.branch, ...paths], { encoding: 'buffer', maxBuffer: 512 * 1024 * 1024 }, (error, stdout) => {
+        if (error) reject(error); else resolve(stdout);
+      });
+      child.stdin?.end?.();
+    });
+    await new Promise((resolve, reject) => {
+      const untar = execFile('tar', ['-x', '-C', target], { encoding: 'buffer' }, (error) => (error ? reject(error) : resolve()));
+      untar.stdin.end(archive);
+    });
+    const listing = [];
+    for (const path of paths) {
+      const base = join(target, path);
+      if (!(await pathExists(base))) continue;
+      for (const entry of await readdir(base).catch(() => [])) listing.push(`${path}/${entry}`);
+    }
+    return {
+      projectId, missionId, branch: mission.branch, target,
+      missionDir: join(target, 'missions', missionDir),
+      resultsDir: mission.manifestId ? join(target, 'results', mission.manifestId) : null,
+      files: listing,
+      hint: 'Copy predict.py from the mission directory, point it at the model bundle in the results directory, commit, then call aleph_evaluate.',
+    };
   }
 
   async listMissions({ projectId }) {
@@ -1753,6 +1813,12 @@ export async function apply(ctx) {
       'MissionComposer entry: merge approved missions into a machine-bound batch branch.',
       { ...projectIdParam, machine_id: { type: 'string', description: 'Machine id, default local' } },
       async (args) => service.formBatch({ projectId: args.project_id, machineId: args.machine_id ?? 'local' }),
+    ), { when: ({ agent }) => isAleph(agent) }),
+    ctx.tools.register(tool(
+      'aleph_adopt_mission',
+      'Copy a finished mission code and results into your research worktree for adoption.',
+      { ...projectIdParam, mission_id: { type: 'string', required: true }, dir: { type: 'string', description: 'Destination directory inside the worktree, default adopted' } },
+      async (args, exec) => service.adoptMission({ projectId: args.project_id, missionId: args.mission_id, agent: exec.agent, dir: args.dir ?? null }),
     ), { when: ({ agent }) => isAleph(agent) }),
     ctx.tools.register(tool(
       'aleph_evaluate',
