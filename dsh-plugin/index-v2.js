@@ -94,6 +94,7 @@ const projectSchema = z.object({
   batches: z.array(batchSchema),
   violations: z.array(z.string()).optional(),
   evaluations: z.array(z.any()).optional(),
+  orchestratorSessionId: z.string().nullable().optional(),
   best: z.any().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -487,7 +488,16 @@ class ProjectService {
     return registered;
   }
 
+  /** Remember the session that drives this project so the Host can restart the Composer later. */
+  async rememberOrchestrator(projectId, agent) {
+    if (!agent?.id) return;
+    const project = this.get(projectId);
+    if (!project || project.orchestratorSessionId === agent.id) return;
+    await this.mutate(projectId, (current) => ({ ...current, orchestratorSessionId: agent.id })).catch(() => undefined);
+  }
+
   async approve({ projectId, missionId, agent = null }) {
+    await this.rememberOrchestrator(projectId, agent);
     const updated = await this.mutate(projectId, (project) => ({
       ...project,
       missions: project.missions.map((mission) => (
@@ -1200,6 +1210,10 @@ class ProjectService {
   /** The Composer is a long-lived queue manager; start it once and keep talking to it. */
   async ensureComposer({ projectId, agent }) {
     const project = this.get(projectId);
+    if (!agent && project?.orchestratorSessionId) {
+      agent = this.ctx?.agents?.get?.(project.orchestratorSessionId) ?? null;
+    }
+    if (!agent) return { projectId, childId: null, started: false, reason: 'no live orchestrator session' };
     // Reuse a live Composer session; a failed one is replaced instead of resuming a broken child.
     const existing = (project?.agents ?? []).filter((item) => item.role === 'composer' && item.childId && item.status !== 'failed').pop();
     if (existing?.childId) return { projectId, childId: existing.childId, started: false };
@@ -1216,7 +1230,8 @@ class ProjectService {
       const ensured = await this.ensureComposer({ projectId, agent }).catch(() => null);
       return { delivered: Boolean(ensured), started: true, childId: ensured?.childId ?? null };
     }
-    const parent = this.parentAgents?.get(record.childId) ?? agent;
+    const remembered = project.orchestratorSessionId ? this.ctx?.agents?.get?.(project.orchestratorSessionId) : null;
+    const parent = this.parentAgents?.get(record.childId) ?? agent ?? remembered ?? null;
     if (!parent || !this.subagents) return { delivered: false, reason: 'no live composer parent' };
     const queued = project.missions.filter((mission) => mission.status === 'approved').length;
     const machine = project.machines.find((item) => item.id === 'local');
@@ -1254,6 +1269,7 @@ class ProjectService {
     const project = this.get(projectId);
     if (!project) throw new Error(`project not found: ${projectId}`);
     this.assertWorkspace(agent, project.workspace);
+    await this.rememberOrchestrator(projectId, agent);
     await this.claimRole(projectId, 'composer');
     const prompt = [
       'You are MissionComposer for AlephResearch, the long-lived owner of the MissionQueue.',
