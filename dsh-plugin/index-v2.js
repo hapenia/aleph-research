@@ -208,6 +208,17 @@ for mission_dir in sorted(missions.glob("*/")):
     env = dict(os.environ)
     env["ALEPH_MISSION_ID"] = mission_id
     env["ALEPH_OUTPUT_DIR"] = str(output_dir)
+    # A mission reads the provided data through one stable path instead of guessing.
+    visible = env.get("ALEPH_VISIBLE_DATA")
+    if visible and os.path.isdir(visible):
+        link = mission_dir / "data"
+        try:
+            if link.is_symlink() or link.exists():
+                pass
+            else:
+                link.symlink_to(visible, target_is_directory=True)
+        except OSError:
+            pass
     log_path = output_dir / "run.log"
     with log_path.open("w", encoding="utf-8", errors="replace") as log:
         proc = subprocess.run(
@@ -321,7 +332,7 @@ class ProjectService {
     }
   }
 
-  async init({ workspace, evalCommand, evalRoot, visibleData, testsetPath, submissionPython, researchers, brief, conventions, agent = null }) {
+  async init({ workspace, evalCommand, evalRoot, visibleData, testsetPath, submissionPython, pythonPath = null, researchers, brief, conventions, agent = null }) {
     const target = resolve(workspace);
     if (!(await pathExists(target))) throw new Error(`workspace does not exist: ${target}`);
     if (agent) this.assertWorkspace(agent, target);
@@ -337,6 +348,7 @@ class ProjectService {
         visibleData: visibleData ? resolve(visibleData) : current.visibleData,
         testsetPath: testsetPath ? resolve(testsetPath) : current.testsetPath,
         submissionPython: submissionPython ?? current.submissionPython,
+        pythonPath: pythonPath ? resolve(pythonPath) : (current.pythonPath ?? (submissionPython ? resolve(submissionPython) : null)),
         conventions: conventions ?? current.conventions ?? null,
       }));
     }
@@ -355,6 +367,16 @@ class ProjectService {
       '',
       'Training writes into `$ALEPH_OUTPUT_DIR`, which becomes `results/<mission-id>/`',
       'on the mission branch, so a finished mission result stays readable from its branch.',
+      '',
+      'The batch runner exports these variables to every mission and creates a `data`',
+      'symlink in the mission directory:',
+      '',
+      '- `ALEPH_PYTHON`: the interpreter to run with; it already has the project runtime.',
+      '- `ALEPH_OUTPUT_DIR`: where to write results, metrics and model files.',
+      '- `ALEPH_VISIBLE_DATA`: the data directory the Leader provided, also reachable as `./data`.',
+      '- `ALEPH_MISSION_ID`: this mission id.',
+      '',
+      'Do not copy the data into the mission; read it from the environment or `./data`.',
       '',
     ].join('\n');
     await ensureRepo(missionRoot, 'template', {
@@ -382,6 +404,7 @@ class ProjectService {
       visibleData: visibleData ? resolve(visibleData) : null,
       testsetPath: testsetPath ? resolve(testsetPath) : null,
       submissionPython: submissionPython || null,
+      pythonPath: pythonPath ? resolve(pythonPath) : (submissionPython ? resolve(submissionPython) : null),
       machines: [{ id: 'local', kind: 'local', status: 'idle', batchId: null }],
       agents: [],
       missions: [],
@@ -1219,7 +1242,10 @@ class ProjectService {
       `Research worktree: ${worktree}. Research branch: ${branch}. Mission repo: ${project.missionRoot}. Template branch: ${project.templateBranch}.`,
       ...(project.conventions ? [`Project conventions:\n${project.conventions}`] : []),
       `The Leader created your initial research scaffold. Provided data is already copied under data/ in ${worktree}; use it directly. Do not read data.zip, testsets, the original project or DSH state.`,
-      `The runtime environment is prepared by Composer and InfraOptimizer. Do not inspect Python versions, installed packages, CPU/GPU, system services or create/install environments. Mission code receives ALEPH_PYTHON.`, 'Declare dependencies in the mission pyproject; Composer and InfraOptimizer resolve the runtime environment. Do not install packages yourself.', 'Small bounded analysis uses the prepared runtime; full training must still be a mission.',
+      `The runtime is prepared for you: your shared interpreter is ${project.pythonPath ?? 'python3'} and mission code receives ALEPH_PYTHON with the same runtime, so numpy, pandas, scipy, scikit-learn and lightgbm are already importable. Do not inspect or install anything.`,
+      'Mission code reads the provided data through ALEPH_VISIBLE_DATA, which the runner also exposes as ./data inside the mission directory. Do not copy the data into a mission and do not guess its path. A mission writes results to ALEPH_OUTPUT_DIR.',
+      'Declare extra dependencies in the mission pyproject; the Host checks them against the runtime before running.',
+      'Small bounded analysis can use the shared interpreter; full training must still be a mission.',
       'Do not read problem/data.zip, any testsets directory, /home/hapenia/Projects/kunlungpt-comp, /home/hapenia/Projects/aleph-research, /home/hapenia/.dsh or any DSH profile/state. Run commands from your worktree, not from the project root; use canonical visible data only.' ,
       'Work only in the assigned research worktree and commit research changes to its branch when appropriate.',
       'You may inspect the complete git history of both repositories with git: use git log --all, git branch -a, git show and git diff in the research worktree and mission repo. Mission results are cherry-picked onto mission branches, so previous work is visible there.',
@@ -1298,14 +1324,14 @@ class ProjectService {
     const checkpoint = setTimeout(() => {
       for (const researcher of this.get(projectId)?.agents ?? []) {
         if (researcher.role !== 'researcher' || researcher.status !== 'running' || !researcher.childId) continue;
-        this.nudgeChild(researcher.childId, 'Checkpoint: stop expanding the analysis. Commit a valid mission with the current code and call aleph_propose_mission now. You can improve it after the first result.');
+        this.nudgeChild(researcher.childId, 'Checkpoint: keep the exploration small. When you have something worth running, create a mission with aleph_create_mission, put the current implementation in main.py, commit and propose it. You can improve it after the first result.');
       }
     }, 60_000);
     checkpoint.unref?.();
     const finalCheckpoint = setTimeout(() => {
       for (const researcher of this.get(projectId)?.agents ?? []) {
         if (researcher.role !== 'researcher' || researcher.status !== 'running' || !researcher.childId) continue;
-        this.nudgeChild(researcher.childId, 'Final checkpoint: run git add -A && git commit in your mission worktree now, then call aleph_propose_mission. Do not write more analysis before proposing.');
+        this.nudgeChild(researcher.childId, 'Final checkpoint: commit the mission work now and call aleph_propose_mission. Add analysis later only if the result shows you need it.');
       }
     }, 180_000);
     finalCheckpoint.unref?.();
@@ -2057,6 +2083,7 @@ export async function apply(ctx) {
         visibleData: args.visible_data,
         testsetPath: args.testset,
         submissionPython: args.submission_python,
+        pythonPath: args.python ?? null,
         researchers: args.researchers ?? 4,
         brief: args.brief ?? '',
         agent: exec.agent,
@@ -2265,6 +2292,7 @@ export async function apply(ctx) {
           visibleData: args.visibleData ?? args.visible_data,
           testsetPath: args.testset ?? args.testsetPath,
           submissionPython: args.submissionPython ?? args.submission_python,
+          pythonPath: args.python ?? args.python_path ?? null,
           researchers: args.researchers ?? 4,
           brief: args.brief ?? '',
         });

@@ -47,7 +47,8 @@ composer. Do not change a mission's intent while merging.
 
 - Do not start researchers, edit research branches, evaluate branches, or change
   project budgets or exploration level.
-- Do not ask researchers to check their environment; the runtime is yours to
-  prepare and the Host checks dependencies before a run.
+- Do not prepare environments by hand. The Host checks a mission's declared
+  dependencies against the shared runtime before the run and only syncs what is
+  genuinely missing; a mission reads data through `ALEPH_VISIBLE_DATA`.
 - Answer with what you started or prepared, with batch ids and current machine
   load. A plan without a dispatch is a wasted turn.

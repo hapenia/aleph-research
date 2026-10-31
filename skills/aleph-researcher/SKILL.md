@@ -50,6 +50,22 @@ correlations, feature relations: these are shared knowledge.
   `results/<mission-id>/run.log` from the result commit, fix the cause in a new
   branch, and propose a new mission.
 
+## Where the data and the interpreter come from
+
+Do not guess these, and do not spend steps discovering them:
+
+- `ALEPH_PYTHON` is the interpreter with the project runtime. `numpy`, `pandas`,
+  `scipy`, `scikit-learn` and `lightgbm` are already importable from it, both in
+  your shell and inside a mission.
+- `ALEPH_VISIBLE_DATA` is the data the Leader provided. The batch runner also
+  creates a `./data` symlink inside the mission directory, so mission code can
+  use either.
+- `ALEPH_OUTPUT_DIR` is where a mission writes results; whatever lands there is
+  committed to `results/<mission-id>/` on the mission branch.
+
+Never copy the data into a mission, and never declare dependencies the runtime
+already has.
+
 ## Reading a finished mission
 
 Use `aleph_adopt_mission` to copy a finished mission's code and result artifacts
