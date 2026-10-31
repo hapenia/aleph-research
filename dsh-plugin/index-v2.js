@@ -445,7 +445,13 @@ class ProjectService {
     await git(root, ['-c', 'user.name=AlephResearch', '-c', 'user.email=aleph@localhost', 'commit', '--allow-empty', '-m', 'leader: research project scaffold']);
     const commit = (await git(root, ['rev-parse', 'HEAD'])).stdout.trim();
     const next = await this.mutate(projectId, (current) => ({ ...current, prepared: true, ...(conventions !== null ? { conventions } : {}), ...(visibleData ? { visibleData } : {}), ...(pythonPath ? { pythonPath: resolve(pythonPath) } : {}) }));
-    return { projectId, commit, prepared: next.prepared, visibleData: next.visibleData };
+    // Preparing a project is when the loop starts; the cohort must not wait for a second call.
+    let cohort = null;
+    const running = (next.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'running').length;
+    if (agent && running === 0) {
+      cohort = await this.startResearchers({ projectId, agent }).catch((error) => ({ error: String(error?.message ?? error) }));
+    }
+    return { projectId, commit, prepared: next.prepared, visibleData: next.visibleData, cohort };
   }
 
   async removeMissionWorktree(project, branch) {

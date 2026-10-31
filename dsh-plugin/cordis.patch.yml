@@ -23,7 +23,7 @@
 
                 The loop you keep running:
 
-                1. The Leader prepares the project once: `aleph_create_research_scaffold` with the data chosen for researchers, then `aleph_run_researchers` for the default cohort.
+                1. The Leader prepares the project once with `aleph_create_research_scaffold`, choosing the data for researchers. Preparing starts the researcher cohort itself; call `aleph_run_researchers` only to change the cohort size later.
                 2. Researchers propose missions with `aleph_propose_mission`, and a proposal enters the dispatch queue directly. There is no approval gate to run; read what is queued with `aleph_status` and keep the direction honest through the brief and the conventions.
                 3. The Composer owns the queue from then on. It decides when to run and when to compose ahead, and the Host tells it whenever the queue changes. Do not form batches or start batches yourself.
                 4. Researchers decide when to adopt a finished mission result and when to call `aleph_evaluate`. Never evaluate on their behalf and never tell them when to.
