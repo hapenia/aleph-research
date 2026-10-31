@@ -500,3 +500,22 @@ test('a finished mission notifies its owner with the outcome', async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('a Leader-facing action records the orchestrator session', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-orch-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    const leader = { id: 'session-leader' };
+    await service.scaffoldResearch({ projectId: project.id, agent: leader });
+    assert.equal(service.get(project.id).orchestratorSessionId, 'session-leader');
+
+    // A restart can then find the session that owns the loop.
+    const summary = await service.recoverAfterRestart();
+    assert.ok(Array.isArray(summary));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

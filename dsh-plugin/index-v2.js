@@ -415,8 +415,9 @@ class ProjectService {
     return { projectId, pythonPath: resolved };
   }
 
-  async scaffoldResearch({ projectId, title = 'Research project', dataSources = [], pythonPath = null, conventions = null }) {
+  async scaffoldResearch({ projectId, title = 'Research project', dataSources = [], pythonPath = null, conventions = null, agent = null }) {
     const project = this.get(projectId);
+    await this.rememberOrchestrator(projectId, agent);
     if (!project) throw new Error(`project not found: ${projectId}`);
     const root = project.researchRoot;
     const conventionsSection = project.conventions ? `\n## Project conventions\n\n${project.conventions}\n` : '';
@@ -1089,6 +1090,7 @@ class ProjectService {
 
   async startResearcher({ projectId, agent }) {
     if (!agent) throw new Error('a calling Agent is required to start a researcher');
+    await this.rememberOrchestrator(projectId, agent);
     if (!this.subagents) throw new Error('subagent service is unavailable');
     const project = this.get(projectId);
     if (!project) throw new Error(`project not found: ${projectId}`);
@@ -1160,6 +1162,7 @@ class ProjectService {
   }
 
   async startResearchers({ projectId, count = null, agent }) {
+    await this.rememberOrchestrator(projectId, agent);
     const project = this.get(projectId);
     if (!project) throw new Error(`project not found: ${projectId}`);
     if (!project.prepared) throw new Error('research project not prepared; Leader must call aleph_create_research_scaffold first');
@@ -1993,7 +1996,7 @@ export async function apply(ctx) {
       'aleph_create_research_scaffold',
       'Leader creates the initial research project before any researcher starts.',
       { ...projectIdParam, title: { type: 'string', description: 'Research project title' }, data: { type: 'array', items: { type: 'string' }, description: 'Data sources to copy into the research project' }, python: { type: 'string', description: 'Shared Python executable for researchers and missions' } },
-      async (args) => service.scaffoldResearch({ projectId: args.project_id, title: args.title ?? 'Research project', dataSources: args.data, pythonPath: args.python }),
+      async (args, exec) => service.scaffoldResearch({ projectId: args.project_id, title: args.title ?? 'Research project', dataSources: args.data, pythonPath: args.python, agent: exec.agent }),
     ), { when: ({ agent }) => isLeader(agent) }),
     ctx.tools.register(tool(
       'aleph_start_mission',
