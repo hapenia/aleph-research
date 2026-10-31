@@ -1816,7 +1816,7 @@ class ProjectService {
       'Dispatch policy:',
       '- Treat the machine as free only when the sampled utilization leaves room for the next batch. A running batch reports its own load entry with its thread count.',
       '- When there is room, run approved work immediately: form a batch with aleph_form_batch and start it with aleph_run_batch, and record the new load with aleph_machine_load.',
-      '- When the machine is saturated, use the waiting time productively: form the next batch and call aleph_run_infra so InfraOptimizer resolves dependencies and tunes that batch for this machine, so it starts as soon as capacity frees.',
+      '- When the machine is saturated, use the waiting time productively: form the next batch and call aleph_run_infra. It returns at once; this machine keeps one long-lived InfraOptimizer, which edits the batch and then tells you through aleph_finish_infra. Start the batch when it reports back.',
       '- Never leave approved missions sitting while the machine has room, and never optimize work you could already have finished.',
       '',
       'Batch composition is your call. Delegate the mechanical work of merging branches and settling conflicts to a sub composer agent when a batch needs judgment; resolve nothing by hand in the mission repo yourself.',
@@ -1859,62 +1859,135 @@ class ProjectService {
     return { projectId, role: 'composer', childId, persistent: true };
   }
 
-  async runInfra({ projectId, batchId, agent }) {
+  /**
+   * One InfraOptimizer per machine, kept alive across batches. Its value is the machine
+   * knowledge it accumulates, so it is never respawned for each batch.
+   */
+  async ensureInfra({ projectId, agent, machineId = 'local' }) {
+    const project = this.get(projectId);
+    if (!project) throw new Error(`project not found: ${projectId}`);
     if (!agent) throw new Error('a calling Agent is required to start InfraOptimizer');
     if (!this.subagents) throw new Error('subagent service is unavailable');
+    const existing = (project.agents ?? []).find((item) => item.role === 'infra'
+      && (item.machineId ?? 'local') === machineId
+      && item.childId
+      && item.status !== 'failed');
+    if (existing) return { started: false, childId: existing.childId, machineId };
+    const prompt = [
+      'You are InfraOptimizer for AlephResearch, the permanent optimizer of one machine.',
+      `Machine: ${machineId}. Project: ${projectId}. Workspace: ${project.workspace}.`,
+      'You stay with this machine for the whole project. Each task names one batch worktree; you edit files there and only there.',
+      'You never execute code: no benchmarks, no smoke runs, no profiling commands, no training, no dependency installs, no tests. The machine is serving a running batch, so execution steals capacity and measures the wrong thing.',
+      'Optimize by reading and editing: thread and process limits, batching, import cost, allocation, precision, caching, data loading and I/O. Carry forward what you learned from earlier batches of this machine.',
+      'When a task is finished, call aleph_finish_infra with the project id and batch id. The Host then commits the worktree and records the result.',
+    ].join('\n');
+    const abort = new AbortController();
+    const activation = await this.subagents.startActivation({
+      provider: 'spawn',
+      label: `aleph infra ${machineId}`,
+      delivery: 'caller',
+      signal: abort.signal,
+      request: { parent: agent, cwd: project.workspace, agentPreset: 'aleph-infra', prompt: [{ type: 'text', text: prompt }] },
+    });
+    const childId = activation.childId ?? null;
+    await this.mutate(projectId, (current) => ({
+      ...current,
+      agents: [...(current.agents ?? []), { role: 'infra', machineId, childId, status: 'running', summary: null, branch: null, updatedAt: now() }],
+    }));
+    // The session outlives a turn, so a settled turn returns the role to waiting, not to dead.
+    activation.result
+      .then((result) => {
+        const text = (result?.output ?? []).filter((block) => block?.type === 'text').map((block) => block.text).join('\n').trim();
+        return this.mutate(projectId, (current) => ({
+          ...current,
+          agents: (current.agents ?? []).map((item) => (item.role === 'infra' && item.childId === childId
+            ? { ...item, status: 'waiting', summary: text ? text.slice(0, 800) : item.summary ?? null, updatedAt: now() }
+            : item)),
+        }));
+      })
+      .catch(() => undefined);
+    return { started: true, childId, machineId };
+  }
+
+  /** Hand one batch worktree to the machine's InfraOptimizer and return at once. */
+  async runInfra({ projectId, batchId, agent }) {
     const project = this.get(projectId);
     if (!project) throw new Error(`project not found: ${projectId}`);
     const batch = project.batches.find((item) => item.id === batchId);
     if (!batch) throw new Error(`batch not found: ${batchId}`);
     if (batch.status !== 'forming') throw new Error(`batch ${batchId} is not forming`);
-    await this.claimRole(projectId, 'infra');
+    if (batch.infra?.status === 'requested') throw new Error(`batch ${batchId} is already with InfraOptimizer`);
+    const infra = await this.ensureInfra({ projectId, agent, machineId: batch.machineId ?? 'local' });
     const worktreeRoot = join(project.workspace, '.aleph', 'infra');
     const worktree = join(worktreeRoot, batchId);
     await mkdir(worktreeRoot, { recursive: true });
     await rm(worktree, { recursive: true, force: true });
     const baseTip = (await git(project.missionRoot, ['rev-parse', batch.branch])).stdout.trim();
     await git(project.missionRoot, ['worktree', 'add', '--detach', worktree, batch.branch]);
-    const prompt = [
-      'You are InfraOptimizer for AlephResearch.',
-      `Batch: ${batch.id}. Machine: ${batch.machineId}. Work only inside this worktree: ${worktree}.`,
-      'The machine is serving a running batch, so you never execute code: no benchmarks, no smoke runs, no profiling commands, no training, no dependency installs, no test invocations. Any execution steals capacity from real work and skews its own measurements.',
-      'Optimize by reading and editing only: thread and process limits, batching, import cost, allocation, precision, caching, data loading and I/O patterns. Reason about the effect from the code and the machine resources instead of measuring it.',
-      'Use read and edit tools, not shell execution. Do not inspect /home, /root, DSH profile/state, other projects, or search the filesystem. Do not start extra agents.',
-      'Write ALEPH_HANDOFF.md with the changes, the reasoning behind each, and the expected speed, memory and I/O impact. Mark it clearly as unmeasured by design. Do not change project budget, queue or scheduling constraints. The Host commits the batch branch and runs the single batch entrypoint.',
+    await this.mutate(projectId, (current) => ({
+      ...current,
+      batches: (current.batches ?? []).map((item) => (item.id === batchId
+        ? { ...item, infra: { status: 'requested', worktree, baseTip, childId: infra.childId ?? null, requestedAt: now() } }
+        : item)),
+    }));
+    const task = [
+      `Batch ${batch.id} is prepared and waiting for your optimization.`,
+      `Worktree: ${worktree}. Mission ids: ${(batch.missionIds ?? []).join(', ') || 'none'}.`,
+      'Read the batch entrypoint, the mission code and the manifests, then edit what limits this machine. Do not run anything.',
+      `When done, call aleph_finish_infra with project_id ${projectId} and batch_id ${batchId}.`,
     ].join('\n');
-    const abort = new AbortController();
-    let activation;
-    try {
-      activation = await this.subagents.startActivation({
-        provider: 'spawn', label: `aleph infra ${batch.id}`, delivery: 'caller', signal: abort.signal,
-        request: { parent: agent, cwd: worktree, agentPreset: 'aleph-infra', prompt: [{ type: 'text', text: prompt }] },
-      });
-    } catch (error) {
-      await git(project.missionRoot, ['worktree', 'remove', '--force', worktree]).catch(() => undefined);
-      throw error;
+    const sent = infra.childId
+      ? await this.notifySession({ sessionId: infra.childId, text: task }).catch(() => ({ delivered: false }))
+      : { delivered: false };
+    if (!sent?.delivered) {
+      await this.mutate(projectId, (current) => ({
+        ...current,
+        batches: (current.batches ?? []).map((item) => (item.id === batchId ? { ...item, infra: { ...(item.infra ?? {}), status: 'failed' } } : item)),
+      }));
+      throw new Error(`could not reach InfraOptimizer ${infra.childId ?? '(none)'}; the batch is still forming`);
     }
-    await this.mutate(projectId, (current) => ({ ...current, agents: [...(current.agents ?? []), { role: 'infra', childId: activation.childId ?? null, status: 'running', summary: null, branch: batch.branch, updatedAt: now() }] }));
-    try {
-      const result = await activation.result;
-      const handoff = await readFile(join(worktree, 'ALEPH_HANDOFF.md'), 'utf8').catch(() => '');
-      const summary = (handoff || (result?.output ?? []).filter((block) => block?.type === 'text').map((block) => block.text).join('\n') || '(no summary)').trim().slice(0, 8000);
-      const dirty = (await git(worktree, ['status', '--porcelain'])).stdout.trim();
-      if (dirty) {
-        await git(worktree, ['add', '-A']);
-        await git(worktree, ['-c', 'user.name=AlephResearch', '-c', 'user.email=aleph@localhost', 'commit', '-m', `infra optimization for ${batch.id}\n\n${summary.slice(0, 4000)}`]);
-        const tip = (await git(worktree, ['rev-parse', 'HEAD'])).stdout.trim();
-        await git(project.missionRoot, ['branch', '-f', batch.branch, tip]);
-      }
-      await this.mutate(projectId, (current) => ({ ...current, agents: (current.agents ?? []).map((item) => item.role === 'infra' && item.status === 'running' ? { ...item, status: 'done', summary, branch: batch.branch, updatedAt: now() } : item) }));
-      return this.startBatch({ projectId, batchId });
-    } catch (error) {
-      await this.mutate(projectId, (current) => ({ ...current, agents: (current.agents ?? []).map((item) => item.role === 'infra' && item.status === 'running' ? { ...item, status: 'failed', summary: String(error), updatedAt: now() } : item) }));
-      throw error;
-    } finally {
-      await git(project.missionRoot, ['worktree', 'remove', '--force', worktree]).catch(() => undefined);
-      await rm(worktree, { recursive: true, force: true }).catch(() => undefined);
-      this.activations?.delete?.(abort);
+    return { projectId, batchId, machineId: batch.machineId ?? 'local', childId: infra.childId, worktree, dispatched: true };
+  }
+
+  /** Commit what InfraOptimizer changed and release the batch back to the queue. */
+  async finishInfra({ projectId, batchId }) {
+    const project = this.get(projectId);
+    if (!project) throw new Error(`project not found: ${projectId}`);
+    const batch = project.batches.find((item) => item.id === batchId);
+    if (!batch) throw new Error(`batch not found: ${batchId}`);
+    if (!batch.infra || batch.infra.status !== 'requested') throw new Error(`batch ${batchId} is not with InfraOptimizer`);
+    const worktree = batch.infra.worktree;
+    const handoff = await readFile(join(worktree, 'ALEPH_HANDOFF.md'), 'utf8').catch(() => '');
+    const dirty = (await git(worktree, ['status', '--porcelain']).catch(() => ({ stdout: '' }))).stdout.trim();
+    let commit = null;
+    if (dirty) {
+      const summary = (handoff || 'infra optimization').trim();
+      await git(worktree, ['add', '-A']);
+      await git(worktree, ['-c', 'user.name=AlephResearch', '-c', 'user.email=aleph@localhost', 'commit', '-m', `infra optimization for ${batchId}\n\n${summary.slice(0, 4000)}`]);
+      const tip = (await git(worktree, ['rev-parse', 'HEAD'])).stdout.trim();
+      // Compare-and-swap keeps a concurrent advance of the batch branch from being clobbered.
+      await git(project.missionRoot, ['update-ref', `refs/heads/${batch.branch}`, tip, batch.infra.baseTip]);
+      commit = tip;
     }
+    await git(project.missionRoot, ['worktree', 'remove', '--force', worktree]).catch(() => undefined);
+    await rm(worktree, { recursive: true, force: true }).catch(() => undefined);
+    await this.mutate(projectId, (current) => ({
+      ...current,
+      batches: (current.batches ?? []).map((item) => (item.id === batchId
+        ? {
+          ...item,
+          infra: { ...(item.infra ?? {}), status: 'done', commit, summary: handoff.trim().slice(0, 4000), finishedAt: now() },
+          summary: { ...(item.summary ?? {}), infra: { commit, changed: Boolean(dirty) } },
+        }
+        : item)),
+    }));
+    await this.notifyComposer({
+      projectId,
+      agent: null,
+      event: 'infra finished',
+      detail: commit ? `batch ${batchId} was optimized in ${commit}` : `batch ${batchId} needed no change`,
+    }).catch(() => undefined);
+    return { projectId, batchId, commit, changed: Boolean(dirty) };
   }
 
   async formBatch({ projectId, machineId = 'local' }) {
@@ -2115,6 +2188,8 @@ export async function apply(ctx) {
   };
   const isAleph = (agent) => ['aleph', 'aleph-researcher', 'aleph-composer', 'aleph-infra'].includes(presetOf(agent));
   const isLeader = (agent) => presetOf(agent) === 'aleph';
+  const isComposer = (agent) => presetOf(agent) === 'aleph-composer';
+  const isInfra = (agent) => presetOf(agent) === 'aleph-infra';
   const projectIdParam = { project_id: { type: 'string', required: true, description: 'Project id' } };
 
   const disposers = [
@@ -2293,10 +2368,20 @@ export async function apply(ctx) {
     ), { when: ({ agent }) => isLeader(agent) }),
     ctx.tools.register(tool(
       'aleph_run_infra',
-      'Start InfraOptimizer on a forming batch, then run the batch and deliver per-mission results.',
+      'Hand a prepared batch to this machine InfraOptimizer. Returns at once; it edits files and reports back with aleph_finish_infra.',
       { ...projectIdParam, batch_id: { type: 'string', required: true } },
       async (args, exec) => service.runInfra({ projectId: args.project_id, batchId: args.batch_id, agent: exec.agent }),
-    ), { when: ({ agent }) => isLeader(agent) }),
+    ), { when: ({ agent }) => isComposer(agent) || isLeader(agent) }),
+    ctx.tools.register(tool(
+      'aleph_finish_infra',
+      'Report that the optimization of a batch is complete. The Host commits the worktree and returns the batch to the queue.',
+      { ...projectIdParam, batch_id: { type: 'string', required: true } },
+      async (args, exec) => {
+        const record = (service.get(args.project_id)?.agents ?? []).find((item) => item.role === 'infra' && item.childId === exec.agent?.id);
+        if (!record) throw new Error('only this project InfraOptimizer may finish a batch');
+        return service.finishInfra({ projectId: args.project_id, batchId: args.batch_id });
+      },
+    ), { when: ({ agent }) => isInfra(agent) }),
     ctx.tools.register(tool(
       'aleph_run_batch',
       'Run a formed machine-bound batch, write per-mission result envelopes and cherry-pick results to pre-batch mission branches.',

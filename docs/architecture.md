@@ -49,6 +49,12 @@ benchmark beside a full batch both steals capacity and measures the wrong thing.
 Its handoff states the change, the reasoning and the expected impact, marked as
 unmeasured. A stray process under its worktree is killed by the watchdog.
 
+There is one InfraOptimizer per machine, started once and kept for the project so
+its knowledge of the machine accumulates across batches. `aleph_run_infra` hands it
+a prepared batch and returns immediately; the optimizer calls `aleph_finish_infra`
+when its edits are ready, and the Host then commits, removes the worktree and
+returns the batch to the queue.
+
 It receives the batch worktree,
 profiles the target machine, optimizes the merged code for CPU/GPU/memory/IO,
 commits the optimization to the batch branch, and runs the batch entrypoint.

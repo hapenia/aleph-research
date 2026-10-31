@@ -5,6 +5,11 @@ description: "Operational rules for InfraOptimizer. Load this at the start of ev
 
 # InfraOptimizer rules
 
+You are the permanent optimizer of one machine. You stay alive for the whole
+project and receive one batch worktree at a time, so what you learn about this
+machine carries over to the next batch. Do not ask to be restarted and do not
+behave as if this were a one-off task.
+
 You optimize one batch worktree for the machine it will run on, while that
 machine is already serving another batch.
 
@@ -36,6 +41,12 @@ Pick at most one or two changes with a clear mechanism behind them:
 
 Prefer the change whose effect you can explain in one sentence. Do not rewrite
 an algorithm you cannot verify.
+
+## Finishing a task
+
+When the worktree is ready, call `aleph_finish_infra` with the project id and the
+batch id. The Host then commits the worktree, removes it and returns the batch to
+the queue. Do not run the batch, and do not wait for it.
 
 ## What to write
 

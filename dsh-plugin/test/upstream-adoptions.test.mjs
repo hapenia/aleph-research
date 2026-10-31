@@ -754,3 +754,61 @@ test('the machine stays free while InfraOptimizer edits a batch', async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('one InfraOptimizer serves every batch of a machine and dispatch does not block', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-infra-role-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    const repo = project.missionRoot;
+    const makeMission = async (name) => {
+      const branch = `missions/${name}`;
+      git(repo, ['switch', '-c', branch, 'template']);
+      await mkdir(join(repo, 'missions', name), { recursive: true });
+      await writeFile(join(repo, 'missions', name, 'mission.json'), JSON.stringify({ id: name, entrypoint: 'run.sh', kind: 'training', title: name, summary: 'test' }));
+      await writeFile(join(repo, 'missions', name, 'run.sh'), '#!/usr/bin/env bash\nset -e\nprintf \'{}\' > "$ALEPH_OUTPUT_DIR/result.json"\n');
+      git(repo, ['add', '-A']);
+      git(repo, [...identity(repo), 'commit', '-m', `mission ${name}`]);
+      git(repo, ['switch', 'template']);
+      await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
+    };
+
+    const activations = [];
+    service.subagents = {
+      async startActivation(options) {
+        activations.push(options.request.agentPreset);
+        let resolve;
+        const result = new Promise((yes) => { resolve = yes; });
+        // A persistent session keeps its result pending until it is really done.
+        return { childId: `child-${activations.length}`, result };
+      },
+      async sendMessage() { return { id: 'm' }; },
+    };
+
+    await makeMission('first');
+    const first = (await service.formBatch({ projectId: project.id })).batches[0];
+    const began = Date.now();
+    const dispatched = await service.runInfra({ projectId: project.id, batchId: first.id, agent: { id: 'composer' } });
+    assert.ok(Date.now() - began < 1000, 'dispatching does not wait for the optimizer');
+    assert.equal(dispatched.dispatched, true);
+    assert.equal(activations.filter((preset) => preset === 'aleph-infra').length, 1, 'one optimizer per machine');
+    const infras = () => service.get(project.id).agents.filter((item) => item.role === 'infra');
+    assert.equal(infras().length, 1);
+
+    // The same machine reuses the same optimizer session for a later batch.
+    service.finishInfra = async () => ({ commit: null, changed: false });
+    await service.mutate(project.id, (state) => ({
+      ...state,
+      batches: state.batches.map((batch) => ({ ...batch, status: 'done', infra: { status: 'done' } })),
+    }));
+    await makeMission('second');
+    const second = (await service.formBatch({ projectId: project.id })).batches.at(-1);
+    await service.runInfra({ projectId: project.id, batchId: second.id, agent: { id: 'composer' } });
+    assert.equal(activations.filter((preset) => preset === 'aleph-infra').length, 1, 'the optimizer is not respawned');
+    assert.equal(infras().length, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
