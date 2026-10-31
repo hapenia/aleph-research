@@ -31,6 +31,9 @@ const missionSchema = z.object({
   branch: z.string(),
   manifestId: z.string().nullable().optional(),
   manifestPath: z.string().nullable().optional(),
+  kind: z.string().nullable().optional(),
+  title: z.string().nullable().optional(),
+  summary: z.string().nullable().optional(),
   status: z.enum(['proposed', 'approved', 'batched', 'running', 'done', 'failed']),
   entrypoint: z.string().nullable().optional(),
   outputs: z.array(z.unknown()).optional(),
@@ -336,6 +339,10 @@ class ProjectService {
       'Each mission lives in `missions/<mission-id>/` and contains `mission.json` with',
       'its `id` and `entrypoint` plus whatever code the mission needs.',
       '',
+      'Declare `kind` (`analysis` for a data question, `training` for a model run), a',
+      'short `title` and a one-line `summary` of the question it answers. Those fields are',
+      'how later researchers discover the result without running the work again.',
+      '',
       'Training writes into `$ALEPH_OUTPUT_DIR`, which becomes `results/<mission-id>/`',
       'on the mission branch, so a finished mission result stays readable from its branch.',
       '',
@@ -515,10 +522,13 @@ class ProjectService {
     return project.missions.map((mission) => ({
       id: mission.id,
       status: mission.status,
+      kind: mission.kind ?? null,
+      title: mission.title ?? mission.manifestId ?? null,
+      summary: mission.summary ?? null,
       branch: mission.branch,
       ownerSession: mission.ownerSession,
       resultCommit: mission.resultCommit,
-      resultPath: mission.manifestId ? `results/${mission.manifestId}/result.json` : null,
+      resultPath: mission.manifestId ? `results/${mission.manifestId}/` : null,
       error: mission.error,
     }));
   }
@@ -552,6 +562,9 @@ class ProjectService {
         branch,
         manifestId: manifest.id ?? manifest.__manifestPath.split('/')[1],
         manifestPath: manifest.__manifestPath,
+        kind: typeof manifest.kind === 'string' ? manifest.kind : null,
+        title: typeof manifest.title === 'string' ? manifest.title : null,
+        summary: typeof manifest.summary === 'string' ? manifest.summary : null,
         status: 'approved',
         entrypoint: manifest.entrypoint ?? null,
         outputs: Array.isArray(manifest.outputs) ? manifest.outputs : [],
@@ -567,6 +580,13 @@ class ProjectService {
     }));
     await this.removeMissionWorktree(project, branch);
     const created = registered.missions[registered.missions.length - 1];
+    // A proposal enters the dispatch queue directly, so the Composer has to hear about it.
+    await this.notifyComposer({
+      projectId,
+      agent,
+      event: 'mission queued',
+      detail: created ? `${created.manifestId ?? created.id} on ${created.branch}` : branch,
+    }).catch(() => undefined);
     const orchestrator = this.get(projectId)?.orchestratorSessionId ?? null;
     if (orchestrator && created) {
       this.notifySession({
@@ -1081,6 +1101,8 @@ class ProjectService {
       'A local script that fits a model, runs cross-validation, or needs a timeout above 120 seconds is mission-worthy even if named quick or prototype. Create the mission before running it locally.',
       'If a local command is killed for exceeding the compute limit, do not retry it locally; create a mission for that work and let other researchers reuse the result.',
       'If a task would help other researchers and has non-trivial cost, create a mission for it instead of running it only locally. Shared analysis, feature engineering, data cleaning, baselines, training and sweeps are typical examples; other researchers must be able to read the mission result.',
+      'Data analysis is mission work too. Profiling the data, measuring label distributions, checking clipping, missingness, per-well spread, correlations or feature relations is reusable knowledge: if you need such a fact, call aleph_list_missions first and read the mission that already answered it. Only run that analysis locally when no mission covers it, and prefer answering it once as an analysis mission instead of redoing it in every session.',
+      'A mission is cheap to file and cheap to read back. If a question will be asked by anyone else, or by you again, file it as a mission with kind=analysis, a short title and a summary of the question, instead of leaving the answer in your scratch files.',
       'Small work can be done directly. For work with significant hardware cost, call aleph_start_mission to create a mission branch and worktree, work there, add missions/<id>/mission.json plus code and an uv project, commit the branch, then call aleph_propose_mission.',
       'After proposing, wait only for missions owned by you: call aleph_evaluate; if it returns status waiting, wait briefly and retry. Do not wait for other researchers missions.',
       'When all your missions are done, call aleph_evaluate once more so the Host evaluates your research branch and writes the report into its commit, then finish. Do not modify project queue, batch or machine state.',
@@ -1754,6 +1776,9 @@ function snapshot(project, options = {}) {
       status: mission.status,
       branch: mission.branch,
       manifest_id: mission.manifestId ?? null,
+      kind: mission.kind ?? null,
+      title: mission.title ?? null,
+      summary: mission.summary ?? null,
       manifest_path: mission.manifestPath ?? null,
       entrypoint: mission.entrypoint ?? null,
       batch_id: mission.batchId,
