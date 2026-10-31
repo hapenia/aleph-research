@@ -148,6 +148,24 @@ if [ "${ALEPH_NO_OPEN:-0}" != "1" ] && command -v google-chrome-stable >/dev/nul
   nohup google-chrome-stable --new-tab "$url" >/dev/null 2>&1 &
 fi
 
+# Keep only the newest run alive; older runs are stopped and removed.
+for stale in "${ALEPH_RUN_ROOT:-/tmp/aleph-runs}"/*; do
+  [ -d "$stale" ] || continue
+  [ "$stale" = "$run_root" ] && continue
+  if [ -f "$stale/host.pid" ]; then
+    kill -TERM "$(cat "$stale/host.pid")" 2>/dev/null || true
+  fi
+  if [ -f "$stale/run.json" ]; then
+    port="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["port"])' "$stale/run.json" 2>/dev/null || true)"
+    if [ -n "$port" ]; then
+      for pid in $(ss -ltnp 2>/dev/null | grep ":$port " | grep -o 'pid=[0-9]*' | cut -d= -f2); do kill -TERM "$pid" 2>/dev/null || true; done
+    fi
+  fi
+  sleep 1
+  chmod -R u+w "$stale" 2>/dev/null || true
+  rm -rf "$stale"
+done
+
 cat <<EOF
 
 case run ready
