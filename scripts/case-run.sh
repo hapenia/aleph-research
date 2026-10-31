@@ -112,6 +112,7 @@ print(json.dumps({
     "testset": os.path.join(run_root, "case", "testsets"),
     "submission_python": os.path.join(runtime, "bin", "python"),
     "researchers": case["researcher_count"],
+    "visible_data": os.path.join(run_root, "case", "visible-data"),
     "brief": case["brief"],
     "conventions": case.get("conventions", ""),
 }))

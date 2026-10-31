@@ -399,3 +399,22 @@ test('project conventions come from the project, not from Aleph', async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('a scaffold without explicit data uses the data the project offers', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-offered-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const offered = join(root, 'offered-data');
+    await mkdir(offered, { recursive: true });
+    await writeFile(join(offered, 'well_01.txt'), 'DEPTH,GR\n1,2\n');
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace, visibleData: offered });
+
+    const scaffolded = await service.scaffoldResearch({ projectId: project.id });
+    assert.ok(existsSync(join(project.researchRoot, 'data', 'well_01.txt')), 'offered data is copied into the scaffold');
+    assert.equal(scaffolded.visibleData, join(project.researchRoot, 'data'));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

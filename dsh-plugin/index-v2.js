@@ -406,7 +406,9 @@ class ProjectService {
     await mkdir(join(root, 'src'), { recursive: true });
     await writeFile(join(root, 'src', '__init__.py'), '', 'utf8');
     await writeFile(join(root, '.gitignore'), '__pycache__/\n*.pyc\n.venv/\n', 'utf8');
-    const toCopy = Array.isArray(dataSources) ? dataSources.filter((path) => typeof path === 'string' && path.trim()) : [];
+    // The project records which data the operator offers; the Leader still decides what to hand over.
+    const offered = Array.isArray(dataSources) ? dataSources.filter((path) => typeof path === 'string' && path.trim()) : [];
+    const toCopy = offered.length > 0 ? offered : (project.visibleData ? [project.visibleData] : []);
     let visibleData = null;
     if (toCopy.length > 0) {
       const dataRoot = join(root, 'data');
