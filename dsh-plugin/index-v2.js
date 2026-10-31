@@ -583,6 +583,7 @@ class ProjectService {
     const startedAt = now();
     await this.mutate(projectId, (current) => ({
       ...current,
+      machines: current.machines.map((item) => (item.id === batch.machineId ? { ...item, status: 'busy', batchId: batch.id } : item)),
       batches: current.batches.map((item) => (item.id === batch.id ? { ...item, status: 'running', startedAt, infra } : item)),
     }));
     let runnerError = null;
@@ -1384,7 +1385,9 @@ class ProjectService {
     if (!project) throw new Error(`project not found: ${projectId}`);
     const machine = project.machines.find((item) => item.id === machineId);
     if (!machine) throw new Error(`machine not found: ${machineId}`);
-    if (machine.status !== 'idle') throw new Error(`machine ${machineId} is busy`);
+    // A forming batch is prepared work, not running work: the machine stays idle until it starts.
+    const active = (project.batches ?? []).find((batch) => batch.machineId === machineId && ['forming', 'running'].includes(batch.status));
+    if (active) throw new Error(`machine ${machineId} already has ${active.status} batch ${active.id}`);
     const approvedAll = project.missions.filter((mission) => mission.status === 'approved');
     const terminalBranches = new Set(project.missions.filter((mission) => ['done', 'failed', 'batched'].includes(mission.status)).map((mission) => mission.branch));
     const seenBranches = new Set();
@@ -1422,7 +1425,7 @@ class ProjectService {
     await git(project.missionRoot, ['switch', project.templateBranch]);
     return this.mutate(projectId, (current) => ({
       ...current,
-      machines: current.machines.map((item) => item.id === machineId ? { ...item, status: 'busy', batchId } : item),
+      machines: current.machines.map((item) => (item.id === machineId ? { ...item, batchId } : item)),
       missions: current.missions.map((mission) => {
         if (approved.some((item) => item.id === mission.id)) {
           return { ...mission, status: 'batched', batchId, preBatchTip: preBatch[mission.id] };
@@ -1488,6 +1491,7 @@ function snapshot(project) {
       template_branch: project.templateBranch,
       eval_command: project.evalCommand,
       eval_root: project.evalRoot ?? null,
+      orchestrator_session: project.orchestratorSessionId ?? null,
       best: project.best ?? null,
       evaluations: (project.evaluations ?? []).slice(-20),
       brief: project.brief ?? '',
@@ -1540,7 +1544,7 @@ function snapshot(project) {
   };
 }
 
-export const inject = ['storageDomain', 'tools', 'webServer'];
+export const inject = ['storageDomain', 'tools', 'webServer', 'agents'];
 
 export async function apply(ctx) {
   const domain = await ctx.storageDomain.open(projectDomain);
@@ -1843,6 +1847,28 @@ export async function apply(ctx) {
   });
   // Retry a terminal batch: failed missions go back to the approved queue and a fresh
   // batch is formed from the same mission branches.
+  // Operator visibility into the Composer channel: start it, or poke it and report the outcome.
+  ctx.webServer.register({
+    kind: 'exact',
+    path: '/api/aleph/composer',
+    async handler(req, res) {
+      if (req.method !== 'POST') return sendJson(res, 405, { ok: false });
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const args = body ? JSON.parse(body) : {};
+        const projectId = args.project_id ?? args.projectId;
+        const action = args.action ?? 'notify';
+        if (action === 'ensure') {
+          return sendJson(res, 200, { ok: true, ...(await service.ensureComposer({ projectId, agent: null })) });
+        }
+        const result = await service.notifyComposer({ projectId, agent: null, event: 'operator poke' });
+        return sendJson(res, 200, { ok: true, ...result });
+      } catch (error) {
+        return sendJson(res, 500, { ok: false, error: { code: 'aleph/composer-failed', message: String(error?.stack ?? error?.message ?? error) } });
+      }
+    },
+  });
   ctx.webServer.register({
     kind: 'exact',
     path: '/api/aleph/select-best',

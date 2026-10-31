@@ -260,3 +260,40 @@ test('evaluations accumulate and the best result follows the highest score', asy
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('a prepared batch does not claim the machine until it runs', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-machine-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    const missionRepo = project.missionRoot;
+    const branch = 'missions/quick';
+    git(missionRepo, ['switch', '-c', branch, 'template']);
+    await mkdir(join(missionRepo, 'missions', 'quick'), { recursive: true });
+    await writeFile(join(missionRepo, 'missions', 'quick', 'mission.json'), JSON.stringify({ id: 'quick', entrypoint: 'run.sh' }));
+    await writeFile(join(missionRepo, 'missions', 'quick', 'run.sh'), '#!/usr/bin/env bash\nset -e\nprintf \'{}\\n\' > "$ALEPH_OUTPUT_DIR/result.json"\n');
+    git(missionRepo, ['add', '-A']);
+    git(missionRepo, [...identity(missionRepo), 'commit', '-m', 'quick mission']);
+    git(missionRepo, ['switch', 'template']);
+
+    let current = await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
+    const missionId = current.missions[0].id;
+    await service.approve({ projectId: project.id, missionId });
+    current = await service.formBatch({ projectId: project.id });
+    const batchId = current.batches[0].id;
+    assert.equal(current.machines[0].status, 'idle', 'a forming batch must not claim the machine');
+    assert.equal(current.machines[0].batchId, batchId);
+
+    // A second batch cannot be prepared on the same machine while one awaits dispatch.
+    await assert.rejects(() => service.formBatch({ projectId: project.id }), /already has forming batch/);
+
+    current = await service.runBatch({ projectId: project.id, batchId });
+    assert.equal(current.batches[0].status, 'done');
+    assert.equal(current.machines[0].status, 'idle');
+    assert.equal(current.machines[0].batchId, null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
