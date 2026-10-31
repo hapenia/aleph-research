@@ -36,6 +36,8 @@ queue and calls `aleph_form_batch`.
   branches.
 - Composer resolves merge conflicts and records each mission's pre-batch tip.
 - A single merged entrypoint runs the missions and writes per-mission outputs.
+- Starting a batch returns immediately; compute runs in the background so the Composer keeps
+  managing the queue while the machine works.
 
 ## InfraOptimizer
 

@@ -829,6 +829,37 @@ class ProjectService {
     return { ...infra, env };
   }
 
+  /**
+   * Start a batch and return at once. An agent that awaits compute holds its own turn for
+   * hours and cannot keep managing the queue, so agent-facing tools use this, while the
+   * operator route still awaits runBatch for scripted use.
+   */
+  startBatch({ projectId, batchId }) {
+    const project = this.get(projectId);
+    if (!project) throw new Error(`project not found: ${projectId}`);
+    const batch = project.batches.find((item) => item.id === batchId);
+    if (!batch) throw new Error(`batch not found: ${batchId}`);
+    if (batch.status !== 'forming' && batch.status !== 'interrupted') {
+      throw new Error(`batch ${batchId} is not runnable (status ${batch.status})`);
+    }
+    this.runningBatches ??= new Set();
+    if (this.runningBatches.has(batchId)) throw new Error(`batch ${batchId} is already running`);
+    this.runningBatches.add(batchId);
+    this.runBatch({ projectId, batchId })
+      .catch(async (error) => {
+        // A rejected run must still leave an honest terminal state.
+        await this.mutate(projectId, (current) => ({
+          ...current,
+          machines: current.machines.map((machine) => (machine.batchId === batchId ? { ...machine, status: 'idle', batchId: null, loads: [] } : machine)),
+          batches: current.batches.map((item) => (item.id === batchId
+            ? { ...item, status: 'failed', finishedAt: now(), summary: { ...(item.summary ?? {}), runnerError: String(error?.message ?? error) } }
+            : item)),
+        })).catch(() => undefined);
+      })
+      .finally(() => this.runningBatches.delete(batchId));
+    return { projectId, batchId, status: 'started', detached: true };
+  }
+
   async runBatch({ projectId, batchId }) {
     const project = this.get(projectId);
     if (!project) throw new Error(`project not found: ${projectId}`);
@@ -1760,7 +1791,7 @@ class ProjectService {
         await git(project.missionRoot, ['branch', '-f', batch.branch, tip]);
       }
       await this.mutate(projectId, (current) => ({ ...current, agents: (current.agents ?? []).map((item) => item.role === 'infra' && item.status === 'running' ? { ...item, status: 'done', summary, branch: batch.branch, updatedAt: now() } : item) }));
-      return this.runBatch({ projectId, batchId });
+      return this.startBatch({ projectId, batchId });
     } catch (error) {
       await this.mutate(projectId, (current) => ({ ...current, agents: (current.agents ?? []).map((item) => item.role === 'infra' && item.status === 'running' ? { ...item, status: 'failed', summary: String(error), updatedAt: now() } : item) }));
       throw error;
@@ -2133,7 +2164,7 @@ export async function apply(ctx) {
       'aleph_run_batch',
       'Run a formed machine-bound batch, write per-mission result envelopes and cherry-pick results to pre-batch mission branches.',
       { ...projectIdParam, batch_id: { type: 'string', required: true } },
-      async (args) => service.runBatch({ projectId: args.project_id, batchId: args.batch_id }),
+      async (args) => service.startBatch({ projectId: args.project_id, batchId: args.batch_id }),
     ), { when: ({ agent }) => isAleph(agent) }),
   ];
   ctx.effect(() => () => { for (const dispose of disposers) dispose(); });

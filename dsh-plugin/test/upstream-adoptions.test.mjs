@@ -566,3 +566,41 @@ test('initializing a project creates the Composer as the Leader child', async ()
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('an agent starts a batch without waiting for it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-detached-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    const repo = project.missionRoot;
+    const branch = 'missions/long';
+    git(repo, ['switch', '-c', branch, 'template']);
+    await mkdir(join(repo, 'missions', 'long'), { recursive: true });
+    await writeFile(join(repo, 'missions', 'long', 'mission.json'), JSON.stringify({ id: 'long', entrypoint: 'run.sh' }));
+    await writeFile(join(repo, 'missions', 'long', 'run.sh'), '#!/usr/bin/env bash\nset -e\nsleep 2\nprintf \'{}\' > "$ALEPH_OUTPUT_DIR/result.json"\n');
+    git(repo, ['add', '-A']);
+    git(repo, [...identity(repo), 'commit', '-m', 'long mission']);
+    git(repo, ['switch', 'template']);
+    await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
+    const batch = (await service.formBatch({ projectId: project.id })).batches[0];
+
+    const began = Date.now();
+    const started = service.startBatch({ projectId: project.id, batchId: batch.id });
+    const elapsed = Date.now() - began;
+    assert.equal(started.detached, true);
+    assert.ok(elapsed < 1000, `startBatch returned in ${elapsed}ms instead of waiting for the run`);
+    await assert.rejects(async () => { service.startBatch({ projectId: project.id, batchId: batch.id }); }, /already running|not runnable/);
+
+    // The run continues in the background and reaches a terminal state.
+    for (let i = 0; i < 400; i += 1) {
+      const state = service.get(project.id).batches.find((b) => b.id === batch.id);
+      if (state.status === 'done' || state.status === 'failed') break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.ok(['done', 'failed'].includes(service.get(project.id).batches.find((b) => b.id === batch.id).status));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
