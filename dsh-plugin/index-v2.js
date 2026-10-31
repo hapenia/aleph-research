@@ -50,7 +50,7 @@ const missionSchema = z.object({
 const batchSchema = z.object({
   id: z.string(),
   machineId: z.string(),
-  status: z.enum(['forming', 'running', 'done', 'failed']),
+  status: z.enum(['forming', 'running', 'done', 'failed', 'interrupted']),
   infra: z.any().optional(),
   missionIds: z.array(z.string()),
   branch: z.string(),
@@ -101,7 +101,7 @@ const projectSchema = z.object({
   agents: z.array(z.object({
     role: z.enum(['researcher', 'composer', 'infra']),
     childId: z.string().nullable(),
-    status: z.enum(['running', 'done', 'failed']),
+    status: z.enum(['running', 'done', 'failed', 'interrupted']),
     summary: z.string().nullable(),
     branch: z.string().nullable().optional(),
     worktree: z.string().nullable().optional(),
@@ -189,6 +189,16 @@ for mission_dir in sorted(missions.glob("*/")):
         continue
     manifest = json.loads(manifest_path.read_text())
     mission_id = manifest.get("id") or mission_dir.name
+    # A resumed batch keeps the work it already finished.
+    done_marker = results / mission_id / "result.json"
+    if done_marker.exists():
+        try:
+            prior = json.loads(done_marker.read_text())
+        except Exception:
+            prior = {}
+        if prior.get("status") == "done":
+            reports.append({"mission_id": mission_id, "exit_code": 0, "status": "done", "resumed": True})
+            continue
     entrypoint = manifest.get("entrypoint") or "run.sh"
     output_dir = results / mission_id
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -641,8 +651,10 @@ class ProjectService {
     const project = this.get(projectId);
     if (!project) return { dispatched: false, reason: 'no project' };
     const running = (project.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'running').length;
+    const waiting = (project.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'interrupted').length;
     const target = this.explorationTarget(project);
-    if (running >= target) return { dispatched: false, running, target, reason: 'cohort is at its target' };
+    // Sessions waiting to be resumed are not dead; replacing them would duplicate their work.
+    if (running + waiting >= target) return { dispatched: false, running, waiting, target, reason: 'interrupted researchers are waiting to resume' };
     const parent = project.orchestratorSessionId ? this.ctx?.agents?.get?.(project.orchestratorSessionId) : null;
     if (!parent) return { dispatched: false, running, target, reason: 'no live orchestrator session to dispatch from' };
     const started = await this.startResearcher({ projectId, agent: parent });
@@ -1214,62 +1226,80 @@ class ProjectService {
     const summary = [];
     for (const project of this.list()) {
       const batchesRoot = join(project.workspace, '.aleph', 'batches');
-      const running = (project.batches ?? []).filter((batch) => batch.status === 'running');
-      const interrupted = new Set();
-      for (const batch of running) {
-        const live = this.hasProcessUnder(join(batchesRoot, batch.id));
-        if (live) continue;
-        interrupted.add(batch.id);
-      }
-      const idleMachine = (project.machines ?? []).every((machine) => machine.status === 'idle');
-      if (interrupted.size === 0 && idleMachine) {
-        // Nothing was left mid-flight; only stale agent records may need closing.
-        const staleAgents = (project.agents ?? []).filter((item) => item.status === 'running');
-        if (staleAgents.length === 0) continue;
-      }
+      const interruptedBatches = (project.batches ?? [])
+        .filter((batch) => batch.status === 'running' && !this.hasProcessUnder(join(batchesRoot, batch.id)))
+        .map((batch) => batch.id);
+      const interruptedResearchers = (project.agents ?? [])
+        .filter((item) => item.role === 'researcher' && item.status === 'running')
+        .map((item) => item.childId)
+        .filter(Boolean);
+      if (interruptedBatches.length === 0 && interruptedResearchers.length === 0) continue;
+
       await this.mutate(project.id, (current) => ({
         ...current,
-        machines: (current.machines ?? []).map((machine) => (
-          interrupted.has(machine.batchId ?? '') || (machine.status === 'busy' && !(current.batches ?? []).some((batch) => batch.id === machine.batchId && batch.status === 'running' && !interrupted.has(batch.id)))
-            ? { ...machine, status: 'idle', batchId: null }
-            : machine
-        )),
         batches: (current.batches ?? []).map((batch) => (
-          interrupted.has(batch.id)
-            ? { ...batch, status: 'failed', finishedAt: nowText, summary: { ...(batch.summary ?? {}), runnerError: 'interrupted by Host restart' } }
+          interruptedBatches.includes(batch.id)
+            ? { ...batch, status: 'interrupted', summary: { ...(batch.summary ?? {}), interruptedAt: nowText } }
             : batch
         )),
-        missions: (current.missions ?? []).map((mission) => (
-          mission.batchId && interrupted.has(mission.batchId) && ['batched', 'running'].includes(mission.status)
-            ? { ...mission, status: 'failed', error: 'interrupted by Host restart', finishedAt: nowText }
-            : mission
-        )),
+        // The session survives a restart, so its researcher can be resumed instead of replaced.
         agents: (current.agents ?? []).map((item) => (
-          item.status === 'running'
-            ? { ...item, status: 'failed', summary: 'interrupted by Host restart', updatedAt: nowText }
+          item.role === 'researcher' && item.status === 'running'
+            ? { ...item, status: 'interrupted', summary: 'waiting to resume after a Host restart', updatedAt: nowText }
             : item
         )),
-        violations: [...(current.violations ?? []), `${nowText} recovered from restart: ${interrupted.size} interrupted batch(es)`].slice(-50),
+        machines: (current.machines ?? []).map((machine) => (
+          interruptedBatches.includes(machine.batchId ?? '') ? { ...machine, status: 'idle', loads: [] } : machine
+        )),
       })).catch(() => undefined);
-      summary.push({ project: project.id, interrupted: [...interrupted] });
+      summary.push({ project: project.id, interruptedBatches, interruptedResearchers });
     }
-    // After reconciliation, restart the two things a restart stops: dispatch and the cohort.
-    for (const project of this.list()) {
-      const queued = (project.missions ?? []).filter((mission) => mission.status === 'approved').length;
-      if (queued > 0) {
-        await this.notifyComposer({
-          projectId: project.id,
-          agent: null,
-          event: 'host restarted',
-          detail: `${queued} mission(s) are queued and nothing is running`,
-        }).catch(() => undefined);
+
+    // Resume the work the restart stopped, newest first.
+    for (const entry of summary) {
+      for (const batchId of entry.interruptedBatches) {
+        this.resumeBatch({ projectId: entry.project, batchId }).catch(() => undefined);
       }
-      const running = (project.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'running').length;
-      if (this.explorationTarget(project) > running) {
-        await this.maybeDispatchReplacement({ projectId: project.id }).catch(() => undefined);
-      }
+      await this.resumeResearchers({ projectId: entry.project }).catch(() => undefined);
     }
     return summary;
+  }
+
+  /** Re-run an interrupted batch; the runner skips missions that already finished. */
+  async resumeBatch({ projectId, batchId }) {
+    const project = this.get(projectId);
+    const batch = (project?.batches ?? []).find((item) => item.id === batchId);
+    if (!batch || batch.status !== 'interrupted') return { resumed: false, reason: 'batch is not interrupted' };
+    await this.mutate(projectId, (current) => ({
+      ...current,
+      batches: (current.batches ?? []).map((item) => (item.id === batchId ? { ...item, status: 'forming' } : item)),
+    }));
+    this.runBatch({ projectId, batchId }).catch(() => undefined);
+    return { resumed: true, batchId };
+  }
+
+  /** Cold-resume interrupted researchers by messaging their existing sessions. */
+  async resumeResearchers({ projectId }) {
+    const project = this.get(projectId);
+    if (!project) return { resumed: 0 };
+    const interrupted = (project.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'interrupted' && item.childId);
+    if (interrupted.length === 0) return { resumed: 0 };
+    const parent = project.orchestratorSessionId ? this.ctx?.agents?.get?.(project.orchestratorSessionId) : null;
+    if (!parent) return { resumed: 0, reason: 'orchestrator session is not live yet' };
+    let resumed = 0;
+    for (const record of interrupted) {
+      const sent = await this.notifySession({
+        sessionId: record.childId,
+        text: 'The Host restarted and your mission work was interrupted mid-flight. Resume where you left off: check aleph_list_missions for your mission results, continue the work you were doing, and finish the lifecycle you already planned.',
+      }).catch(() => ({ delivered: false }));
+      if (!sent?.delivered) continue;
+      await this.mutate(projectId, (current) => ({
+        ...current,
+        agents: (current.agents ?? []).map((item) => (item.childId === record.childId ? { ...item, status: 'running', summary: null, updatedAt: now() } : item)),
+      })).catch(() => undefined);
+      resumed += 1;
+    }
+    return { resumed };
   }
 
   hasProcessUnder(rootPath) {

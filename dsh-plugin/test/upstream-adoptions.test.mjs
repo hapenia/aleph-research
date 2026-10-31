@@ -175,44 +175,44 @@ test('result delivery refuses to overwrite commits pushed after batching', async
   }
 });
 
-test('a Host restart frees the machine and fails interrupted work', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'aleph-recovery-'));
+test('a Host restart resumes interrupted work instead of replacing it', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-resume-'));
   try {
     const workspace = join(root, 'workspace');
     await mkdir(workspace, { recursive: true });
-    const records = table();
-    const service = new ProjectService({}, { table: () => records }, {});
+    const service = new ProjectService({}, { table: () => table() }, {});
     const project = await service.init({ workspace });
-    const missionRepo = project.missionRoot;
+    await service.scaffoldResearch({ projectId: project.id });
+    const repo = project.missionRoot;
     const branch = 'missions/slow';
-    git(missionRepo, ['switch', '-c', branch, 'template']);
-    await mkdir(join(missionRepo, 'missions', 'slow'), { recursive: true });
-    await writeFile(join(missionRepo, 'missions', 'slow', 'mission.json'), JSON.stringify({ id: 'slow', entrypoint: 'run.sh' }));
-    await writeFile(join(missionRepo, 'missions', 'slow', 'run.sh'), '#!/usr/bin/env bash\nsleep 30\n');
-    git(missionRepo, ['add', '-A']);
-    git(missionRepo, [...identity(missionRepo), 'commit', '-m', 'slow mission']);
-    git(missionRepo, ['switch', 'template']);
+    git(repo, ['switch', '-c', branch, 'template']);
+    await mkdir(join(repo, 'missions', 'slow'), { recursive: true });
+    await writeFile(join(repo, 'missions', 'slow', 'mission.json'), JSON.stringify({ id: 'slow', entrypoint: 'run.sh' }));
+    await writeFile(join(repo, 'missions', 'slow', 'run.sh'), '#!/usr/bin/env bash\nset -e\nsleep 1\nprintf \'{}\' > "$ALEPH_OUTPUT_DIR/result.json"\n');
+    git(repo, ['add', '-A']);
+    git(repo, [...identity(repo), 'commit', '-m', 'slow mission']);
+    git(repo, ['switch', 'template']);
 
-    let current = await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
-    const missionId = current.missions[0].id;
-    current = await service.formBatch({ projectId: project.id });
-    const batchId = current.batches[0].id;
+    const proposed = await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
+    const missionId = proposed.missions[0].id;
+    const batch = (await service.formBatch({ projectId: project.id })).batches[0];
 
-    // Simulate the state a restart leaves behind: the batch says running, the machine is busy.
+    // State a restart leaves behind: the batch says running, a researcher was mid-flight.
     await service.mutate(project.id, (state) => ({
       ...state,
-      machines: state.machines.map((machine) => ({ ...machine, status: 'busy', batchId })),
-      batches: state.batches.map((batch) => (batch.id === batchId ? { ...batch, status: 'running' } : batch)),
+      machines: state.machines.map((machine) => ({ ...machine, status: 'busy', batchId: batch.id })),
+      batches: state.batches.map((item) => (item.id === batch.id ? { ...item, status: 'running' } : item)),
+      agents: [{ role: 'researcher', childId: 'child-1', status: 'running', summary: null, branch: 'research/r-x', worktree: null, updatedAt: new Date().toISOString() }],
     }));
 
-    await service.recoverAfterRestart();
+    const summary = await service.recoverAfterRestart();
     const recovered = service.get(project.id);
-    assert.equal(recovered.batches[0].status, 'failed');
-    assert.match(recovered.batches[0].summary.runnerError, /restart/);
-    assert.equal(recovered.missions[0].status, 'failed');
-    assert.match(recovered.missions[0].error, /restart/);
-    assert.equal(recovered.machines[0].status, 'idle');
-    assert.equal(recovered.machines[0].batchId, null);
+    assert.equal(recovered.batches[0].status === 'interrupted' || recovered.batches[0].status === 'forming', true, 'the batch is queued for resume, not failed');
+    assert.equal(recovered.missions.find((m) => m.id === missionId).status !== 'failed', true, 'its mission is not failed');
+    const researcher = recovered.agents.find((item) => item.role === 'researcher');
+    assert.equal(researcher.status, 'interrupted', 'the researcher is kept for a cold resume');
+    assert.equal(researcher.childId, 'child-1');
+    assert.ok(Array.isArray(summary) && summary.length === 1);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
