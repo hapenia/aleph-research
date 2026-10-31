@@ -86,26 +86,38 @@ const preset = await evaluate(`(async () => {
 
 let delivered = null;
 if (kickoff) {
-  // The editor mounts well after the navigation, so give it time instead of failing fast.
-  let focused = false;
-  for (let attempt = 0; attempt < 40 && !focused; attempt += 1) {
-    focused = await evaluate(`(() => { const box = document.querySelector('textarea,[contenteditable="true"]'); if (!box) return false; box.focus(); return true; })()`);
-    if (!focused) await new Promise((resolve) => setTimeout(resolve, 250));
+  // The editor mounts after navigation and only accepts real input events, so click into it
+  // first, then type, and retry once before giving up.
+  let box = null;
+  for (let attempt = 0; attempt < 40 && !box; attempt += 1) {
+    box = await evaluate(`(() => {
+      const element = document.querySelector('textarea,[contenteditable="true"]');
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+    })()`);
+    if (!box) await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  if (!focused) {
+  if (!box) {
     delivered = 'no-composer';
   } else {
-    await send('Input.insertText', { text: kickoff });
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    const typed = await evaluate(`(() => { const box = document.querySelector('textarea,[contenteditable="true"]'); return (box?.value ?? box?.textContent ?? '').trim().length; })()`);
-    if (typed > 0) {
-      for (const type of ['keyDown', 'keyUp']) {
-        await send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+    for (const type of ['mousePressed', 'mouseReleased']) {
+      await send('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    for (let attempt = 0; attempt < 3 && delivered !== 'sent'; attempt += 1) {
+      await send('Input.insertText', { text: kickoff });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const typed = await evaluate(`(() => { const element = document.querySelector('textarea,[contenteditable="true"]'); return (element?.value ?? element?.textContent ?? '').trim().length; })()`);
+      if (typed > 0) {
+        for (const type of ['keyDown', 'keyUp']) {
+          await send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        delivered = 'sent';
+      } else {
+        delivered = 'insert-failed';
       }
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      delivered = 'sent';
-    } else {
-      delivered = 'insert-failed';
     }
   }
 }

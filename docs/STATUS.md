@@ -235,3 +235,16 @@ the same interpreter and data.
 With those fixed, the first analysis mission of the next run finished: an
 `analysis` mission profiled labels across 72 wells, wrote `REPORT.md` and
 `metrics.json`, and committed them to its branch.
+
+## Opening phase
+
+A project no longer starts its whole cohort at once. `aleph_start_project`
+prepares the scaffold and starts one researcher; that researcher takes the first
+experimental pass and gets a method evaluated, and only then does the Host reclaim
+it and start the configured cohort. The opening instruction is the ordinary
+researcher prompt, so basic analysis and cleaning happen because they are the
+natural first step rather than because a prompt asks for them.
+
+An explicit cohort request supersedes the phase, and exploration replacement
+stays quiet while the opening researcher owns the project, so the configured
+number of researchers is never doubled.
