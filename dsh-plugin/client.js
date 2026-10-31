@@ -47,6 +47,12 @@ window.__ModuleLoader__.load({
         'field.entrypoint': 'Entrypoint',
         'field.violations': 'Watchdog violations',
         'section.violations': 'Runtime violations',
+        'section.evaluations': 'Evaluations',
+        'field.score': 'Score',
+        'field.evaluatedCommit': 'Scored commit',
+        'field.reportCommit': 'Report commit',
+        'field.evaluatedAt': 'Evaluated',
+        'empty.evaluations': 'No evaluation yet.',
         'section.git': 'Git trees',
         'field.tip': 'Tip',
         'field.subject': 'Subject',
@@ -170,6 +176,12 @@ window.__ModuleLoader__.load({
         'field.entrypoint': '入口脚本',
         'field.violations': 'watchdog 违规',
         'section.violations': '运行时违规',
+        'section.evaluations': '评测记录',
+        'field.score': '分数',
+        'field.evaluatedCommit': '被评提交',
+        'field.reportCommit': '报告提交',
+        'field.evaluatedAt': '评测时间',
+        'empty.evaluations': '尚无评测记录。',
         'section.git': 'Git 树',
         'field.tip': '提交',
         'field.subject': '说明',
@@ -919,6 +931,22 @@ window.__ModuleLoader__.load({
         table(t, missionColumns, missions, t('empty.missions')),
       );
 
+      const evaluations = Array.isArray(project.evaluations) ? project.evaluations.filter((entry) => entry && typeof entry === 'object') : [];
+      const evaluationColumns = [
+        { label: t('field.evaluatedAt'), width: 'minmax(140px, 1fr)', render: (entry) => formatDate(entry.at) ?? '—' },
+        { label: t('table.branch'), width: 'minmax(140px, 1.4fr)', mono: true, render: (entry) => entry.branch ?? '—' },
+        { label: t('field.score'), width: '90px', primary: true, render: (entry) => (typeof entry.score === 'number' ? entry.score.toFixed(2) : t(MISSING)) },
+        { label: t('field.evaluatedCommit'), width: 'minmax(90px, 1fr)', mono: true, render: (entry) => entry.evaluatedCommit ? String(entry.evaluatedCommit).slice(0, 8) : '—' },
+        { label: t('field.reportCommit'), width: 'minmax(90px, 1fr)', mono: true, render: (entry) => entry.researchCommit ? String(entry.researchCommit).slice(0, 8) : '—' },
+        { label: t('field.evaluations'), width: 'minmax(160px, 1.6fr)', mono: true, render: (entry) => entry.evaluationRef ?? '—' },
+      ];
+      const evaluationCard = h(
+        'div',
+        { style: styles.card },
+        h('h2', { style: styles.sectionTitle }, t('section.evaluations')),
+        table(t, evaluationColumns, evaluations.slice().reverse().slice(0, 12), t('empty.evaluations')),
+      );
+
       const violations = Array.isArray(project.violations) ? project.violations : [];
       const violationCard = h(
         'div',
@@ -937,6 +965,7 @@ window.__ModuleLoader__.load({
         agentSection(t, project),
         batchCard,
         missionCard,
+        evaluationCard,
         gitSection(t, snapshot),
         violationCard,
         h(

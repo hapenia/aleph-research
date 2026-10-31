@@ -206,8 +206,15 @@ test('a Host restart resumes interrupted work instead of replacing it', async ()
     }));
 
     const summary = await service.recoverAfterRestart();
+    // Recovery resumes the batch in the background; let it settle before the fixture is removed.
+    for (let i = 0; i < 300; i += 1) {
+      const busy = service.get(project.id).batches.some((batch) => ['forming', 'running'].includes(batch.status));
+      if (!busy) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
     const recovered = service.get(project.id);
-    assert.equal(recovered.batches[0].status === 'interrupted' || recovered.batches[0].status === 'forming', true, 'the batch is queued for resume, not failed');
+    // Recovery either leaves the batch queued or finishes it right away; it must never fail it.
+    assert.ok(['interrupted', 'forming', 'running', 'done'].includes(recovered.batches[0].status), `unexpected batch status ${recovered.batches[0].status}`);
     assert.equal(recovered.missions.find((m) => m.id === missionId).status !== 'failed', true, 'its mission is not failed');
     const researcher = recovered.agents.find((item) => item.role === 'researcher');
     assert.equal(researcher.status, 'interrupted', 'the researcher is kept for a cold resume');
@@ -443,7 +450,13 @@ test('a prepared batch may wait behind a running one', async () => {
     assert.equal(service.get(project.id).machines[0].status, 'idle', 'preparation alone does not claim the machine');
 
     const running = service.runBatch({ projectId: project.id, batchId: runningBatch.id });
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    // Wait for the batch to actually start instead of assuming a fixed delay.
+    for (let i = 0; i < 200; i += 1) {
+      const state = service.get(project.id).batches.find((b) => b.id === runningBatch.id);
+      if (state?.status === 'running') break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(service.get(project.id).batches.find((b) => b.id === runningBatch.id).status, 'running');
 
     await makeApprovedMission('second');
     const prepared = (await service.formBatch({ projectId: project.id })).batches[1];
