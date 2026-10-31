@@ -1120,6 +1120,9 @@ class ProjectService {
 
     // A timed-out runner leaves its mission children behind; never leave them consuming the machine.
     const orphans = this.killUnder(batchWorktree);
+    // InfraOptimizer only edits files; anything it starts under its worktree is an accident.
+    const infraRoot = join(project.workspace, '.aleph', 'infra');
+    const infraStrays = this.killUnder(infraRoot);
     await git(project.missionRoot, ['worktree', 'remove', '--force', batchWorktree]).catch(() => undefined);
     await rm(batchWorktree, { recursive: true, force: true }).catch(() => undefined);
     if (orphans > 0) {
@@ -1543,6 +1546,20 @@ class ProjectService {
     };
     const projects = this.list();
     const nowMs = Date.now();
+    // InfraOptimizer edits files only. Anything it starts would compete with the running
+    // batch, so such processes are killed as soon as they appear.
+    for (const project of projects) {
+      const infraRoot = join(resolve(project.workspace), '.aleph', 'infra');
+      if (this.hasProcessUnder(infraRoot)) {
+        const killed = this.killUnder(infraRoot);
+        this.notifyComposer({
+          projectId: project.id,
+          agent: null,
+          event: 'infra ran code',
+          detail: `${killed} process(es) started by InfraOptimizer were stopped; it must optimize by editing only`,
+        }).catch(() => undefined);
+      }
+    }
     for (const project of projects) {
       const workspace = resolve(project.workspace);
       const allowed = [
@@ -1860,10 +1877,10 @@ class ProjectService {
     const prompt = [
       'You are InfraOptimizer for AlephResearch.',
       `Batch: ${batch.id}. Machine: ${batch.machineId}. Work only inside this worktree: ${worktree}.`,
-      `Optimize only files under the current worktree. Shared Python: ${project.pythonPath ?? 'python3'}; ALEPH_PYTHON is set for batch execution. Resolve mission dependencies with uv inside this worktree before optimizing; this is the only environment setup. Do not inspect /home, /root, DSH profile/state, other projects, or search the filesystem. Do not start extra agents.`,
-      'First read the batch files and the manifest. Make at most one focused optimization to threading, batching, import cost, allocation, precision or caching. Run one small before/after benchmark if cheap; otherwise inspect statically.',
-      'Use at most six shell commands total. If no safe improvement is justified, write ALEPH_HANDOFF.md and stop without changing code.',
-      'Write ALEPH_HANDOFF.md with changes and before/after measurements. Do not change project budget, queue or scheduling constraints. The Host commits the batch branch and runs the single batch entrypoint.',
+      'The machine is serving a running batch, so you never execute code: no benchmarks, no smoke runs, no profiling commands, no training, no dependency installs, no test invocations. Any execution steals capacity from real work and skews its own measurements.',
+      'Optimize by reading and editing only: thread and process limits, batching, import cost, allocation, precision, caching, data loading and I/O patterns. Reason about the effect from the code and the machine resources instead of measuring it.',
+      'Use read and edit tools, not shell execution. Do not inspect /home, /root, DSH profile/state, other projects, or search the filesystem. Do not start extra agents.',
+      'Write ALEPH_HANDOFF.md with the changes, the reasoning behind each, and the expected speed, memory and I/O impact. Mark it clearly as unmeasured by design. Do not change project budget, queue or scheduling constraints. The Host commits the batch branch and runs the single batch entrypoint.',
     ].join('\n');
     const abort = new AbortController();
     let activation;

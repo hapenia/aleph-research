@@ -722,3 +722,35 @@ test('listing missions returns the fields a researcher needs to reuse a result',
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('the machine stays free while InfraOptimizer edits a batch', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-infra-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    const repo = project.missionRoot;
+    const branch = 'missions/editable';
+    git(repo, ['switch', '-c', branch, 'template']);
+    await mkdir(join(repo, 'missions', 'editable'), { recursive: true });
+    await writeFile(join(repo, 'missions', 'editable', 'mission.json'), JSON.stringify({ id: 'editable', entrypoint: 'run.sh', kind: 'training', title: 'editable', summary: 'test' }));
+    await writeFile(join(repo, 'missions', 'editable', 'run.sh'), '#!/usr/bin/env bash\nset -e\nprintf \'{}\' > "$ALEPH_OUTPUT_DIR/result.json"\n');
+    git(repo, ['add', '-A']);
+    git(repo, [...identity(repo), 'commit', '-m', 'editable mission']);
+    git(repo, ['switch', 'template']);
+    await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
+    const batch = (await service.formBatch({ projectId: project.id })).batches[0];
+
+    // The infra worktree exists while the batch is prepared.
+    const infraRoot = join(workspace, '.aleph', 'infra');
+    await mkdir(join(infraRoot, batch.id), { recursive: true });
+    assert.equal(service.get(project.id).machines[0].status, 'idle', 'optimization does not claim the machine');
+
+    // Nothing under the infra root may keep running, because the machine serves the batch.
+    service.checkProcesses();
+    assert.ok(!service.hasProcessUnder(infraRoot), 'no lingering process under the infra worktree');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

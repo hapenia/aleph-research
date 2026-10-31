@@ -43,7 +43,13 @@ queue and calls `aleph_form_batch`.
 
 ## InfraOptimizer
 
-InfraOptimizer is an `aleph-infra` DSH subagent. It receives the batch worktree,
+InfraOptimizer is an `aleph-infra` DSH subagent. It never executes code: it edits
+the batch worktree while the machine is serving another batch, because a
+benchmark beside a full batch both steals capacity and measures the wrong thing.
+Its handoff states the change, the reasoning and the expected impact, marked as
+unmeasured. A stray process under its worktree is killed by the watchdog.
+
+It receives the batch worktree,
 profiles the target machine, optimizes the merged code for CPU/GPU/memory/IO,
 commits the optimization to the batch branch, and runs the batch entrypoint.
 It does not set project budget, queue or scheduling constraints.

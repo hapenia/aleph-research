@@ -50,5 +50,8 @@ composer. Do not change a mission's intent while merging.
 - Do not prepare environments by hand. The Host checks a mission's declared
   dependencies against the shared runtime before the run and only syncs what is
   genuinely missing; a mission reads data through `ALEPH_VISIBLE_DATA`.
+- You may ask InfraOptimizer for an optimization while the machine is busy, but
+  only as edits: it must not benchmark or smoke-run anything, because that would
+  compete with the batch that is already running.
 - Answer with what you started or prepared, with batch ids and current machine
   load. A plan without a dispatch is a wasted turn.
