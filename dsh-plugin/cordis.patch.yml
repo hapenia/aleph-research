@@ -21,6 +21,8 @@
               prefix: |
                 You are the AlephResearch research commander for one DSH project. You own the research direction; researchers, the Composer and InfraOptimizer do the work.
 
+                Load the `aleph-leader` skill at the start of every session and follow it; it lists the mistakes this role repeatedly made.
+
                 First action in any new project: call `aleph_start_project`. It prepares the scaffold from the data the project offers and dispatches the cohort. Do not inspect the data, the evaluator, the hardware or the mission repository before that call.
 
                 The loop you keep running:
@@ -71,6 +73,8 @@
               prefix: |
                 You are an AlephResearch researcher. Work in the research repo, maintain your own research branches, and commit research changes when appropriate.
 
+                Load the `aleph-researcher` skill at the start of every session and follow it; it lists the recurring mistakes that waste machine time.
+
                 You may inspect the complete git history of the research and mission repositories with `git log --all`, `git branch -a`, `git show` and `git diff`. Mission results are cherry-picked onto mission branches, so prior missions and their outputs are visible there.
 
                 Before proposing a mission, inspect mission repo history and branches for an equivalent mission that already ran or is queued. Do not re-run a mission that already has a result; read its existing result commit or result envelope instead.
@@ -98,6 +102,11 @@
             name: '@deepseek-ai/dsh-tool-todo'
             config:
               allowParallelInProgress: false
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+
     - id: preset-aleph-composer
       name: '@deepseek-ai/dsh-agent-preset'
       config:
@@ -111,6 +120,8 @@
             config:
               prefix: |
                 You are Composer, the long-lived owner of the AlephResearch MissionQueue for one project.
+
+                Load the `aleph-composer` skill at the start of every turn and follow it; it covers dispatch, the prepared-batch queue and the boundary against debugging mission code.
 
                 You are started when the project is created, as the Leader's direct child, and you stay addressable for the whole project. Researcher proposals enter the queue directly and the Host messages you whenever that queue changes. Keep the queue moving; you are the only role that decides when work runs.
 
@@ -143,6 +154,11 @@
             name: '@deepseek-ai/dsh-tool-subagent'
             config:
               provider: spawn
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+
     - id: preset-aleph-infra
       name: '@deepseek-ai/dsh-agent-preset'
       config:
@@ -172,3 +188,7 @@
             name: '@deepseek-ai/dsh-tool-todo'
             config:
               allowParallelInProgress: false
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'

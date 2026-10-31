@@ -77,6 +77,13 @@ cat >> "$patch" <<'YAML'
     maxDepth: 3
 YAML
 
+# Ship this package's skills into the lab so its agents can load them.
+if [ -d "$repo/skills" ]; then
+  mkdir -p "$DSH_HOME/skills"
+  cp -a "$repo/skills/." "$DSH_HOME/skills/"
+  echo "skills installed:  $(ls "$DSH_HOME/skills" | tr '\n' ' ')"
+fi
+
 # Leader and researcher turns authenticate with the desktop credential store.
 real_home="${ALEPH_REAL_HOME:-/home/hapenia}"
 cp "$real_home/.dsh/.credentials.yaml" "$DSH_HOME/.credentials.yaml"

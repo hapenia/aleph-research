@@ -1,0 +1,74 @@
+---
+name: aleph-researcher
+description: "Operational rules for an AlephResearch researcher. Load this before doing any analysis, before writing a mission, and whenever a tool result is confusing: it lists the recurring mistakes that waste machine time and how to avoid them, in this project's actual tool names."
+---
+
+# Aleph researcher rules
+
+Read this once at the start of a session, and again before you propose a mission.
+Every rule here exists because it was observed going wrong.
+
+## Order of work
+
+1. Read `README.md` in your worktree. It carries the project conventions: data
+   format, submission contract, scoring.
+2. `aleph_list_missions`. This is your memory of what the project already knows.
+3. Only then decide what to do.
+
+## Data analysis is mission work
+
+The most common waste in this system is every researcher re-deriving the same
+data facts. Label distributions, clipping floors, missingness, per-well spread,
+correlations, feature relations: these are shared knowledge.
+
+- If a mission already answers the question (check `kind: analysis` in
+  `aleph_list_missions`), read its result from the mission branch with
+  `git show <resultCommit>:results/<mission>/*` and use it.
+- If nothing answers it, file an analysis mission with `kind: analysis`, a
+  `title` and a `summary`, run it once, and let everyone read it.
+- Only run a data question locally when it is small, private to your current
+  step, and will not be useful to anyone else.
+
+## Missions
+
+- Use `aleph_start_mission`, which creates the branch and worktree from
+  `template`. Do not hand-roll a mission branch.
+- `mission.json` must carry `id`, `entrypoint`, `kind`, `title`, `summary`.
+  `kind` is `analysis` or `training`; the title and summary are how the next
+  researcher finds your result.
+- Put the model files and `metrics.json` in `$ALEPH_OUTPUT_DIR`. Whatever you
+  write there is committed to `results/<mission-id>/` on your mission branch and
+  stays readable after the batch ends.
+- A mission that failed is not retried by anyone. Read
+  `results/<mission-id>/run.log` from the result commit, fix the cause in a new
+  branch, and propose a new mission.
+
+## Reading a finished mission
+
+Use `aleph_adopt_mission` to copy a finished mission's code and result artifacts
+into your worktree. It gives you a working reference, not a patch you must
+accept. Never retype inference code that already exists in a mission.
+
+## Evaluation is your decision
+
+Call `aleph_evaluate` when your branch is worth scoring. Nothing else schedules
+it, and no one evaluates for you. Read the score and the per-target credits it
+returns, then decide what to try next.
+
+## Do not do these
+
+- Do not inspect the shared Python, installed packages, CPU, GPU or services.
+  The runtime is prepared for you; `ALEPH_PYTHON` is the interpreter to use.
+- Do not read `problem/`, the hidden testset, the original project, or any DSH
+  profile or session state.
+- Do not run long local training, sweeps, or multi-process jobs. If a command
+  needs minutes of compute, it is a mission.
+- Do not install packages outside a mission's own uv project.
+- Do not wait for other researchers' missions, and do not rerun a mission that
+  already has a result.
+
+## When a message arrives from the Host
+
+The Host tells you when your mission settles. Read the status, the result commit
+and the error excerpt, then either adopt the result or fix the cause in a new
+mission. Do not poll for it.

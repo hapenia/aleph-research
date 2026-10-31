@@ -57,6 +57,11 @@ if [ -f "$HOME_REAL/.dsh/.credentials.yaml" ] && [ ! -f "$DSH_HOME/.credentials.
   cp "$HOME_REAL/.dsh/.credentials.yaml" "$DSH_HOME/.credentials.yaml"
 fi
 
+if [ -d "$repo/skills" ]; then
+  mkdir -p "$DSH_HOME/skills"
+  cp -a "$repo/skills/." "$DSH_HOME/skills/"
+fi
+
 echo "isolated DSH_HOME: $DSH_HOME"
 echo "leader workspace:  $lab/leader"
 echo "start:             DSH_HOME=$DSH_HOME HOME=$HOME dsh --profile aleph-lab --no-open --host 127.0.0.1 --port $port"
