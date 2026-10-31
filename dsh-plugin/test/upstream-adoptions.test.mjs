@@ -532,3 +532,37 @@ test('a Leader-facing action records the orchestrator session', async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('initializing a project creates the Composer as the Leader child', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-init-composer-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const leader = { id: 'session-leader' };
+    const started = [];
+    service.subagents = {
+      async startActivation(options) {
+        started.push({ preset: options.request.agentPreset, parent: options.request.parent?.id });
+        let resolve;
+        const result = new Promise((yes) => { resolve = yes; });
+        return { childId: `child-${started.length}`, result };
+      },
+      async sendMessage() { return { id: 'm' }; },
+    };
+
+    const composers = () => started.filter((entry) => entry.preset === 'aleph-composer');
+    const project = await service.init({ workspace, agent: leader });
+    assert.equal(composers().length, 1, 'one Composer activation at initialization');
+    assert.equal(composers()[0].parent, leader.id, 'the Composer is a direct child of the Leader');
+    const composer = service.get(project.id).agents.find((item) => item.role === 'composer');
+    assert.ok(composer, 'the Composer record exists before any mission');
+    assert.equal(composer.childId, 'child-1');
+
+    // Starting the project again must not spawn a second Composer.
+    await service.scaffoldResearch({ projectId: project.id, agent: leader });
+    assert.equal(composers().length, 1, 'restarting the project reuses the Composer');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

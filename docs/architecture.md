@@ -27,7 +27,8 @@ approval step.
 
 ## Composer and machines
 
-MissionComposer is an `aleph-composer` DSH subagent. It inspects the queued
+MissionComposer is created when the project is created, as a direct child of the
+Leader session, and stays addressable for the whole project. It inspects the queued
 queue and calls `aleph_form_batch`.
 
 - One machine runs one batch at a time and the batch owns that machine.

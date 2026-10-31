@@ -391,7 +391,12 @@ class ProjectService {
       updatedAt: stamp,
     };
     await this.table.put(project.id, project);
-    return project;
+    // The Composer is part of the project from the start: it is the Leader's direct child and
+    // the queue owner, so it must exist before the first proposal rather than appear on demand.
+    if (agent) {
+      await this.ensureComposer({ projectId: project.id, agent }).catch(() => undefined);
+    }
+    return this.get(project.id) ?? project;
   }
 
   /** Point a research branch at the best evaluated commit, so a later iteration starts from it. */
@@ -445,6 +450,8 @@ class ProjectService {
     await git(root, ['-c', 'user.name=AlephResearch', '-c', 'user.email=aleph@localhost', 'commit', '--allow-empty', '-m', 'leader: research project scaffold']);
     const commit = (await git(root, ['rev-parse', 'HEAD'])).stdout.trim();
     const next = await this.mutate(projectId, (current) => ({ ...current, prepared: true, ...(conventions !== null ? { conventions } : {}), ...(visibleData ? { visibleData } : {}), ...(pythonPath ? { pythonPath: resolve(pythonPath) } : {}) }));
+    // The Composer is the Leader's direct child and must exist before work is queued.
+    await this.ensureComposer({ projectId, agent }).catch(() => undefined);
     // Preparing a project is when the loop starts; the cohort must not wait for a second call.
     let cohort = null;
     const running = (next.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'running').length;
@@ -1657,7 +1664,7 @@ class ProjectService {
     const prompt = [
       'You are MissionComposer for AlephResearch, the long-lived owner of the MissionQueue.',
       `Project: ${project.id}. Research repo: ${project.researchRoot}. Mission repo: ${project.missionRoot}. Machine: local.`,
-      'Researcher missions arrive as proposals; the Leader approves them into the queue and the Host notifies you whenever that queue changes.',
+      'You are started when the project is created, as the Leader direct child, and you stay addressable for the whole project. Researcher proposals enter the queue directly and the Host messages you whenever that queue changes. Keep the queue moving; you are the only role that decides when work runs.',
       '',
       `Machine load is not a flag. aleph_status reports sampled telemetry (cores, load average, memory, GPU utilization) plus the machine load list you maintain with aleph_machine_load, which replaces the whole list like a todo list.`,
       'Dispatch policy:',
