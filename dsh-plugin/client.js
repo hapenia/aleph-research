@@ -61,6 +61,8 @@ window.__ModuleLoader__.load({
         'field.preBatch': 'Pre-batch tip',
         'field.error': 'Error',
         'field.machine': 'Machine',
+        'field.load': 'Load',
+        'field.telemetry': 'Telemetry',
         'machine.idle': 'Idle',
         'machine.busy': 'Busy',
         'machine.unknown': 'Unknown',
@@ -181,6 +183,8 @@ window.__ModuleLoader__.load({
         'field.preBatch': 'Pre-batch tip',
         'field.error': '错误',
         'field.machine': '机器',
+        'field.load': '负载',
+        'field.telemetry': '实测负载',
         'machine.idle': '空闲',
         'machine.busy': '忙碌',
         'machine.unknown': '未知',
@@ -835,6 +839,20 @@ window.__ModuleLoader__.load({
       const machineColumns = [
         { label: t('field.machine'), width: 'minmax(100px, 1fr)', mono: true, primary: true, render: (machine) => machine.id ?? '—' },
         { label: t('field.status'), width: '96px', render: (machine) => h('span', { style: styles.badge }, t('machine.' + (machine.status ?? 'unknown'))) },
+        { label: t('field.load'), width: 'minmax(180px, 2fr)', render: (machine) => {
+          const loads = Array.isArray(machine.loads) ? machine.loads : [];
+          if (loads.length === 0) return '—';
+          return loads.map((entry) => `${entry.kind}:${entry.id}${entry.cpu ? ` cpu=${entry.cpu}` : ''}`).join(' · ');
+        } },
+        { label: t('field.telemetry'), width: 'minmax(200px, 2fr)', render: (machine) => {
+          const tele = machine.telemetry;
+          if (!tele) return '—';
+          const parts = [`load ${tele.load1}/${tele.load5}/${tele.load15}`, `${tele.cores} cores`];
+          if (tele.memAvailableGb != null) parts.push(`${tele.memAvailableGb}/${tele.memTotalGb} GB free`);
+          const gpu = Array.isArray(tele.gpus) ? tele.gpus[0] : null;
+          if (gpu) parts.push(`GPU ${gpu.utilization}% ${gpu.memoryUsedMb}/${gpu.memoryTotalMb} MB`);
+          return parts.join(' · ');
+        } },
         { label: t('table.batch'), width: 'minmax(120px, 1.4fr)', mono: true, render: (machine) => machine.batchId ?? '—' },
       ];
       const machineCard = h(

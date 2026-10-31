@@ -7,7 +7,7 @@
  * optimized and run by InfraOptimizer, and their results are cherry-picked
  * back to the pre-batch mission branch.
  */
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, readlinkSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
@@ -63,6 +63,18 @@ const machineSchema = z.object({
   kind: z.enum(['local']),
   status: z.enum(['idle', 'busy']),
   batchId: z.string().nullable(),
+  // What the Composer believes is running, replaced as a whole like a todo list.
+  loads: z.array(z.object({
+    id: z.string(),
+    kind: z.enum(['batch', 'mission', 'evaluation', 'other']),
+    label: z.string().optional(),
+    cpu: z.number().optional(),
+    memGb: z.number().optional(),
+    vramMb: z.number().optional(),
+    startedAt: z.string().optional(),
+  })).optional(),
+  // Last observed telemetry, filled by the Host sampler.
+  telemetry: z.any().optional(),
 });
 
 const projectSchema = z.object({
@@ -488,6 +500,60 @@ class ProjectService {
     return registered;
   }
 
+  /** Observed machine capacity and current pressure. Cheap enough to sample on demand. */
+  sampleTelemetry() {
+    const read = (path, fallback) => { try { return readFileSync(path, 'utf8'); } catch { return fallback; } };
+    const load = read('/proc/loadavg', '0 0 0').trim().split(/\s+/).map(Number);
+    const mem = {};
+    for (const line of read('/proc/meminfo', '').split('\n')) {
+      const match = /^(\w+):\s+(\d+) kB/.exec(line);
+      if (match) mem[match[1]] = Number(match[2]) * 1024;
+    }
+    let gpus = [];
+    try {
+      const query = execFileSync('nvidia-smi', ['--query-gpu=name,utilization.gpu,memory.used,memory.total', '--format=csv,noheader,nounits'], { encoding: 'utf8', timeout: 2000 });
+      gpus = query.trim().split('\n').filter(Boolean).map((line) => {
+        const [name, util, used, total] = line.split(',').map((part) => part.trim());
+        return { name, utilization: Number(util), memoryUsedMb: Number(used), memoryTotalMb: Number(total) };
+      });
+    } catch { gpus = []; }
+    return {
+      sampledAt: now(),
+      cores: os.cpus().length,
+      load1: load[0] ?? 0,
+      load5: load[1] ?? 0,
+      load15: load[2] ?? 0,
+      cpuUtilization: Math.min(1, (load[0] ?? 0) / Math.max(1, os.cpus().length)),
+      memTotalGb: Number((mem.MemTotal / 1e9).toFixed(2)) || null,
+      memAvailableGb: Number((mem.MemAvailable / 1e9).toFixed(2)) || null,
+      gpus,
+    };
+  }
+
+  /** Replace the machine load list, exactly like writing a todo list. */
+  async setMachineLoad({ projectId, machineId = 'local', loads = [] }) {
+    const project = this.get(projectId);
+    if (!project) throw new Error(`project not found: ${projectId}`);
+    const machine = project.machines.find((item) => item.id === machineId);
+    if (!machine) throw new Error(`machine not found: ${machineId}`);
+    const clean = (Array.isArray(loads) ? loads : []).map((entry, index) => ({
+      id: String(entry?.id ?? `load-${index}`),
+      kind: ['batch', 'mission', 'evaluation', 'other'].includes(entry?.kind) ? entry.kind : 'other',
+      label: entry?.label ? String(entry.label).slice(0, 200) : undefined,
+      cpu: Number.isFinite(Number(entry?.cpu)) ? Number(entry.cpu) : undefined,
+      memGb: Number.isFinite(Number(entry?.memGb)) ? Number(entry.memGb) : undefined,
+      vramMb: Number.isFinite(Number(entry?.vramMb)) ? Number(entry.vramMb) : undefined,
+      startedAt: typeof entry?.startedAt === 'string' ? entry.startedAt : now(),
+    }));
+    const next = await this.mutate(projectId, (current) => ({
+      ...current,
+      machines: current.machines.map((item) => (item.id === machineId
+        ? { ...item, loads: clean, status: clean.length === 0 ? 'idle' : 'busy', telemetry: this.sampleTelemetry() }
+        : item)),
+    }));
+    return { projectId, machineId, loads: clean, status: clean.length === 0 ? 'idle' : 'busy', telemetry: next.machines.find((item) => item.id === machineId)?.telemetry ?? null };
+  }
+
   /** Remember the session that drives this project so the Host can restart the Composer later. */
   async rememberOrchestrator(projectId, agent) {
     if (!agent?.id) return;
@@ -581,9 +647,12 @@ class ProjectService {
       : 6 * 60 * 60 * 1000;
     const infra = await this.prepareBatchRuntime({ project, batch, missionRecords, batchWorktree });
     const startedAt = now();
+    const loadEntry = { id: batch.id, kind: 'batch', label: `batch ${batch.id} on ${batch.machineId}`, cpu: infra.threads, startedAt };
     await this.mutate(projectId, (current) => ({
       ...current,
-      machines: current.machines.map((item) => (item.id === batch.machineId ? { ...item, status: 'busy', batchId: batch.id } : item)),
+      machines: current.machines.map((item) => (item.id === batch.machineId
+        ? { ...item, status: 'busy', batchId: batch.id, loads: [...(item.loads ?? []).filter((entry) => entry.id !== batch.id), loadEntry], telemetry: this.sampleTelemetry() }
+        : item)),
       batches: current.batches.map((item) => (item.id === batch.id ? { ...item, status: 'running', startedAt, infra } : item)),
     }));
     let runnerError = null;
@@ -723,7 +792,11 @@ class ProjectService {
     }
     const settled = await this.mutate(projectId, (current) => ({
       ...current,
-      machines: current.machines.map((item) => item.id === batch.machineId ? { ...item, status: 'idle', batchId: null } : item),
+      machines: current.machines.map((item) => {
+        if (item.id !== batch.machineId) return item;
+        const loads = (item.loads ?? []).filter((entry) => entry.id !== batch.id);
+        return { ...item, status: loads.length === 0 ? 'idle' : 'busy', batchId: loads.length === 0 ? null : item.batchId, loads, telemetry: this.sampleTelemetry() };
+      }),
       missions: current.missions.map((mission) => {
         const outcome = outcomes.find((item) => item.missionId === mission.id);
         if (!outcome) return mission;
@@ -977,6 +1050,7 @@ class ProjectService {
    */
   async recoverAfterRestart() {
     const nowText = now();
+    const summary = [];
     for (const project of this.list()) {
       const batchesRoot = join(project.workspace, '.aleph', 'batches');
       const running = (project.batches ?? []).filter((batch) => batch.status === 'running');
@@ -1016,7 +1090,9 @@ class ProjectService {
         )),
         violations: [...(current.violations ?? []), `${nowText} recovered from restart: ${interrupted.size} interrupted batch(es)`].slice(-50),
       })).catch(() => undefined);
+      summary.push({ project: project.id, interrupted: [...interrupted] });
     }
+    return summary;
   }
 
   hasProcessUnder(rootPath) {
@@ -1277,10 +1353,12 @@ class ProjectService {
       `Project: ${project.id}. Research repo: ${project.researchRoot}. Mission repo: ${project.missionRoot}. Machine: local.`,
       'Researcher missions arrive as proposals; the Leader approves them into the queue and the Host notifies you whenever that queue changes.',
       '',
+      `Machine load is not a flag. aleph_status reports sampled telemetry (cores, load average, memory, GPU utilization) plus the machine load list you maintain with aleph_machine_load, which replaces the whole list like a todo list.`,
       'Dispatch policy:',
-      '- When the machine is idle, run approved work immediately: form a batch with aleph_form_batch and start it with aleph_run_batch. Do not optimize or pre-compose idle capacity away.',
-      '- When the machine is already busy, use the waiting time productively: form the next batch ahead of time and call aleph_run_infra so InfraOptimizer resolves dependencies and tunes that batch for this machine. It will start as soon as the machine frees up.',
-      '- Never leave approved missions sitting in the queue while the machine is idle.',
+      '- Treat the machine as free only when the sampled utilization leaves room for the next batch. A running batch reports its own load entry with its thread count.',
+      '- When there is room, run approved work immediately: form a batch with aleph_form_batch and start it with aleph_run_batch, and record the new load with aleph_machine_load.',
+      '- When the machine is saturated, use the waiting time productively: form the next batch and call aleph_run_infra so InfraOptimizer resolves dependencies and tunes that batch for this machine, so it starts as soon as capacity frees.',
+      '- Never leave approved missions sitting while the machine has room, and never optimize work you could already have finished.',
       '',
       'Batch composition is your call. Delegate the mechanical work of merging branches and settling conflicts to a sub composer agent when a batch needs judgment; resolve nothing by hand in the mission repo yourself.',
       'Do not run researchers, do not edit research branches, and do not change project budgets. Report what you dispatched or prepared, with batch ids.',
@@ -1555,7 +1633,10 @@ export async function apply(ctx) {
   const workspaceRegistry = ctx.get('workspaceRegistry');
   const service = new ProjectService(ctx, domain, { sessions, subagents, agentPresets });
   ctx.effect(() => { const timer = setInterval(() => service.checkProcesses(), 5000); timer.unref?.(); return () => clearInterval(timer); });
-  service.recoverAfterRestart().catch(() => undefined);
+  service.recoverAfterRestart().then(
+    (summary) => { if (summary) console.warn('[aleph] restart recovery', summary); },
+    (error) => console.warn('[aleph] restart recovery failed', error?.message ?? error),
+  );
 
   const presetOf = (agent) => {
     if (!sessions || !agentPresets) return null;
@@ -1597,6 +1678,31 @@ export async function apply(ctx) {
       'List all missions with status, branch, result commit and result path; use before repeating analysis.',
       { ...projectIdParam },
       async (args) => service.listMissions({ projectId: args.project_id }),
+    ), { when: ({ agent }) => isAleph(agent) }),
+    ctx.tools.register(tool(
+      'aleph_machine_load',
+      'Replace the load list for a machine, like writing a todo list: what is actually running and how much it is expected to use. The machine is idle exactly when the list is empty.',
+      {
+        ...projectIdParam,
+        machine_id: { type: 'string', description: 'Machine id, default local' },
+        loads: {
+          type: 'array',
+          description: 'Complete list of active loads; pass an empty list to mark the machine idle',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              kind: { type: 'string', enum: ['batch', 'mission', 'evaluation', 'other'] },
+              label: { type: 'string' },
+              cpu: { type: 'number' },
+              memGb: { type: 'number' },
+              vramMb: { type: 'number' },
+            },
+            required: ['id'],
+          },
+        },
+      },
+      async (args) => service.setMachineLoad({ projectId: args.project_id, machineId: args.machine_id ?? 'local', loads: args.loads ?? [] }),
     ), { when: ({ agent }) => isAleph(agent) }),
     ctx.tools.register(tool(
       'aleph_status',
@@ -1848,6 +1954,18 @@ export async function apply(ctx) {
   // Retry a terminal batch: failed missions go back to the approved queue and a fresh
   // batch is formed from the same mission branches.
   // Operator visibility into the Composer channel: start it, or poke it and report the outcome.
+  ctx.webServer.register({
+    kind: 'exact',
+    path: '/api/aleph/recover',
+    async handler(req, res) {
+      try {
+        const summary = await service.recoverAfterRestart();
+        return sendJson(res, 200, { ok: true, summary });
+      } catch (error) {
+        return sendJson(res, 500, { ok: false, error: { code: 'aleph/recover-failed', message: String(error?.stack ?? error?.message ?? error) } });
+      }
+    },
+  });
   ctx.webServer.register({
     kind: 'exact',
     path: '/api/aleph/composer',

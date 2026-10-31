@@ -297,3 +297,36 @@ test('a prepared batch does not claim the machine until it runs', async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('machine load is an observed list, not a boolean', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-load-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    assert.equal(service.get(project.id).machines[0].status, 'idle');
+
+    const loaded = await service.setMachineLoad({
+      projectId: project.id,
+      loads: [{ id: 'train-1', kind: 'mission', cpu: 6, memGb: 8 }],
+    });
+    assert.equal(loaded.status, 'busy');
+    assert.equal(loaded.loads.length, 1);
+    assert.ok(loaded.telemetry && typeof loaded.telemetry.cores === 'number');
+    assert.ok(typeof loaded.telemetry.load1 === 'number');
+    assert.equal(service.get(project.id).machines[0].status, 'busy');
+
+    // Replacing the list with an empty one is the only way to free the machine.
+    const cleared = await service.setMachineLoad({ projectId: project.id, loads: [] });
+    assert.equal(cleared.status, 'idle');
+    assert.deepEqual(cleared.loads, []);
+    assert.equal(service.get(project.id).machines[0].status, 'idle');
+
+    // Unknown kinds are normalised instead of rejected.
+    const normalised = await service.setMachineLoad({ projectId: project.id, loads: [{ id: 'x', kind: 'weird' }] });
+    assert.equal(normalised.loads[0].kind, 'other');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
