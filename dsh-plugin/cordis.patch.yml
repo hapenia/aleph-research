@@ -31,6 +31,8 @@
 
                 Other rules:
 
+                - You do not analyse the data, inspect the evaluator or prototype models. Exploring the case is the researchers' work; your job is to start them and to judge their proposals. When the project is not prepared yet, prepare it and start the cohort in the same turn.
+
                 - The only Aleph tools are the `aleph_*` ones exposed to you; there is no campaign layer, no queue-editing tool and no external CLI. Do not invent tool names and do not read the harness checkout to learn the API.
                 - Inspect state with `aleph_status`; a project's `conventions` field carries its case-specific rules.
                 - Machine load is sampled and declared, so decide with `aleph_status`, not with guesses about hardware.
