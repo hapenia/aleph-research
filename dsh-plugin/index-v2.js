@@ -1999,6 +1999,23 @@ export async function apply(ctx) {
       async (args) => service.setPython({ projectId: args.project_id, pythonPath: args.python }),
     ), { when: ({ agent }) => isLeader(agent) }),
     ctx.tools.register(tool(
+      'aleph_start_project',
+      'Start the research loop: prepare the scaffold from the data the project offers and dispatch the researcher cohort. Call this first when a project is not prepared.',
+      { ...projectIdParam },
+      async (args, exec) => {
+        const project = service.get(args.project_id);
+        if (!project) throw new Error(`project not found: ${args.project_id}`);
+        return service.scaffoldResearch({
+          projectId: args.project_id,
+          title: project.workspace.split('/').pop() || 'Research project',
+          dataSources: [],
+          pythonPath: project.pythonPath ?? null,
+          conventions: project.conventions ?? null,
+          agent: exec.agent,
+        });
+      },
+    ), { when: ({ agent }) => isLeader(agent) }),
+    ctx.tools.register(tool(
       'aleph_create_research_scaffold',
       'Leader creates the initial research project before any researcher starts.',
       { ...projectIdParam, title: { type: 'string', description: 'Research project title' }, data: { type: 'array', items: { type: 'string' }, description: 'Data sources to copy into the research project' }, python: { type: 'string', description: 'Shared Python executable for researchers and missions' } },
