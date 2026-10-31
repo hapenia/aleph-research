@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -370,6 +370,30 @@ test('a researcher can adopt a finished mission code and results', async () => {
     assert.ok(existsSync(join(adopted.missionDir, 'predict.py')), 'mission source is copied');
     assert.ok(existsSync(join(adopted.resultsDir, 'metrics.json')), 'mission results are copied');
     assert.ok(adopted.files.length > 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('project conventions come from the project, not from Aleph', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-conventions-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({
+      workspace,
+      conventions: 'Submission: write answer.txt with a single number.',
+    });
+    assert.equal(project.conventions, 'Submission: write answer.txt with a single number.');
+    assert.match(git(project.missionRoot, ['show', 'template:README.md']), /Project conventions[\s\S]*answer\.txt/);
+
+    await service.scaffoldResearch({ projectId: project.id });
+    assert.match(await readFile(join(project.researchRoot, 'README.md'), 'utf8'), /answer\.txt/);
+
+    // A second init without conventions keeps the project's own text.
+    const again = await service.init({ workspace });
+    assert.match(again.conventions, /answer\.txt/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

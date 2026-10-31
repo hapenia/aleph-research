@@ -85,6 +85,7 @@ const projectSchema = z.object({
   templateBranch: z.string(),
   evalCommand: z.string(),
   evalRoot: z.string().nullable().optional(),
+  conventions: z.string().nullable().optional(),
   brief: z.string().optional(),
   researcherCount: z.number().int().optional(),
   prepared: z.boolean().optional(),
@@ -300,44 +301,40 @@ class ProjectService {
     }
   }
 
-  async init({ workspace, evalCommand = 'python3 eval/run_eval.py', evalRoot = null, visibleData = null, testsetPath = null, submissionPython = null, researchers = 4, brief = '', agent = null }) {
+  async init({ workspace, evalCommand, evalRoot, visibleData, testsetPath, submissionPython, researchers, brief, conventions, agent = null }) {
     const target = resolve(workspace);
     if (!(await pathExists(target))) throw new Error(`workspace does not exist: ${target}`);
     if (agent) this.assertWorkspace(agent, target);
     const existing = this.byWorkspace(target);
     if (existing) {
+      // Re-initialising must not reset project settings that were not supplied.
       return this.mutate(existing.id, (current) => ({
         ...current,
         researcherCount: Number.isFinite(Number(researchers)) ? Number(researchers) : (current.researcherCount ?? 4),
-        brief: brief || current.brief || '',
+        brief: brief ?? current.brief ?? '',
         evalCommand: evalCommand || current.evalCommand,
         evalRoot: evalRoot ? resolve(evalRoot) : current.evalRoot,
         visibleData: visibleData ? resolve(visibleData) : current.visibleData,
         testsetPath: testsetPath ? resolve(testsetPath) : current.testsetPath,
         submissionPython: submissionPython ?? current.submissionPython,
+        conventions: conventions ?? current.conventions ?? null,
       }));
     }
     const researchRoot = join(target, 'research');
     await ensureRepo(researchRoot, 'main', { 'README.md': '# Research repository\n' });
     const missionRoot = join(target, 'missions');
+    const missionReadmeBase = [
+      '# Mission repository template',
+      '',
+      'Each mission lives in `missions/<mission-id>/` and contains `mission.json` with',
+      'its `id` and `entrypoint` plus whatever code the mission needs.',
+      '',
+      'Training writes into `$ALEPH_OUTPUT_DIR`, which becomes `results/<mission-id>/`',
+      'on the mission branch, so a finished mission result stays readable from its branch.',
+      '',
+    ].join('\n');
     await ensureRepo(missionRoot, 'template', {
-      'README.md': [
-        '# Mission repository template',
-        '',
-        'Each mission lives in `missions/<mission-id>/` and must contain:',
-        '',
-        '- `mission.json` with `id`, `entrypoint`, and any `outputs`.',
-        '- the entrypoint script plus its training code and an uv project.',
-        '- `predict.py`: the inference deliverable. It must accept `--input-dir` and',
-        '  `--output` exactly like the research submission contract, so a validated',
-        '  mission result can be adopted by a researcher without rewriting inference.',
-        '',
-        'Training writes into `$ALEPH_OUTPUT_DIR`, which becomes `results/<mission-id>/`',
-        'on the mission branch. Put the model bundle and metrics there so they are',
-        'readable from the mission branch after the batch ends.',
-        '',
-      ].join('\n'),
-
+      'README.md': conventions ? `${missionReadmeBase}\n## Project conventions\n\n${conventions}\n` : missionReadmeBase,
       'batch_runner.py': TEMPLATE_BATCH_RUNNER,
       'pyproject.toml': '[project]\nname = "aleph-missions"\nversion = "0.1.0"\nrequires-python = ">=3.10"\n',
       // A shared ignore list keeps missions from colliding on .gitignore and from committing bytecode.
@@ -351,9 +348,10 @@ class ProjectService {
       researchRoot,
       missionRoot,
       templateBranch: 'template',
-      evalCommand,
+      evalCommand: evalCommand || 'python3 eval/run_eval.py',
       evalRoot: evalRoot ? resolve(evalRoot) : null,
-      brief,
+      conventions: conventions ?? null,
+      brief: brief ?? '',
       researcherCount: Number.isFinite(Number(researchers)) ? Number(researchers) : 4,
       prepared: false,
       visibleData: visibleData ? resolve(visibleData) : null,
@@ -392,11 +390,12 @@ class ProjectService {
     return { projectId, pythonPath: resolved };
   }
 
-  async scaffoldResearch({ projectId, title = 'Research project', dataSources = [], pythonPath = null }) {
+  async scaffoldResearch({ projectId, title = 'Research project', dataSources = [], pythonPath = null, conventions = null }) {
     const project = this.get(projectId);
     if (!project) throw new Error(`project not found: ${projectId}`);
     const root = project.researchRoot;
-    await writeFile(join(root, 'README.md'), `# ${title}\n\n${project.brief || ''}\n\n## Provided data\n\nThe data selected by the Leader is under data/ in this worktree.\n\n## Data format\n\nProvided files are under data/. Well files are comma-separated text with a header row, a units row and data rows. Parse by column name, not position, because columns can vary between wells. Treat -99999 as missing. Hidden evaluation inputs contain only the standard input columns.\n\n## Submission contract\n\nThe research branch root must contain predict.py. The evaluator runs it as\n\n    $ALEPH_SUBMISSION_PYTHON predict.py --visible-data DIR --input-dir DIR --output FILE\n\nwith ALEPH_SOLUTION_DIR as the branch root on PYTHONPATH and ALEPH_VISIBLE_DATA pointing at the provided data.\n\nInput directory: one file per hidden well, named <well-stem>.csv, holding only the input columns (DEPTH GR PE SP CAL AC DEN CNL RXO RT DEVI AZIM BIT CASE) and no unit row.\n\nOutput file: JSON shaped as\n\n    {\"wells\": [{\"id\": \"<well-stem>\", \"predictions\": [{\"POR\": 0.1, \"PERM\": 0.01, \"SW\": 99.9}, ...]}]}\n\nEach predictions list must have exactly as many rows as that well's input file, in the same order. A flat list of wells is also accepted.\n\nScoring: rows whose true POR, PERM or SW is <= -9999, or whose PERM is <= 0, are skipped. Per row credit is max(0, 1 - |p-y| / (0.08*(|y|+1e-5))) for POR, max(0, 1 - |log10(max(p/y,1e-5))|) for PERM, max(0, 1 - |p-y| / (0.05*(|y|+1e-5))) for SW. Total = (0.30*POR + 0.35*PERM + 0.35*SW) * 100. Hidden labels never leave the Leader side.\n`, 'utf8');
+    const conventionsSection = project.conventions ? `\n## Project conventions\n\n${project.conventions}\n` : '';
+    await writeFile(join(root, 'README.md'), `# ${title}\n\n${project.brief || ''}\n\n## Provided data\n\nThe data the Leader selected for researchers is under data/ in this worktree.\n${conventionsSection}`, 'utf8');
     await writeFile(join(root, 'pyproject.toml'), '[project]\nname = "aleph-research"\nversion = "0.1.0"\nrequires-python = ">=3.10"\n', 'utf8');
     await mkdir(join(root, 'src'), { recursive: true });
     await writeFile(join(root, 'src', '__init__.py'), '', 'utf8');
@@ -417,7 +416,7 @@ class ProjectService {
     // Re-scaffolding an unchanged project must stay idempotent.
     await git(root, ['-c', 'user.name=AlephResearch', '-c', 'user.email=aleph@localhost', 'commit', '--allow-empty', '-m', 'leader: research project scaffold']);
     const commit = (await git(root, ['rev-parse', 'HEAD'])).stdout.trim();
-    const next = await this.mutate(projectId, (current) => ({ ...current, prepared: true, ...(visibleData ? { visibleData } : {}), ...(pythonPath ? { pythonPath: resolve(pythonPath) } : {}) }));
+    const next = await this.mutate(projectId, (current) => ({ ...current, prepared: true, ...(conventions !== null ? { conventions } : {}), ...(visibleData ? { visibleData } : {}), ...(pythonPath ? { pythonPath: resolve(pythonPath) } : {}) }));
     return { projectId, commit, prepared: next.prepared, visibleData: next.visibleData };
   }
 
@@ -994,6 +993,7 @@ class ProjectService {
       'You are an AlephResearch researcher.',
       `Project: ${project.id}. Research brief: ${project.brief || '(no extra brief)'}.`,
       `Research worktree: ${worktree}. Research branch: ${branch}. Mission repo: ${project.missionRoot}. Template branch: ${project.templateBranch}.`,
+      ...(project.conventions ? [`Project conventions:\n${project.conventions}`] : []),
       `The Leader created your initial research scaffold. Provided data is already copied under data/ in ${worktree}; use it directly. Do not read data.zip, testsets, the original project or DSH state.`,
       `The runtime environment is prepared by Composer and InfraOptimizer. Do not inspect Python versions, installed packages, CPU/GPU, system services or create/install environments. Mission code receives ALEPH_PYTHON.`, 'Declare dependencies in the mission pyproject; Composer and InfraOptimizer resolve the runtime environment. Do not install packages yourself.', 'Small bounded analysis uses the prepared runtime; full training must still be a mission.',
       'Do not read problem/data.zip, any testsets directory, /home/hapenia/Projects/kunlungpt-comp, /home/hapenia/Projects/aleph-research, /home/hapenia/.dsh or any DSH profile/state. Run commands from your worktree, not from the project root; use canonical visible data only.' ,
@@ -1629,6 +1629,7 @@ function snapshot(project, options = {}) {
       template_branch: project.templateBranch,
       eval_command: project.evalCommand,
       eval_root: project.evalRoot ?? null,
+      conventions: project.conventions ?? null,
       orchestrator_session: project.orchestratorSessionId ?? null,
       best: project.best ?? null,
       evaluations: (project.evaluations ?? []).slice(-20),
@@ -1719,6 +1720,7 @@ export async function apply(ctx) {
         workspace: { type: 'string', description: 'Absolute workspace path; defaults to the session cwd' },
         eval_command: { type: 'string', description: 'Research evaluator command' },
         eval_root: { type: 'string', description: 'Directory the evaluator runs from' },
+        conventions: { type: 'string', description: 'Project-specific conventions written into the mission template' },
         visible_data: { type: 'string' },
         testset: { type: 'string' },
         submission_python: { type: 'string' },
@@ -1729,6 +1731,7 @@ export async function apply(ctx) {
         workspace: service.workspaceFor(exec.agent, args.workspace),
         evalCommand: args.eval_command,
         evalRoot: args.eval_root ?? null,
+        conventions: args.conventions ?? null,
         visibleData: args.visible_data,
         testsetPath: args.testset,
         submissionPython: args.submission_python,
@@ -1895,6 +1898,7 @@ export async function apply(ctx) {
           workspace: args.workspace,
           evalCommand: args.evalCommand ?? args.eval_command,
           evalRoot: args.evalRoot ?? args.eval_root ?? null,
+          conventions: args.conventions ?? null,
           visibleData: args.visibleData ?? args.visible_data,
           testsetPath: args.testset ?? args.testsetPath,
           submissionPython: args.submissionPython ?? args.submission_python,
@@ -1968,6 +1972,7 @@ export async function apply(ctx) {
           title: args.title ?? 'Research project',
           dataSources: args.data ?? [],
           pythonPath: args.python ?? null,
+          conventions: args.conventions ?? null,
         });
         return sendJson(res, 200, { ok: true, ...result });
       } catch (error) {
