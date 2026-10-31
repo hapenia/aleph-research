@@ -47,10 +47,11 @@ A DSH workspace/project contains:
 - MissionQueue, BatchQueue, Machine registry, agents and results in the
   `aleph_project` DSH storage domain.
 
-Aleph itself carries no case-specific rules. Anything particular to a project,
-such as a submission format or a metric, arrives as that project's
-`conventions` and is written into the mission template and the research
-scaffold.
+Aleph itself carries no case-specific rules. Anything a researcher needs to
+know about a project, such as a submission format or a metric, arrives as that
+project's `conventions` and is written into the research scaffold and the
+researcher prompt. A mission is only a unit of approved compute: its contents
+are the researcher's business.
 
 There is no campaign layer and no `~/.aleph` directory.
 

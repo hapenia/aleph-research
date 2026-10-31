@@ -386,7 +386,8 @@ test('project conventions come from the project, not from Aleph', async () => {
       conventions: 'Submission: write answer.txt with a single number.',
     });
     assert.equal(project.conventions, 'Submission: write answer.txt with a single number.');
-    assert.match(git(project.missionRoot, ['show', 'template:README.md']), /Project conventions[\s\S]*answer\.txt/);
+    // The mission template describes the repository, not how a mission must work.
+    assert.doesNotMatch(git(project.missionRoot, ['show', 'template:README.md']), /answer\.txt/);
 
     await service.scaffoldResearch({ projectId: project.id });
     assert.match(await readFile(join(project.researchRoot, 'README.md'), 'utf8'), /answer\.txt/);

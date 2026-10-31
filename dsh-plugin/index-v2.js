@@ -334,7 +334,7 @@ class ProjectService {
       '',
     ].join('\n');
     await ensureRepo(missionRoot, 'template', {
-      'README.md': conventions ? `${missionReadmeBase}\n## Project conventions\n\n${conventions}\n` : missionReadmeBase,
+      'README.md': missionReadmeBase,
       'batch_runner.py': TEMPLATE_BATCH_RUNNER,
       'pyproject.toml': '[project]\nname = "aleph-missions"\nversion = "0.1.0"\nrequires-python = ">=3.10"\n',
       // A shared ignore list keeps missions from colliding on .gitignore and from committing bytecode.
@@ -495,7 +495,7 @@ class ProjectService {
       missionDir: join(target, 'missions', missionDir),
       resultsDir: mission.manifestId ? join(target, 'results', mission.manifestId) : null,
       files: listing,
-      hint: 'Copy predict.py from the mission directory, point it at the model bundle in the results directory, commit, then call aleph_evaluate.',
+      hint: 'The copied files are a working reference: reuse whatever is useful, adapt it in your own branch, commit, then call aleph_evaluate.',
     };
   }
 
