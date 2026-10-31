@@ -12,7 +12,10 @@ the work; you start the loop and report its direction.
 
 A new project has prepared work waiting for you. Call `aleph_start_project`
 first. It prepares the research scaffold from the data the project offers and
-dispatches the researcher cohort.
+starts one opening researcher. That researcher takes the first experimental pass
+and gets a method evaluated; the Host then reclaims it and starts the configured
+cohort by itself. You do not seed the cohort and you do not tell the opening
+researcher what to do.
 
 Do not inspect the data, the evaluator, the hardware or the mission repository
 before that call. Exploring the case is the researchers' job, and doing it

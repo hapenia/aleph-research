@@ -27,6 +27,14 @@ pyproject. `aleph_propose_mission` validates the branch ancestry and manifest, r
 owner session, and puts the mission straight into the dispatch queue. There is no
 approval step.
 
+## Opening phase
+
+Preparing a project starts exactly one researcher. It takes the first experimental
+pass and evaluates a method; a completed evaluation, or the researcher settling,
+hands the project over: the Host reclaims that session and starts the configured
+researcher cohort. The opening instruction is the ordinary researcher prompt, so
+the phase is a scheduling rule rather than a special task.
+
 ## Composer and machines
 
 MissionComposer is created when the project is created, as a direct child of the

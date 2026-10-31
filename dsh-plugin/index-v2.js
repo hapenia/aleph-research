@@ -92,6 +92,14 @@ const projectSchema = z.object({
   brief: z.string().optional(),
   researcherCount: z.number().int().optional(),
   exploration: z.enum(['low', 'normal', 'high']).optional(),
+  bootstrap: z.object({
+    status: z.enum(['pending', 'running', 'done', 'skipped']),
+    childId: z.string().nullable().optional(),
+    branch: z.string().nullable().optional(),
+    startedAt: z.string().nullable().optional(),
+    finishedAt: z.string().nullable().optional(),
+    evaluatedCommit: z.string().nullable().optional(),
+  }).nullable().optional(),
   prepared: z.boolean().optional(),
   pythonPath: z.string().nullable().optional(),
   visibleData: z.string().nullable().optional(),
@@ -498,7 +506,7 @@ class ProjectService {
     let cohort = null;
     const running = (next.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'running').length;
     if (agent && running === 0) {
-      cohort = await this.startResearchers({ projectId, agent }).catch((error) => ({ error: String(error?.message ?? error) }));
+      cohort = await this.startBootstrap({ projectId, agent }).catch((error) => ({ error: String(error?.message ?? error) }));
     }
     return { projectId, commit, prepared: next.prepared, visibleData: next.visibleData, cohort };
   }
@@ -757,6 +765,7 @@ class ProjectService {
   async maybeDispatchReplacement({ projectId }) {
     const project = this.get(projectId);
     if (!project) return { dispatched: false, reason: 'no project' };
+    if (project.bootstrap?.status === 'running') return { dispatched: false, reason: 'the opening researcher owns the project' };
     const running = (project.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'running').length;
     const waiting = (project.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'interrupted').length;
     const target = this.explorationTarget(project);
@@ -1260,20 +1269,27 @@ class ProjectService {
         best: better ? { score, branch: record.branch, commit: evaluatedCommit, researchCommit, evaluationRef, at: record.at } : best,
       };
     });
+    // The opening researcher is done once its method has a score; the cohort replaces it.
+    let bootstrap = null;
+    if (updated.bootstrap?.status === 'running' && owner && updated.bootstrap.childId === owner) {
+      bootstrap = await this.completeBootstrap({ projectId, reason: 'the opening method was evaluated', evaluatedCommit }).catch(() => null);
+    }
     return {
       status: 'done', projectId, score, researchCommit, evaluatedCommit, evaluationRef, researchBranchUpdated,
       best: updated.best ?? null,
+      bootstrap,
       stdout: stdout.slice(0, 8000), stderr: stderr.slice(0, 4000),
     };
   }
 
-  async startResearcher({ projectId, agent }) {
+  async startResearcher({ projectId, agent, bootstrap = false }) {
     if (!agent) throw new Error('a calling Agent is required to start a researcher');
     await this.rememberOrchestrator(projectId, agent);
     if (!this.subagents) throw new Error('subagent service is unavailable');
     const project = this.get(projectId);
     if (!project) throw new Error(`project not found: ${projectId}`);
     this.assertWorkspace(agent, project.workspace);
+    const phase = bootstrap ? 'bootstrap' : 'cohort';
     const branch = `research/r-${randomUUID().slice(0, 8)}`;
     const worktree = join(project.workspace, '.aleph', 'researchers', newId('r'));
     await mkdir(join(project.workspace, '.aleph', 'researchers'), { recursive: true });
@@ -1322,7 +1338,11 @@ class ProjectService {
       throw new Error('researcher activation did not return a child ID');
     }
     const childId = activation.childId;
-    await this.mutate(projectId, (current) => ({ ...current, agents: [...(current.agents ?? []), { role: 'researcher', childId, status: 'running', summary: null, branch, worktree, updatedAt: now() }] }));
+    await this.mutate(projectId, (current) => ({
+      ...current,
+      agents: [...(current.agents ?? []), { role: 'researcher', phase, childId, status: 'running', summary: null, branch, worktree, updatedAt: now() }],
+      ...(bootstrap ? { bootstrap: { status: 'running', childId, branch, startedAt: now() } } : {}),
+    }));
     this.parentAgents ??= new Map();
     if (agent) this.parentAgents.set(childId, agent);
     // Ownership is exact: only this activation may settle its own record.
@@ -1333,6 +1353,10 @@ class ProjectService {
           ? { ...item, status, summary, updatedAt: now() }
           : item)),
       })).catch(() => undefined);
+      if (bootstrap) {
+        await this.completeBootstrap({ projectId, reason: 'the initial researcher finished' }).catch(() => undefined);
+        return;
+      }
       await this.maybeDispatchReplacement({ projectId }).catch(() => undefined);
     };
     activation.result.then(async (result) => {
@@ -1356,6 +1380,10 @@ class ProjectService {
     const requested = Math.max(1, Math.min(16, Number(count) || project.researcherCount || 4));
     await this.mutate(projectId, (current) => ({
       ...current,
+      // An explicit cohort request supersedes the single opening researcher.
+      ...(current.bootstrap && current.bootstrap.status !== 'done'
+        ? { bootstrap: { ...current.bootstrap, status: 'skipped', finishedAt: now() } }
+        : {}),
       agents: (current.agents ?? []).map((item) => item.role === 'researcher' && item.status === 'running'
         ? { ...item, status: 'failed', summary: 'superseded by a new researcher batch', updatedAt: now() }
         : item),
@@ -1379,6 +1407,49 @@ class ProjectService {
     }, 180_000);
     finalCheckpoint.unref?.();
     return { projectId, requested, started };
+  }
+
+  /**
+   * The project opens with a single researcher. Its experiments and its first evaluated
+   * method settle the project's defaults, and only then does the full cohort start.
+   */
+  async startBootstrap({ projectId, agent }) {
+    const project = this.get(projectId);
+    if (!project) throw new Error(`project not found: ${projectId}`);
+    const current = project.bootstrap;
+    if (current?.status === 'running') return { started: false, reason: 'bootstrap already running', bootstrap: current };
+    if (current?.status === 'done' || current?.status === 'skipped') {
+      const cohort = await this.startResearchers({ projectId, agent });
+      return { started: false, reason: 'bootstrap already done', cohort };
+    }
+    const started = await this.startResearcher({ projectId, agent, bootstrap: true });
+    return { started: true, ...started };
+  }
+
+  /** Reclaim the initial researcher and start the configured cohort. */
+  async completeBootstrap({ projectId, reason = 'done', evaluatedCommit = null }) {
+    const project = this.get(projectId);
+    if (!project) return { completed: false };
+    const bootstrap = project.bootstrap;
+    if (!bootstrap || bootstrap.status === 'done' || bootstrap.status === 'skipped') return { completed: false };
+    await this.mutate(projectId, (state) => ({
+      ...state,
+      bootstrap: {
+        ...(state.bootstrap ?? {}),
+        status: 'done',
+        finishedAt: now(),
+        evaluatedCommit: evaluatedCommit ?? state.bootstrap?.evaluatedCommit ?? null,
+        detail: reason,
+      },
+      // The bootstrap session is finished by construction; the cohort replaces it.
+      agents: (state.agents ?? []).map((item) => (item.role === 'researcher' && item.childId === bootstrap.childId && item.status === 'running'
+        ? { ...item, status: 'done', summary: item.summary ?? 'bootstrap finished; cohort started', updatedAt: now() }
+        : item)),
+    }));
+    const parent = bootstrap.childId ? (this.parentAgents?.get(bootstrap.childId) ?? (project.orchestratorSessionId ? this.ctx?.agents?.get?.(project.orchestratorSessionId) : null)) : null;
+    if (!parent) return { completed: true, cohort: null, reason: 'no live parent to start the cohort' };
+    const cohort = await this.startResearchers({ projectId, agent: parent }).catch((error) => ({ error: String(error?.message ?? error) }));
+    return { completed: true, cohort };
   }
 
   nudgeChild(childId, text) {
@@ -2109,6 +2180,7 @@ function snapshot(project, options = {}) {
       brief: project.brief ?? '',
       researcher_count: project.researcherCount ?? 4,
       exploration: project.exploration ?? 'normal',
+      bootstrap: project.bootstrap ?? null,
       prepared: project.prepared === true,
       python_path: project.pythonPath ?? null,
       visible_data: project.visibleData ?? null,

@@ -812,3 +812,51 @@ test('one InfraOptimizer serves every batch of a machine and dispatch does not b
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('the project opens with one researcher and starts the cohort after its evaluation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-bootstrap-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace, researchers: 3 });
+    await service.scaffoldResearch({ projectId: project.id });
+
+    const activations = [];
+    service.subagents = {
+      async startActivation(options) {
+        activations.push({ preset: options.request.agentPreset, prompt: (options.request.prompt?.[0]?.text ?? '') });
+        let resolve;
+        const result = new Promise((yes) => { resolve = yes; });
+        return { childId: `child-${activations.length}`, result };
+      },
+      async sendMessage() { return { id: 'm' }; },
+    };
+
+    const leader = { id: 'session-leader' };
+    const opened = await service.startBootstrap({ projectId: project.id, agent: leader });
+    assert.equal(opened.started, true);
+    const researchers = () => service.get(project.id).agents.filter((item) => item.role === 'researcher');
+    assert.equal(researchers().length, 1, 'exactly one researcher opens the project');
+    assert.equal(researchers()[0].phase, 'bootstrap');
+    assert.equal(service.get(project.id).bootstrap.status, 'running');
+
+    // No second researcher appears while the opening one is still working.
+    await service.maybeDispatchReplacement({ projectId: project.id });
+    assert.equal(researchers().length, 1, 'the cohort waits for the opening researcher');
+
+    // Its evaluation closes the bootstrap phase and starts the configured cohort.
+    const result = await service.completeBootstrap({ projectId: project.id, reason: 'test', evaluatedCommit: 'abc1234' });
+    assert.equal(result.completed, true);
+    assert.equal(service.get(project.id).bootstrap.status, 'done');
+    assert.equal(service.get(project.id).bootstrap.evaluatedCommit, 'abc1234');
+    const cohort = service.get(project.id).agents.filter((item) => item.role === 'researcher' && item.status === 'running');
+    assert.equal(cohort.length, 3, 'the configured cohort starts after the evaluation');
+    assert.equal(activations.filter((item) => item.preset === 'aleph-researcher').length, 4, 'one opening plus three cohort researchers');
+    // The opening researcher gets the ordinary prompt: no extra analysis or cleaning brief.
+    const normalise = (text) => text.replace(/r-[0-9a-f]{8}/g, 'r-ID').replace(/research\/r-ID/g, 'research/r-ID');
+    assert.equal(normalise(activations[0].prompt), normalise(activations[1].prompt), 'the opening instruction matches the cohort prompt');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
