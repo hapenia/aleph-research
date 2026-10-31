@@ -1302,6 +1302,32 @@ class ProjectService {
     return { resumed };
   }
 
+  /** Resume whatever was left waiting, now that the orchestrator may be live again. */
+  recoverPending() {
+    if (this.recovering) return;
+    this.recovering = true;
+    (async () => {
+      for (const project of this.list()) {
+        const live = project.orchestratorSessionId ? this.ctx?.agents?.get?.(project.orchestratorSessionId) : null;
+        const interrupted = (project.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'interrupted');
+        if (live && interrupted.length > 0) {
+          await this.resumeResearchers({ projectId: project.id }).catch(() => undefined);
+        }
+        const queued = (project.missions ?? []).filter((mission) => mission.status === 'approved').length;
+        const composer = (project.agents ?? []).some((item) => item.role === 'composer' && item.status === 'running');
+        if (live && queued > 0 && !composer) {
+          await this.notifyComposer({ projectId: project.id, agent: null, event: 'dispatch pending', detail: `${queued} mission(s) queued` }).catch(() => undefined);
+        }
+        const interruptedBatch = (project.batches ?? []).find((batch) => batch.status === 'interrupted');
+        if (interruptedBatch && !this.resumeScheduled?.has?.(interruptedBatch.id)) {
+          this.resumeScheduled ??= new Set();
+          this.resumeScheduled.add(interruptedBatch.id);
+          this.resumeBatch({ projectId: project.id, batchId: interruptedBatch.id }).catch(() => undefined);
+        }
+      }
+    })().catch(() => undefined).finally(() => { this.recovering = false; });
+  }
+
   hasProcessUnder(rootPath) {
     const root = resolve(rootPath);
     let entries = [];
@@ -1317,6 +1343,7 @@ class ProjectService {
   }
 
   checkProcesses() {
+    this.recoverPending();
     const hasBwrapAncestor = (pid) => {
       let current = pid;
       for (let depth = 0; depth < 12; depth += 1) {
