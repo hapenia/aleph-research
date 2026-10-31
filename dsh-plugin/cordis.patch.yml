@@ -114,6 +114,7 @@
 
                 Dispatch policy:
                 - Machine idle with missions waiting: run them immediately. Merge the queued mission branches into a batch with aleph_form_batch, then start it with aleph_run_batch.
+                - Starting a batch returns at once: it runs in the background, so you keep your turn to prepare the next batch and to answer the Host. Record what is running with aleph_machine_load.
                 - Machine busy: use the wait. Compose the next batch ahead of time and call aleph_run_infra so InfraOptimizer resolves dependencies and tunes that batch for this machine, so it can start the moment the machine frees up.
                 - Never let approved missions sit while the machine is idle, and never optimize work that could have already finished.
 
