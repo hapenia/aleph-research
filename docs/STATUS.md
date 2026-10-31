@@ -115,3 +115,17 @@ Deliberately left open: #3, #4, #5 describe concurrency and budget limits that
 belong to a multi-machine model, #8 asks for strategy text that the mission
 prompt already carries, #9 is covered by the persistent Composer, and #10
 (pause, resume, cancel, finish) an operation surface that is still missing.
+
+## Machine load
+
+A machine is no longer a boolean. Each machine carries:
+
+- `telemetry`: Host-sampled cores, one/five/fifteen minute load average, CPU
+  utilisation, memory available and total, and per-GPU utilisation and memory.
+- `loads`: the list of work the Composer believes is running, replaced as a whole
+  by `aleph_machine_load` the way a todo tool replaces a todo list.
+
+The batch runner adds its own entry when a batch starts and removes it when the
+batch ends, so the list stays truthful even if the Composer is idle. A prepared
+batch does not claim the machine; only execution does. The console shows both the
+declared load and the sampled telemetry.
