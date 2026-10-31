@@ -748,6 +748,35 @@ class ProjectService {
     return killed;
   }
 
+  /** Dependency names declared by a mission pyproject. */
+  async declaredDependencies(manifestPath) {
+    try {
+      const text = await readFile(manifestPath, 'utf8');
+      const match = /dependencies\s*=\s*\[([\s\S]*?)\]/.exec(text);
+      if (!match) return [];
+      return [...match[1].matchAll(/"([^"]+)"/g)]
+        .map((entry) => entry[1])
+        .map((spec) => spec.split(/[<>=!~;\[]/)[0].trim())
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  /** Which of those distributions the shared interpreter cannot already import. */
+  async missingDependencies(project, names) {
+    if (names.length === 0) return [];
+    const python = project.pythonPath;
+    if (!python) return names;
+    const probe = `import importlib.metadata as m, sys\nmissing=[]\nfor name in ${JSON.stringify(names)}:\n    try: m.version(name)\n    except Exception: missing.append(name)\nprint(' '.join(missing))`;
+    try {
+      const { stdout } = await run(python, ['-c', probe], { timeout: 30_000 });
+      return stdout.trim().split(/\s+/).filter(Boolean);
+    } catch {
+      return names;
+    }
+  }
+
   async prepareBatchRuntime({ project, batch, missionRecords, batchWorktree }) {
     const cores = Math.max(1, Number(os.cpus().length) || 1);
     // One mission runs at a time, so it may use most of the machine without starving the desktop.
@@ -771,12 +800,21 @@ class ProjectService {
       if (!dir) continue;
       const manifest = join(dir, 'pyproject.toml');
       if (!(await pathExists(manifest))) { prepared.push({ mission: mission.id, status: 'no-pyproject' }); continue; }
+      // Never build a mission-local environment the shared runtime already satisfies: a partial
+      // .venv is worse than none, because mission entrypoints prefer it.
+      const needed = await this.declaredDependencies(manifest);
+      const missing = await this.missingDependencies(project, needed);
+      if (missing.length === 0) {
+        prepared.push({ mission: mission.id, status: 'satisfied-by-runtime', dependencies: needed.length });
+        continue;
+      }
       try {
-        // Dependencies come from the mission's own pyproject; the shared runtime is the fallback.
         await run('uv', ['sync', '--quiet', '--project', dir], { cwd: batchWorktree, env, timeout: 300_000 });
-        prepared.push({ mission: mission.id, status: 'synced' });
+        prepared.push({ mission: mission.id, status: 'synced', missing });
       } catch (error) {
-        prepared.push({ mission: mission.id, status: 'sync-failed', error: String(error?.message ?? error).slice(0, 400) });
+        // A failed sync leaves a half-built venv that would shadow the runtime, so remove it.
+        await rm(join(dir, '.venv'), { recursive: true, force: true }).catch(() => undefined);
+        prepared.push({ mission: mission.id, status: 'sync-failed', missing, error: String(error?.message ?? error).slice(0, 400) });
       }
     }
     const infra = { cores, threads, missions: prepared, runner: project.pythonPath ?? 'python3', timeout_ms: timeoutMs };
