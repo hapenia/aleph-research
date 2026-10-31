@@ -178,3 +178,14 @@ on the model remembering two tool calls.
 
 `aleph_start_project` now prepares the scaffold from the offered data and
 dispatches the cohort in one step, which is what a single kickoff needs.
+
+## Console and mission runtimes
+
+The console gained an evaluation table: time, branch, score, scored commit, report
+commit and report ref, newest first.
+
+Tracing the fourth batch showed InfraOptimizer's `uv sync` building mission-local
+`.venv` directories that the mission entrypoints then preferred over the shared
+runtime, so real runs failed on missing `lightgbm` and `sklearn` even though the
+runtime had them. Dependencies are now checked against the shared interpreter
+first, and a failed sync deletes the half-built environment.
