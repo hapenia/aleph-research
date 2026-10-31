@@ -129,3 +129,21 @@ The batch runner adds its own entry when a batch starts and removes it when the
 batch ends, so the list stays truthful even if the Composer is idle. A prepared
 batch does not claim the machine; only execution does. The console shows both the
 declared load and the sampled telemetry.
+
+## Iteration four
+
+A clean run of the whole loop on a fresh project (`p-9f9dcb04`) exercised the
+new orchestration without any manual batch step.
+
+- Approving two missions started the persistent Composer by itself, which then
+  formed `b-74cb40bc` and started it while the machine was idle.
+- The machine reported live telemetry (24 cores, load average, 16.5 of 33.4 GB
+  free, GPU utilisation) and a load list holding the running batch at 16 threads.
+- The batch finished 1 of 2 missions. The done mission persisted its report,
+  model bundle, OOF predictions and metrics (OOF score 79.54); the failed one
+  left a readable `KeyError: 'PERM'` traceback in its run log.
+- The machine returned to idle with an empty load list.
+
+Evaluation attribution held on the same run: the report commit's parent is the
+scored commit, each evaluation kept its own `refs/aleph/evaluations` entry, and a
+later weaker score (68.94) did not displace the best result (69.85).
