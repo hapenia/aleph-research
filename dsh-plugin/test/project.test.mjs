@@ -36,7 +36,8 @@ test('project mission flows through approval, batch, result cherry-pick and eval
     git(missionRepo, ['switch', '-c', 'mission/test', 'template']);
     await mkdir(join(missionRepo, 'missions', 'm-test'), { recursive: true });
     await writeFile(join(missionRepo, 'missions', 'm-test', 'mission.json'), JSON.stringify({
-      id: 'm-test', entrypoint: 'run.sh', outputs: [{ key: 'score' }], resource: { cpu: 1 },
+      id: 'm-test', entrypoint: 'run.sh', kind: 'training', title: 'm-test', summary: 'test mission',
+      outputs: [{ key: 'score' }], resource: { cpu: 1 },
     }));
     await writeFile(join(missionRepo, 'missions', 'm-test', 'run.sh'), '#!/usr/bin/env bash\nset -e\nprintf \'{"score": 1}\\n\' > "$ALEPH_OUTPUT_DIR/score.json"\n');
     execFileSync('chmod', ['+x', join(missionRepo, 'missions', 'm-test', 'run.sh')]);

@@ -21,7 +21,9 @@ A mission branch is created from `template` by the researcher. It contains:
 - mission code and an uv project.
 - a single batch entrypoint contribution.
 
-`aleph_propose_mission` validates the branch ancestry and manifest, records the
+`aleph_create_mission` returns a branch and worktree that are already a valid mission:
+manifest with kind, title and summary, an executable entrypoint, a code stub and a
+pyproject. `aleph_propose_mission` validates the branch ancestry and manifest, records the
 owner session, and puts the mission straight into the dispatch queue. There is no
 approval step.
 

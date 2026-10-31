@@ -31,10 +31,17 @@ correlations, feature relations: these are shared knowledge.
 
 ## Missions
 
-- Use `aleph_start_mission`, which creates the branch and worktree from
-  `template`. Do not hand-roll a mission branch.
-- `mission.json` must carry `id`, `entrypoint`, `kind`, `title`, `summary`.
-  `kind` is `analysis` or `training`; the title and summary are how the next
+- Create a mission with one call: `aleph_create_mission` with a name, `kind`,
+  `title`, `summary` and any dependencies. It returns a branch and worktree that
+  already contain a valid `mission.json`, an executable `run.sh`, a `main.py`
+  stub and a `pyproject.toml`. Do not hand-roll a mission branch.
+- Then edit `main.py`, write to `$ALEPH_OUTPUT_DIR`, commit, and call
+  `aleph_propose_mission`. A creation call plus an edit is the whole packaging
+  step.
+- `aleph_propose_mission` checks the branch and reports every problem in one
+  reply, so a malformed mission is fixed in one pass rather than one error at a
+  time.
+- `kind` is `analysis` or `training`; the title and summary are how the next
   researcher finds your result.
 - Put the model files and `metrics.json` in `$ALEPH_OUTPUT_DIR`. Whatever you
   write there is committed to `results/<mission-id>/` on your mission branch and

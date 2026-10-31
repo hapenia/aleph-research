@@ -143,7 +143,7 @@ test('result delivery refuses to overwrite commits pushed after batching', async
     const branch = 'missions/late-commit';
     git(missionRepo, ['switch', '-c', branch, 'template']);
     await mkdir(join(missionRepo, 'missions', 'late'), { recursive: true });
-    await writeFile(join(missionRepo, 'missions', 'late', 'mission.json'), JSON.stringify({ id: 'late', entrypoint: 'run.sh' }));
+    await writeFile(join(missionRepo, 'missions', 'late', 'mission.json'), JSON.stringify({ id: 'late', entrypoint: 'run.sh', kind: 'training', title: 'late', summary: 'test mission' }));
     await writeFile(join(missionRepo, 'missions', 'late', 'run.sh'), '#!/usr/bin/env bash\nset -e\nprintf \'{"ok":true}\\n\' > "$ALEPH_OUTPUT_DIR/result.json"\n');
     execFileSync('chmod', ['+x', join(missionRepo, 'missions', 'late', 'run.sh')]);
     git(missionRepo, ['add', '-A']);
@@ -187,7 +187,7 @@ test('a Host restart resumes interrupted work instead of replacing it', async ()
     const branch = 'missions/slow';
     git(repo, ['switch', '-c', branch, 'template']);
     await mkdir(join(repo, 'missions', 'slow'), { recursive: true });
-    await writeFile(join(repo, 'missions', 'slow', 'mission.json'), JSON.stringify({ id: 'slow', entrypoint: 'run.sh' }));
+    await writeFile(join(repo, 'missions', 'slow', 'mission.json'), JSON.stringify({ id: 'slow', entrypoint: 'run.sh', kind: 'training', title: 'slow', summary: 'test mission' }));
     await writeFile(join(repo, 'missions', 'slow', 'run.sh'), '#!/usr/bin/env bash\nset -e\nsleep 1\nprintf \'{}\' > "$ALEPH_OUTPUT_DIR/result.json"\n');
     git(repo, ['add', '-A']);
     git(repo, [...identity(repo), 'commit', '-m', 'slow mission']);
@@ -278,7 +278,7 @@ test('a prepared batch does not claim the machine until it runs', async () => {
     const branch = 'missions/quick';
     git(missionRepo, ['switch', '-c', branch, 'template']);
     await mkdir(join(missionRepo, 'missions', 'quick'), { recursive: true });
-    await writeFile(join(missionRepo, 'missions', 'quick', 'mission.json'), JSON.stringify({ id: 'quick', entrypoint: 'run.sh' }));
+    await writeFile(join(missionRepo, 'missions', 'quick', 'mission.json'), JSON.stringify({ id: 'quick', entrypoint: 'run.sh', kind: 'training', title: 'quick', summary: 'test mission' }));
     await writeFile(join(missionRepo, 'missions', 'quick', 'run.sh'), '#!/usr/bin/env bash\nset -e\nprintf \'{}\\n\' > "$ALEPH_OUTPUT_DIR/result.json"\n');
     git(missionRepo, ['add', '-A']);
     git(missionRepo, [...identity(missionRepo), 'commit', '-m', 'quick mission']);
@@ -347,7 +347,7 @@ test('a researcher can adopt a finished mission code and results', async () => {
     const branch = 'missions/adoptable';
     git(missionRepo, ['switch', '-c', branch, 'template']);
     await mkdir(join(missionRepo, 'missions', 'adoptable'), { recursive: true });
-    await writeFile(join(missionRepo, 'missions', 'adoptable', 'mission.json'), JSON.stringify({ id: 'adoptable', entrypoint: 'run.sh' }));
+    await writeFile(join(missionRepo, 'missions', 'adoptable', 'mission.json'), JSON.stringify({ id: 'adoptable', entrypoint: 'run.sh', kind: 'training', title: 'adoptable', summary: 'test mission' }));
     await writeFile(join(missionRepo, 'missions', 'adoptable', 'run.sh'), '#!/usr/bin/env bash\nset -e\nprintf \'{"ok":true}\\n\' > "$ALEPH_OUTPUT_DIR/result.json"\nprintf \'{"w":1}\\n\' > "$ALEPH_OUTPUT_DIR/metrics.json"\n');
     await writeFile(join(missionRepo, 'missions', 'adoptable', 'predict.py'), 'print("inference")\n');
     git(missionRepo, ['add', '-A']);
@@ -435,7 +435,7 @@ test('a prepared batch may wait behind a running one', async () => {
       const branch = `missions/${name}`;
       git(repo, ['switch', '-c', branch, 'template']);
       await mkdir(join(repo, 'missions', name), { recursive: true });
-      await writeFile(join(repo, 'missions', name, 'mission.json'), JSON.stringify({ id: name, entrypoint: 'run.sh' }));
+      await writeFile(join(repo, 'missions', name, 'mission.json'), JSON.stringify({ id: name, entrypoint: 'run.sh', kind: 'training', title: name, summary: 'test mission' }));
       await writeFile(join(repo, 'missions', name, 'run.sh'), '#!/usr/bin/env bash\nset -e\nsleep 1\nprintf \'{}\' > "$ALEPH_OUTPUT_DIR/result.json"\n');
       git(repo, ['add', '-A']);
       git(repo, [...identity(repo), 'commit', '-m', `mission ${name}`]);
@@ -485,7 +485,7 @@ test('a finished mission notifies its owner with the outcome', async () => {
     const branch = 'missions/reports-back';
     git(repo, ['switch', '-c', branch, 'template']);
     await mkdir(join(repo, 'missions', 'reports-back'), { recursive: true });
-    await writeFile(join(repo, 'missions', 'reports-back', 'mission.json'), JSON.stringify({ id: 'reports-back', entrypoint: 'run.sh' }));
+    await writeFile(join(repo, 'missions', 'reports-back', 'mission.json'), JSON.stringify({ id: 'reports-back', entrypoint: 'run.sh', kind: 'training', title: 'reports-back', summary: 'test mission' }));
     await writeFile(join(repo, 'missions', 'reports-back', 'run.sh'), '#!/usr/bin/env bash\nset -e\nexit 3\n');
     git(repo, ['add', '-A']);
     git(repo, [...identity(repo), 'commit', '-m', 'failing mission']);
@@ -578,7 +578,7 @@ test('an agent starts a batch without waiting for it', async () => {
     const branch = 'missions/long';
     git(repo, ['switch', '-c', branch, 'template']);
     await mkdir(join(repo, 'missions', 'long'), { recursive: true });
-    await writeFile(join(repo, 'missions', 'long', 'mission.json'), JSON.stringify({ id: 'long', entrypoint: 'run.sh' }));
+    await writeFile(join(repo, 'missions', 'long', 'mission.json'), JSON.stringify({ id: 'long', entrypoint: 'run.sh', kind: 'training', title: 'long', summary: 'test mission' }));
     await writeFile(join(repo, 'missions', 'long', 'run.sh'), '#!/usr/bin/env bash\nset -e\nsleep 2\nprintf \'{}\' > "$ALEPH_OUTPUT_DIR/result.json"\n');
     git(repo, ['add', '-A']);
     git(repo, [...identity(repo), 'commit', '-m', 'long mission']);
@@ -600,6 +600,78 @@ test('an agent starts a batch without waiting for it', async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     assert.ok(['done', 'failed'].includes(service.get(project.id).batches.find((b) => b.id === batch.id).status));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('one call creates a mission that is immediately proposable', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-create-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    await service.scaffoldResearch({ projectId: project.id });
+
+    const created = await service.createMission({
+      projectId: project.id,
+      name: 'label-structure',
+      kind: 'analysis',
+      title: 'Label structure and clipping floors',
+      summary: 'Distributions, floors and per-well spread of POR, PERM and SW',
+      dependencies: ['numpy', 'pandas'],
+    });
+    assert.equal(created.kind, 'analysis');
+    assert.ok(existsSync(join(created.missionDir, 'mission.json')));
+    assert.ok(existsSync(join(created.missionDir, 'run.sh')));
+    assert.ok(existsSync(join(created.missionDir, 'main.py')));
+    assert.ok(existsSync(join(created.missionDir, 'pyproject.toml')));
+    const manifest = JSON.parse(await readFile(join(created.missionDir, 'mission.json'), 'utf8'));
+    assert.equal(manifest.kind, 'analysis');
+    assert.equal(manifest.title, 'Label structure and clipping floors');
+    assert.ok(manifest.summary.includes('floors'));
+
+    // Committing the stub is enough to enter the queue with no extra packaging steps.
+    git(created.worktree, [...identity(created.worktree), 'commit', '--allow-empty', '-m', 'mission ready']);
+    const proposed = await service.propose({ projectId: project.id, branch: created.branch, agent: { id: 'researcher' } });
+    const mission = proposed.missions.find((item) => item.branch === created.branch);
+    assert.equal(mission.status, 'approved', 'a created mission enters the queue directly');
+    assert.equal(mission.kind, 'analysis');
+    assert.equal(mission.title, 'Label structure and clipping floors');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a malformed mission reports every problem at once', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-problems-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    const repo = project.missionRoot;
+    const branch = 'missions/incomplete';
+    git(repo, ['switch', '-c', branch, 'template']);
+    await mkdir(join(repo, 'missions', 'incomplete'), { recursive: true });
+    // No kind, title or summary, and the entrypoint file is missing.
+    await writeFile(join(repo, 'missions', 'incomplete', 'mission.json'), JSON.stringify({ id: 'incomplete', entrypoint: 'run.sh' }));
+    git(repo, ['add', '-A']);
+    git(repo, [...identity(repo), 'commit', '-m', 'incomplete mission']);
+    git(repo, ['switch', 'template']);
+
+    await assert.rejects(
+      () => service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } }),
+      (error) => {
+        const text = String(error.message);
+        assert.match(text, /missing "kind"/);
+        assert.match(text, /missing "title"/);
+        assert.match(text, /missing "summary"/);
+        assert.match(text, /entrypoint .* does not exist/);
+        return true;
+      },
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

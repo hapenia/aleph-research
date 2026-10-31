@@ -10,7 +10,7 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, readlinkSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import os from 'node:os';
 import { promisify } from 'node:util';
@@ -474,9 +474,20 @@ class ProjectService {
     }
   }
 
-  async startMission({ projectId, name = 'mission' }) {
+  /** One call that leaves a valid mission behind: metadata, entrypoint, code stub and project file. */
+  async createMission({
+    projectId,
+    name = 'mission',
+    kind = 'analysis',
+    title = null,
+    summary = null,
+    entrypoint = 'run.sh',
+    dependencies = [],
+    agent = null,
+  }) {
     const project = this.get(projectId);
     if (!project) throw new Error(`project not found: ${projectId}`);
+    if (!['analysis', 'training', 'other'].includes(kind)) throw new Error(`unknown mission kind: ${kind}`);
     const slug = String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'mission';
     const branch = `missions/${slug}-${randomUUID().slice(0, 8)}`;
     const worktree = join(project.workspace, '.aleph', 'missions', newId('mw'));
@@ -484,22 +495,42 @@ class ProjectService {
     await git(project.missionRoot, ['worktree', 'add', '-b', branch, worktree, project.templateBranch]);
     const missionDir = join(worktree, 'missions', slug);
     await mkdir(missionDir, { recursive: true });
-    await writeFile(join(missionDir, 'mission.json'), JSON.stringify({ id: slug, entrypoint: 'run.sh', outputs: [] }, null, 2), 'utf8');
-    await writeFile(join(missionDir, 'run.sh'), '#!/usr/bin/env bash\nset -euo pipefail\n# Replace this stub with the mission entrypoint.\necho "mission not implemented" >&2\nexit 1\n', 'utf8');
-    await writeFile(join(missionDir, 'README.md'), `# ${slug}\n\nFill mission.json, replace run.sh with the mission entrypoint, add code and an uv project, commit, then call aleph_propose_mission.\n`, 'utf8');
+    await writeFile(join(missionDir, 'mission.json'), JSON.stringify({
+      id: slug,
+      entrypoint,
+      kind,
+      title: title ?? slug,
+      summary: summary ?? '',
+      outputs: [],
+    }, null, 2), 'utf8');
+    // The stub is already a working entrypoint: correct interpreter, correct directory, fails loudly.
+    await writeFile(join(missionDir, 'run.sh'), '#!/usr/bin/env bash\nset -euo pipefail\ncd "$(dirname "$0")"\nif [ ! -f main.py ]; then echo "mission has no main.py yet" >&2; exit 1; fi\nexec "${ALEPH_PYTHON:-python3}" main.py "$@"\n', 'utf8');
+    await writeFile(join(missionDir, 'main.py'), 'def main() -> int:\n    raise SystemExit("replace main.py with the mission implementation")\n\n\nif __name__ == "__main__":\n    raise SystemExit(main())\n', 'utf8');
+    const dependencyList = (Array.isArray(dependencies) ? dependencies : []).filter((item) => typeof item === 'string' && item.trim());
+    await writeFile(join(missionDir, 'pyproject.toml'), [
+      '[project]',
+      `name = "${slug}"`,
+      'version = "0.1.0"',
+      'requires-python = ">=3.10"',
+      'dependencies = [',
+      ...dependencyList.map((item) => `  "${item}",`),
+      ']',
+      '',
+    ].join('\n'), 'utf8');
+    await writeFile(join(missionDir, 'README.md'), `# ${slug}\n\n${title ?? ''}\n\n${summary ?? ''}\n`, 'utf8');
+    // Git records the executable bit; committing it here removes a whole class of "permission denied" failures.
+    await chmod(join(missionDir, 'run.sh'), 0o755).catch(() => undefined);
     await git(worktree, ['add', '-A']);
-    await git(worktree, ['-c', 'user.name=AlephResearch', '-c', 'user.email=aleph@localhost', 'commit', '-m', `mission scaffold ${slug}`]);
-    return { projectId, branch, worktree, missionId: slug, missionDir };
+    await git(worktree, ['-c', 'user.name=AlephResearch', '-c', 'user.email=aleph@localhost', 'commit', '-m', `mission ${slug}: metadata, entrypoint and project`]);
+    await this.rememberOrchestrator(projectId, agent);
+    return { projectId, branch, worktree, missionId: slug, missionDir, entrypoint, kind, title: title ?? slug, dependencies: dependencyList };
   }
 
-  async mutateProject(projectId, updater) {
-    return this.mutate(projectId, updater);
+  async startMission({ projectId, name = 'mission' }) {
+    return this.createMission({ projectId, name });
   }
 
-  /**
-   * Copy a finished mission's code and results into a research worktree so its
-   * submission can be adopted without hand-copying files out of git.
-   */
+  /** Copy a finished mission's code and results into a research worktree. */
   async adoptMission({ projectId, missionId, agent, dir = null }) {
     const project = this.get(projectId);
     if (!project) throw new Error(`project not found: ${projectId}`);
@@ -514,7 +545,6 @@ class ProjectService {
     await mkdir(target, { recursive: true });
     const paths = [`missions/${missionDir}`];
     if (mission.manifestId) paths.push(`results/${mission.manifestId}`);
-    // git archive keeps the checkout untouched and copies exactly what the branch holds.
     const archive = await new Promise((resolve, reject) => {
       const child = execFile('git', ['-C', project.missionRoot, 'archive', '--format=tar', mission.branch, ...paths], { encoding: 'buffer', maxBuffer: 512 * 1024 * 1024 }, (error, stdout) => {
         if (error) reject(error); else resolve(stdout);
@@ -540,23 +570,6 @@ class ProjectService {
     };
   }
 
-  async listMissions({ projectId }) {
-    const project = this.get(projectId);
-    if (!project) throw new Error(`project not found: ${projectId}`);
-    return project.missions.map((mission) => ({
-      id: mission.id,
-      status: mission.status,
-      kind: mission.kind ?? null,
-      title: mission.title ?? mission.manifestId ?? null,
-      summary: mission.summary ?? null,
-      branch: mission.branch,
-      ownerSession: mission.ownerSession,
-      resultCommit: mission.resultCommit,
-      resultPath: mission.manifestId ? `results/${mission.manifestId}/` : null,
-      error: mission.error,
-    }));
-  }
-
   async propose({ projectId, branch, agent }) {
     const project = this.get(projectId);
     if (!project) throw new Error(`project not found: ${projectId}`);
@@ -564,16 +577,35 @@ class ProjectService {
     if (!branchExists) throw new Error(`mission branch not found: ${branch}`);
     const ancestor = await git(project.missionRoot, ['merge-base', '--is-ancestor', project.templateBranch, branch]).then(() => true).catch(() => false);
     if (!ancestor) throw new Error(`mission branch ${branch} is not derived from ${project.templateBranch}`);
+    // Collect every problem at once: a researcher should not rediscover them one call at a time.
+    const problems = [];
+    const files = (await git(project.missionRoot, ['ls-tree', '-r', '--name-only', branch])).stdout.split(/\r?\n/).filter(Boolean);
+    const manifestPath = files.find((path) => /^missions\/[^/]+\/mission\.json$/.test(path));
     let manifest = null;
-    try {
-      const files = (await git(project.missionRoot, ['ls-tree', '-r', '--name-only', branch])).stdout.split(/\r?\n/);
-      const manifestPath = files.find((path) => /^missions\/[^/]+\/mission\.json$/.test(path));
-      if (!manifestPath) throw new Error('no missions/<id>/mission.json');
-      const raw = await git(project.missionRoot, ['show', `${branch}:${manifestPath}`]);
-      manifest = JSON.parse(raw.stdout);
-      manifest.__manifestPath = manifestPath;
-    } catch (error) {
-      throw new Error(`mission branch ${branch} has no valid missions/<id>/mission.json: ${error instanceof Error ? error.message : error}`);
+    if (!manifestPath) {
+      problems.push('no missions/<id>/mission.json on the branch');
+    } else {
+      try {
+        manifest = JSON.parse((await git(project.missionRoot, ['show', `${branch}:${manifestPath}`])).stdout);
+        manifest.__manifestPath = manifestPath;
+      } catch (error) {
+        problems.push(`mission.json is not valid JSON: ${error instanceof Error ? error.message.split('\n')[0] : error}`);
+      }
+    }
+    if (manifest) {
+      for (const key of ['id', 'entrypoint', 'kind', 'title', 'summary']) {
+        const value = manifest[key];
+        if (typeof value !== 'string' || value.trim() === '') problems.push(`mission.json is missing "${key}"`);
+      }
+      if (typeof manifest.entrypoint === 'string' && manifest.entrypoint.trim()) {
+        const entryPath = `${manifest.__manifestPath.split('/').slice(0, 2).join('/')}/${manifest.entrypoint}`;
+        const entryRow = (await git(project.missionRoot, ['ls-tree', branch, entryPath])).stdout.trim();
+        // The runner invokes the entrypoint through bash, so the executable bit is not required.
+        if (!entryRow) problems.push(`entrypoint ${entryPath} does not exist on the branch`);
+      }
+    }
+    if (problems.length > 0) {
+      throw new Error(`mission branch ${branch} is not proposable:\n- ${problems.join('\n- ')}\nCall aleph_create_mission for a valid scaffold, or fix these and propose again.`);
     }
     const existingMission = (project.missions ?? []).find((mission) => mission.branch === branch);
     if (existingMission) return { projectId, missions: project.missions };
@@ -2102,6 +2134,27 @@ export async function apply(ctx) {
       'Create a mission branch from the template and return its worktree for the researcher to fill.',
       { ...projectIdParam, name: { type: 'string', description: 'Short mission name' } },
       async (args) => service.startMission({ projectId: args.project_id, name: args.name ?? 'mission' }),
+    ), { when: ({ agent }) => isAleph(agent) }),
+    ctx.tools.register(tool(
+      'aleph_create_mission',
+      'Create a ready-to-run mission in one call: branch, worktree, mission.json with kind/title/summary, executable run.sh, main.py stub and pyproject. Fill main.py, commit, then propose it.',
+      {
+        ...projectIdParam,
+        name: { type: 'string', required: true, description: 'Short mission name, used for the directory and slug' },
+        kind: { type: 'string', description: 'analysis, training or other' },
+        title: { type: 'string', description: 'One-line title shown in aleph_list_missions' },
+        summary: { type: 'string', description: 'One-line summary of the question the mission answers' },
+        dependencies: { type: 'array', items: { type: 'string' }, description: 'Python distributions for the mission pyproject' },
+      },
+      async (args, exec) => service.createMission({
+        projectId: args.project_id,
+        name: args.name,
+        kind: args.kind ?? 'analysis',
+        title: args.title ?? null,
+        summary: args.summary ?? null,
+        dependencies: args.dependencies ?? [],
+        agent: exec.agent,
+      }),
     ), { when: ({ agent }) => isAleph(agent) }),
     ctx.tools.register(tool(
       'aleph_propose_mission',
