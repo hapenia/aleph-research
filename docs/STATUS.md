@@ -147,3 +147,22 @@ new orchestration without any manual batch step.
 Evaluation attribution held on the same run: the report commit's parent is the
 scored commit, each evaluation kept its own `refs/aleph/evaluations` entry, and a
 later weaker score (68.94) did not displace the best result (69.85).
+
+## Iteration five
+
+Conventions and mission adoption produced the first real score jump.
+
+- The project conventions reached the research scaffold and the researcher
+  prompt, and stayed off the mission template, because a mission is only a unit
+  of approved compute.
+- A researcher built a mission (`gbm-logs-baseline`), it ran a four-fold CV
+  (OOF 76.49) and its model bundle and metrics were committed to the mission
+  branch.
+- Another researcher adopted that mission with `aleph_adopt_mission`, wired a
+  submission from the copied code and bundle, and evaluated it.
+
+Hidden-test score for the adopted submission: **75.63**, versus **69.85** for the
+previous iteration's hand-written fallback.
+
+Batch progress is now published by the runner, so the console shows which
+mission is executing instead of showing every queued mission as active.
