@@ -205,3 +205,33 @@ Every preset mounts `skill-filesystem` and `tool-skill`, both lab scripts instal
 skills into the isolated DSH home, and each persona tells the agent to load its skill
 first. In the fifth run all four researchers and the Composer loaded their skill
 before doing anything else.
+
+## Failure audit
+
+Every mission failure in the fifth run was the same class:
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `ModuleNotFoundError: lightgbm` / `sklearn` | the batch ran with the system `python3` because only `submissionPython` was set while `pythonPath` stayed empty, and a partial `uv sync` venv shadowed the runtime | the submission interpreter now doubles as the runtime, and dependencies are probed against it before any sync |
+
+Reading the researcher sessions, rather than their tool history, showed three
+reasoning traps behind the rest:
+
+- Three of four researchers burned steps guessing how mission code reaches the
+  data (`ALEPH_DATA_DIR`? copy it in? absolute path?), and one concluded the
+  runtime had no ML stack. Both facts were undocumented.
+- Checkpoint messages ordered them to "stop expanding the analysis", which read
+  as pressure to ship whatever existed; they now ask for a mission with the
+  current implementation.
+- One researcher could not tell whether the submission interpreter shares the
+  runtime, and hedged by avoiding LightGBM serialisation.
+
+The environment contract is now written down where each role reads it: the
+mission template lists `ALEPH_PYTHON`, `ALEPH_OUTPUT_DIR`, `ALEPH_VISIBLE_DATA`
+and `ALEPH_MISSION_ID`, the runner also links `ALEPH_VISIBLE_DATA` as `./data` in
+the mission directory, and the researcher skill states that a submission runs on
+the same interpreter and data.
+
+With those fixed, the first analysis mission of the next run finished: an
+`analysis` mission profiled labels across 72 wells, wrote `REPORT.md` and
+`metrics.json`, and committed them to its branch.
