@@ -173,7 +173,7 @@ function tool(name, description, parameters, execute) {
 }
 
 const TEMPLATE_BATCH_RUNNER = `#!/usr/bin/env python3
-import json, os, pathlib, subprocess, sys
+import json, os, pathlib, subprocess, sys, time
 root = pathlib.Path(__file__).resolve().parent
 missions = root / "missions"
 results = root / "results"
@@ -188,6 +188,9 @@ for mission_dir in sorted(missions.glob("*/")):
     entrypoint = manifest.get("entrypoint") or "run.sh"
     output_dir = results / mission_id
     output_dir.mkdir(parents=True, exist_ok=True)
+    (results / "progress.json").write_text(json.dumps({
+        "mission_id": mission_id, "phase": "running", "started_at": time.time(),
+    }, ensure_ascii=False))
     env = dict(os.environ)
     env["ALEPH_MISSION_ID"] = mission_id
     env["ALEPH_OUTPUT_DIR"] = str(output_dir)
@@ -224,6 +227,9 @@ for mission_dir in sorted(missions.glob("*/")):
         else:
             record[key] = parsed
     (output_dir / "result.json").write_text(json.dumps(record, ensure_ascii=False, indent=2))
+    (results / "progress.json").write_text(json.dumps({
+        "mission_id": mission_id, "phase": "finished", "status": record["status"], "exit_code": proc.returncode,
+    }, ensure_ascii=False))
     reports.append({"mission_id": mission_id, "exit_code": proc.returncode, "status": record["status"]})
 (results / "batch.json").write_text(json.dumps({"missions": reports}, ensure_ascii=False))
 print(json.dumps({"missions": reports}))
@@ -557,6 +563,19 @@ class ProjectService {
     }));
     await this.removeMissionWorktree(project, branch);
     return registered;
+  }
+
+  /** Progress the batch runner publishes while it works, so the console is not blind mid-run. */
+  liveProgress(project) {
+    const out = {};
+    for (const batch of project.batches ?? []) {
+      if (batch.status !== 'running') continue;
+      const file = join(project.workspace, '.aleph', 'batches', batch.id, 'results', 'progress.json');
+      try {
+        out[batch.id] = JSON.parse(readFileSync(file, 'utf8'));
+      } catch { /* the runner has not published yet */ }
+    }
+    return Object.keys(out).length > 0 ? out : null;
   }
 
   /** Observed machine capacity and current pressure. Cheap enough to sample on demand. */
@@ -1671,6 +1690,7 @@ function snapshot(project, options = {}) {
       finished_at: batch.finishedAt ?? null,
       summary: batch.summary ?? null,
     })),
+    progress: options.liveProgress ? options.liveProgress(project) : null,
     machines: project.machines.map((machine) => ({
       ...machine,
       loads: machine.loads ?? [],
@@ -1776,7 +1796,7 @@ export async function apply(ctx) {
       'Return projects, missions, batches and machines.',
       { project_id: { type: 'string', description: 'Optional project id' } },
       async (args) => (args.project_id ? [service.get(args.project_id)].filter(Boolean) : service.list())
-        .map((project) => snapshot(project, { telemetry: () => service.sampleTelemetry() })),
+        .map((project) => snapshot(project, { telemetry: () => service.sampleTelemetry(), liveProgress: (item) => service.liveProgress(item) })),
     ), { when: ({ agent }) => isAleph(agent) }),
     ctx.tools.register(tool(
       'aleph_set_python',
@@ -1873,7 +1893,10 @@ export async function apply(ctx) {
     async handler(req, res) {
       const project = service.list().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
       if (!project) return sendJson(res, 404, { ok: false, error: { code: 'aleph/no-project' } });
-      const body = snapshot(project, { telemetry: () => service.sampleTelemetry() });
+      const body = snapshot(project, {
+        telemetry: () => service.sampleTelemetry(),
+        liveProgress: (item) => service.liveProgress(item),
+      });
       body.git = await gitSnapshot(project);
       return sendJson(res, 200, body);
     },
@@ -1882,7 +1905,7 @@ export async function apply(ctx) {
     kind: 'exact',
     path: '/api/aleph/projects',
     handler(req, res) {
-      return sendJson(res, 200, { projects: service.list().map((project) => snapshot(project, { telemetry: () => service.sampleTelemetry() })) });
+      return sendJson(res, 200, { projects: service.list().map((project) => snapshot(project, { telemetry: () => service.sampleTelemetry(), liveProgress: (item) => service.liveProgress(item) })) });
     },
   });
   ctx.webServer.register({

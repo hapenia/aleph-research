@@ -62,6 +62,7 @@ window.__ModuleLoader__.load({
         'field.error': 'Error',
         'field.machine': 'Machine',
         'field.load': 'Load',
+        'field.runningMission': 'Executing',
         'field.telemetry': 'Telemetry',
         'machine.idle': 'Idle',
         'machine.busy': 'Busy',
@@ -184,6 +185,7 @@ window.__ModuleLoader__.load({
         'field.error': '错误',
         'field.machine': '机器',
         'field.load': '负载',
+        'field.runningMission': '正在执行',
         'field.telemetry': '实测负载',
         'machine.idle': '空闲',
         'machine.busy': '忙碌',
@@ -878,12 +880,18 @@ window.__ModuleLoader__.load({
         ),
       );
 
+      const progress = snapshot && typeof snapshot.progress === 'object' && snapshot.progress !== null ? snapshot.progress : {};
       const batchColumns = [
         { label: t('table.batch'), width: 'minmax(100px, 1fr)', mono: true, primary: true, render: (batch) => batch.id ?? '—' },
         { label: t('field.status'), width: '96px', render: (batch) => statusPill(t, batchDisplayStatus(batch.status)) },
         { label: t('field.machine'), width: 'minmax(80px, 0.8fr)', mono: true, render: (batch) => batch.machine_id ?? '—' },
         { label: t('field.count'), width: '72px', render: (batch) => String(Array.isArray(batch.mission_ids) ? batch.mission_ids.length : 0) },
         { label: t('table.branch'), width: 'minmax(140px, 1.4fr)', mono: true, render: (batch) => batch.branch ?? '—' },
+        { label: t('field.runningMission'), width: 'minmax(160px, 1.6fr)', mono: true, render: (batch) => {
+          const entry = progress[batch.id];
+          if (!entry) return '—';
+          return entry.mission_id ? `${entry.mission_id} (${entry.phase})` : '—';
+        } },
         { label: t('field.created'), width: 'minmax(140px, 1fr)', render: (batch) => formatDate(batch.created_at) ?? '—' },
       ];
       const batchCard = h(
