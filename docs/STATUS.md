@@ -166,3 +166,15 @@ previous iteration's hand-written fallback.
 
 Batch progress is now published by the runner, so the console shows which
 mission is executing instead of showing every queued mission as active.
+
+## Iteration traces
+
+Tracing a researcher lifecycle surfaced eleven defects, all addressed in the same
+round: an inert batch queue, a Composer that debugged mission code, silent mission
+failures, no exploration control, a polling Leader, a console ref bug, the removed
+approval gate taking the Composer's wake-up with it, restarts that replaced instead
+of resumed, an unrecorded orchestrator session, and a project start that depended
+on the model remembering two tool calls.
+
+`aleph_start_project` now prepares the scaffold from the offered data and
+dispatches the cohort in one step, which is what a single kickoff needs.
