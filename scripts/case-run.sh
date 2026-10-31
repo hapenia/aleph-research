@@ -153,6 +153,10 @@ PY
 # Open the panel so the run can be watched while it proceeds.
 if [ "${ALEPH_NO_OPEN:-0}" != "1" ] && command -v google-chrome-stable >/dev/null 2>&1; then
   nohup google-chrome-stable --new-tab "$url" >/dev/null 2>&1 &
+  # A session's preset is locked once it starts, so select Aleph before the first message.
+  if ! node "$repo/scripts/case-ui.mjs" "$run_root" ${ALEPH_KICKOFF:+--kickoff "$ALEPH_KICKOFF"}; then
+    echo "warning: could not put the panel into the Aleph preset" >&2
+  fi
 fi
 
 # Keep only the newest run alive; older runs are stopped and removed.

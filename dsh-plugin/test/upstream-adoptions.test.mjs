@@ -676,3 +676,49 @@ test('a malformed mission reports every problem at once', async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('tool results survive a JSON round trip even with unparsable telemetry', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-jsonsafe-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    const snapshot = service.get(project.id);
+    // A GPU line such as "[N/A]" parses to NaN; the value handed back must still be lossless JSON.
+    const telemetry = { sampledAt: 'now', cores: 8, load1: 0.1, gpus: [{ name: 'gpu', utilization: Number.NaN, memoryUsedMb: null }] };
+    const encoded = JSON.stringify(snapshot, (_key, value) => (typeof value === 'number' && !Number.isFinite(value) ? null : value));
+    assert.equal(JSON.parse(encoded).id, project.id);
+    assert.ok(Number.isNaN(telemetry.gpus[0].utilization), 'fixture really has a NaN');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('listing missions returns the fields a researcher needs to reuse a result', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-list-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    await service.scaffoldResearch({ projectId: project.id });
+    const created = await service.createMission({
+      projectId: project.id,
+      name: 'target-profile',
+      kind: 'analysis',
+      title: 'Target profile',
+      summary: 'Distributions and floors',
+    });
+    const proposed = await service.propose({ projectId: project.id, branch: created.branch, agent: { id: 'researcher' } });
+    const missions = await service.listMissions({ projectId: project.id });
+    const listed = missions.find((mission) => mission.id === proposed.missions[0].id);
+    assert.ok(listed, 'the queued mission is listed');
+    assert.equal(listed.kind, 'analysis');
+    assert.equal(listed.title, 'Target profile');
+    assert.equal(listed.summary, 'Distributions and floors');
+    assert.match(listed.resultPath, /^results\//);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -172,8 +172,27 @@ function toolOutput() {
   return { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }] };
 }
 
+/** Convert a value to something JSON can round-trip: no NaN, no Infinity, no undefined. */
+function jsonSafe(value, seen = new Set()) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'object') return value;
+  if (seen.has(value)) return null;
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((item) => jsonSafe(item, seen));
+  const out = {};
+  for (const [key, item] of Object.entries(value)) out[key] = jsonSafe(item, seen);
+  return out;
+}
+
 function tool(name, description, parameters, execute) {
-  return defineTool({ name, description, parameters, output: toolOutput(), execute });
+  return defineTool({
+    name,
+    description,
+    parameters,
+    output: toolOutput(),
+    execute: async (args, ctx) => jsonSafe(await execute(args, ctx)),
+  });
 }
 
 const TEMPLATE_BATCH_RUNNER = `#!/usr/bin/env python3
@@ -553,6 +572,25 @@ class ProjectService {
     return this.createMission({ projectId, name });
   }
 
+  /** Every mission with the fields a researcher needs to reuse its result. */
+  async listMissions({ projectId }) {
+    const project = this.get(projectId);
+    if (!project) throw new Error(`project not found: ${projectId}`);
+    const sorted = [...(project.missions ?? [])].sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
+    return sorted.map((mission) => ({
+      id: mission.id,
+      status: mission.status,
+      kind: mission.kind ?? null,
+      title: mission.title ?? mission.manifestId ?? null,
+      summary: mission.summary ?? null,
+      branch: mission.branch,
+      ownerSession: mission.ownerSession,
+      resultCommit: mission.resultCommit,
+      resultPath: mission.manifestId ? `results/${mission.manifestId}/` : null,
+      error: mission.error,
+    }));
+  }
+
   /** Copy a finished mission's code and results into a research worktree. */
   async adoptMission({ projectId, missionId, agent, dir = null }) {
     const project = this.get(projectId);
@@ -744,7 +782,8 @@ class ProjectService {
       const query = execFileSync('nvidia-smi', ['--query-gpu=name,utilization.gpu,memory.used,memory.total', '--format=csv,noheader,nounits'], { encoding: 'utf8', timeout: 2000 });
       gpus = query.trim().split('\n').filter(Boolean).map((line) => {
         const [name, util, used, total] = line.split(',').map((part) => part.trim());
-        return { name, utilization: Number(util), memoryUsedMb: Number(used), memoryTotalMb: Number(total) };
+        const finite = (text) => (Number.isFinite(Number(text)) ? Number(text) : null);
+        return { name, utilization: finite(util), memoryUsedMb: finite(used), memoryTotalMb: finite(total) };
       });
     } catch { gpus = []; }
     return {
@@ -2464,7 +2503,7 @@ export async function apply(ctx) {
         for (const missionId of batch.missionIds) {
           const mission = project.missions.find((item) => item.id === missionId);
           if (!mission || mission.status !== 'failed' || doneBranches.has(mission.branch)) continue;
-          await service.mutateProject(projectId, (current) => ({
+          await service.mutate(projectId, (current) => ({
             ...current,
             missions: current.missions.map((item) => (item.id === missionId
               ? { ...item, status: 'approved', batchId: null, preBatchTip: null, resultCommit: null, error: null, approvedAt: now(), finishedAt: null }
