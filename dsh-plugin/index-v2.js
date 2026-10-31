@@ -1253,6 +1253,22 @@ class ProjectService {
       })).catch(() => undefined);
       summary.push({ project: project.id, interrupted: [...interrupted] });
     }
+    // After reconciliation, restart the two things a restart stops: dispatch and the cohort.
+    for (const project of this.list()) {
+      const queued = (project.missions ?? []).filter((mission) => mission.status === 'approved').length;
+      if (queued > 0) {
+        await this.notifyComposer({
+          projectId: project.id,
+          agent: null,
+          event: 'host restarted',
+          detail: `${queued} mission(s) are queued and nothing is running`,
+        }).catch(() => undefined);
+      }
+      const running = (project.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'running').length;
+      if (this.explorationTarget(project) > running) {
+        await this.maybeDispatchReplacement({ projectId: project.id }).catch(() => undefined);
+      }
+    }
     return summary;
   }
 
