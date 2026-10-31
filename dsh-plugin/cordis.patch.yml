@@ -119,6 +119,8 @@
               allowParallelInProgress: false
           - id: tool-subagent
             name: '@deepseek-ai/dsh-tool-subagent'
+            config:
+              provider: spawn
     - id: preset-aleph-infra
       name: '@deepseek-ai/dsh-agent-preset'
       config:

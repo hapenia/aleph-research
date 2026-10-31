@@ -43,6 +43,11 @@ if [ -f "$patch" ] && ! grep -q 'opencode-go' "$patch"; then
     providers:
       opencode-go:
         apiKeyEnv: OPENCODE_GO_API_KEY
+- id: subagent
+  name: "@deepseek-ai/dsh-subagent"
+  config:
+    maxActiveSubagents: 16
+    maxDepth: 3
 YAML
   echo "patched profile:   opencode-go provider, full access"
 fi

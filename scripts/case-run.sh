@@ -70,6 +70,11 @@ cat >> "$patch" <<'YAML'
     providers:
       opencode-go:
         apiKeyEnv: OPENCODE_GO_API_KEY
+- id: subagent
+  name: "@deepseek-ai/dsh-subagent"
+  config:
+    maxActiveSubagents: 16
+    maxDepth: 3
 YAML
 
 # Leader and researcher turns authenticate with the desktop credential store.
