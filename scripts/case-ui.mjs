@@ -57,55 +57,53 @@ const preset = await evaluate(`(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const click = (el) => el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window, button: 0 }));
   const text = (el) => (el.textContent || '').trim();
-  // The preset chip is a button labelled with the current preset name.
-  const current = () => [...document.querySelectorAll('button')].map(text).find((label) => /Aleph Research|标准模式|Standard|极简模式|创造模式/.test(label)) ?? '';
+  // The preset chip shows the current preset name; its label may be truncated in the button.
+  const current = () => [...document.querySelectorAll('button')].map(text)
+    .find((label) => /Aleph Re|Aleph Research|标准模式|Standard|极简模式|创造模式/.test(label)) ?? '';
 
-  if (/Aleph Research/.test(current())) return 'already-aleph';
+  if (/Aleph Re/.test(current())) return 'already-aleph';
 
-  // The preset seat is a header button showing the current preset name.
-  const seat = [...document.querySelectorAll('button')].find((button) => /标准模式|Standard|极简模式|创造模式/.test(text(button)));
-  if (!seat) {
-    // A restored session that already started cannot switch, so open a new one.
-    const fresh = [...document.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === '新建会话');
-    if (!fresh) return 'no-seat-and-no-new-session';
+  // The profile defaults new sessions to Aleph, so a fresh session is enough.
+  const fresh = [...document.querySelectorAll('button')].find((button) => button.getAttribute('aria-label') === '新建会话');
+  if (fresh) {
     click(fresh);
-    await sleep(1200);
+    await sleep(1500);
+    if (/Aleph Re/.test(current())) return 'new-session-aleph';
   }
-  const pick = [...document.querySelectorAll('button')].find((button) => /标准模式|Standard|极简模式|创造模式/.test(text(button)));
-  if (!pick) return 'no-preset-picker';
-  click(pick);
+
+  // Fall back to choosing the preset from the seat menu.
+  const seat = [...document.querySelectorAll('button')].find((button) => /标准模式|Standard|极简模式|创造模式/.test(text(button)));
+  if (!seat) return 'no-preset-picker:' + current();
+  click(seat);
   await sleep(700);
   const items = [...document.querySelectorAll('[role="menu"] *')].filter((el) => text(el).startsWith('Aleph'));
   const item = items.find((el) => el.children.length === 0) ?? items[0];
   if (!item) return 'aleph-item-missing';
   click(item);
   await sleep(900);
-  await sleep(600);
-  return /Aleph Research/.test(current()) ? 'switched' : 'switch-failed:' + current();
+  return /Aleph Re/.test(current()) ? 'switched' : 'switch-failed:' + current();
 })()`);
 
 let delivered = null;
 if (kickoff) {
-  delivered = await evaluate(`(async () => {
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    const box = document.querySelector('textarea,[contenteditable="true"]');
-    if (!box) return 'no-input';
-    box.focus();
-    if (box.tagName === 'TEXTAREA') {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-      setter.call(box, ${JSON.stringify(kickoff)});
-      box.dispatchEvent(new Event('input', { bubbles: true }));
+  // Real input events: a synthetic value assignment does not reach the editor.
+  const focused = await evaluate(`(() => { const box = document.querySelector('textarea,[contenteditable="true"]'); if (!box) return false; box.focus(); return true; })()`);
+  if (!focused) {
+    delivered = 'no-composer';
+  } else {
+    await send('Input.insertText', { text: kickoff });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    const typed = await evaluate(`(() => { const box = document.querySelector('textarea,[contenteditable="true"]'); return (box?.value ?? box?.textContent ?? '').trim().length; })()`);
+    if (typed > 0) {
+      for (const type of ['keyDown', 'keyUp']) {
+        await send('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      delivered = 'sent';
     } else {
-      box.textContent = ${JSON.stringify(kickoff)};
-      box.dispatchEvent(new InputEvent('input', { bubbles: true }));
+      delivered = 'insert-failed';
     }
-    await sleep(300);
-    const send = [...document.querySelectorAll('button')].find((b) => /发送|Send/.test(b.textContent || '') || b.getAttribute('aria-label') === 'Send');
-    if (!send) return 'no-send-button';
-    send.click();
-    await sleep(500);
-    return 'sent';
-  })()`);
+  }
 }
 
 console.log(`preset: ${preset}${delivered ? `, kickoff: ${delivered}` : ''}`);
