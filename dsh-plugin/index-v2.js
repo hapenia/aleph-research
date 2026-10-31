@@ -1555,7 +1555,7 @@ async function gitSnapshot(project) {
   return { research: await repo(project.researchRoot), missions: await repo(project.missionRoot) };
 }
 
-function snapshot(project) {
+function snapshot(project, options = {}) {
   return {
     schema: 2,
     generated_at: now(),
@@ -1610,7 +1610,11 @@ function snapshot(project) {
       finished_at: batch.finishedAt ?? null,
       summary: batch.summary ?? null,
     })),
-    machines: project.machines,
+    machines: project.machines.map((machine) => ({
+      ...machine,
+      loads: machine.loads ?? [],
+      telemetry: options.telemetry ? options.telemetry(project, machine) : (machine.telemetry ?? null),
+    })),
     agents: project.agents ?? [],
     counts: {
       // Batched missions wait inside their batch; one batch entrypoint runs them in order.
@@ -1708,7 +1712,8 @@ export async function apply(ctx) {
       'aleph_status',
       'Return projects, missions, batches and machines.',
       { project_id: { type: 'string', description: 'Optional project id' } },
-      async (args) => (args.project_id ? [service.get(args.project_id)].filter(Boolean) : service.list()).map(snapshot),
+      async (args) => (args.project_id ? [service.get(args.project_id)].filter(Boolean) : service.list())
+        .map((project) => snapshot(project, { telemetry: () => service.sampleTelemetry() })),
     ), { when: ({ agent }) => isAleph(agent) }),
     ctx.tools.register(tool(
       'aleph_set_python',
@@ -1799,7 +1804,7 @@ export async function apply(ctx) {
     async handler(req, res) {
       const project = service.list().sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
       if (!project) return sendJson(res, 404, { ok: false, error: { code: 'aleph/no-project' } });
-      const body = snapshot(project);
+      const body = snapshot(project, { telemetry: () => service.sampleTelemetry() });
       body.git = await gitSnapshot(project);
       return sendJson(res, 200, body);
     },
@@ -1808,7 +1813,7 @@ export async function apply(ctx) {
     kind: 'exact',
     path: '/api/aleph/projects',
     handler(req, res) {
-      return sendJson(res, 200, { projects: service.list().map(snapshot) });
+      return sendJson(res, 200, { projects: service.list().map((project) => snapshot(project, { telemetry: () => service.sampleTelemetry() })) });
     },
   });
   ctx.webServer.register({
