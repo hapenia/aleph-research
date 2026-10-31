@@ -189,3 +189,19 @@ Tracing the fourth batch showed InfraOptimizer's `uv sync` building mission-loca
 runtime, so real runs failed on missing `lightgbm` and `sklearn` even though the
 runtime had them. Dependencies are now checked against the shared interpreter
 first, and a failed sync deletes the half-built environment.
+
+## Operator skills
+
+The three roles repeated the same mistakes across iterations, so the durable rules
+now live in skills that the agents load instead of in a long persona:
+
+| Skill | What it fixes |
+| --- | --- |
+| `aleph-researcher` | re-deriving shared data facts, missing mission metadata, hand-rolled mission branches, retyping inference code, environment probing, long local compute |
+| `aleph-composer` | empty prepared-batch queue, blocking dispatch, stale machine load, debugging mission code |
+| `aleph-leader` | analysing data instead of starting the loop, sleep-polling, treating scored output as approval |
+
+Every preset mounts `skill-filesystem` and `tool-skill`, both lab scripts install the
+skills into the isolated DSH home, and each persona tells the agent to load its skill
+first. In the fifth run all four researchers and the Composer loaded their skill
+before doing anything else.

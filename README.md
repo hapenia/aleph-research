@@ -41,6 +41,8 @@ The template and runtime live under `.case-templates/` and are not committed.
 
 A DSH workspace/project contains:
 
+- `skills/`: operator skills for the Leaders, researchers and the Composer,
+  installed into the lab's DSH home by the run scripts.
 - `research/`: the researcher's own git repo and branches.
 - `missions/`: a separate mission repo initialized from `template`.
 - MissionQueue, BatchQueue, Machine registry, agents and results in the
