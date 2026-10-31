@@ -86,8 +86,12 @@ const preset = await evaluate(`(async () => {
 
 let delivered = null;
 if (kickoff) {
-  // Real input events: a synthetic value assignment does not reach the editor.
-  const focused = await evaluate(`(() => { const box = document.querySelector('textarea,[contenteditable="true"]'); if (!box) return false; box.focus(); return true; })()`);
+  // The editor mounts well after the navigation, so give it time instead of failing fast.
+  let focused = false;
+  for (let attempt = 0; attempt < 40 && !focused; attempt += 1) {
+    focused = await evaluate(`(() => { const box = document.querySelector('textarea,[contenteditable="true"]'); if (!box) return false; box.focus(); return true; })()`);
+    if (!focused) await new Promise((resolve) => setTimeout(resolve, 250));
+  }
   if (!focused) {
     delivered = 'no-composer';
   } else {
