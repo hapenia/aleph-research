@@ -2,7 +2,7 @@
 
 AlephResearch is a DSH-native research project plugin. A researcher works in a
 research repo; hardware-heavy work is packaged as an independent mission repo
-branch, approved by the Leader, composed into a machine-bound batch by
+branch, queued on proposal, composed into a machine-bound batch by
 MissionComposer, optimized and run by InfraOptimizer, and returned to the
 researcher through the pre-batch mission branch.
 
@@ -30,7 +30,6 @@ rest headlessly:
 
 ```bash
 ./scripts/case-drive.sh /tmp/aleph-runs/iter7 scaffold
-./scripts/case-drive.sh /tmp/aleph-runs/iter7 approve
 ./scripts/case-drive.sh /tmp/aleph-runs/iter7 batch
 ./scripts/case-drive.sh /tmp/aleph-runs/iter7 run
 ./scripts/case-drive.sh /tmp/aleph-runs/iter7 evaluate
@@ -50,7 +49,7 @@ A DSH workspace/project contains:
 Aleph itself carries no case-specific rules. Anything a researcher needs to
 know about a project, such as a submission format or a metric, arrives as that
 project's `conventions` and is written into the research scaffold and the
-researcher prompt. A mission is only a unit of approved compute: its contents
+researcher prompt. A mission is only a unit of compute someone asked for: its contents
 are the researcher's business.
 
 There is no campaign layer and no `~/.aleph` directory.
@@ -66,8 +65,8 @@ There is no campaign layer and no `~/.aleph` directory.
 3. For a hardware-heavy task, researcher creates a mission branch from
    `template`, adds `missions/<mission-id>/mission.json`, code, uv project and
    entrypoint, then calls `aleph_propose_mission`.
-4. Leader calls `aleph_approve_mission`; approved missions enter the queue.
-5. MissionComposer (`aleph_run_composer`) merges approved mission branches into
+4. The proposal enters the dispatch queue directly; no approval step exists.
+5. MissionComposer (`aleph_run_composer`) merges queued mission branches into
    a machine-bound batch branch and resolves merge conflicts.
 6. InfraOptimizer (`aleph_run_infra`) optimizes the merged batch code for the
    target machine, commits the optimization and runs the single batch
@@ -86,7 +85,6 @@ research branch and worktree.
 - `aleph_init_project`
 - `aleph_status`
 - `aleph_propose_mission`
-- `aleph_approve_mission`
 - `aleph_run_composer`
 - `aleph_form_batch`
 - `aleph_run_infra`

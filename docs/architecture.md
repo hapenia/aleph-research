@@ -21,16 +21,17 @@ A mission branch is created from `template` by the researcher. It contains:
 - mission code and an uv project.
 - a single batch entrypoint contribution.
 
-`aleph_propose_mission` validates the branch ancestry and manifest and records
-the owner session. `aleph_approve_mission` moves it into the approved queue.
+`aleph_propose_mission` validates the branch ancestry and manifest, records the
+owner session, and puts the mission straight into the dispatch queue. There is no
+approval step.
 
 ## Composer and machines
 
-MissionComposer is an `aleph-composer` DSH subagent. It inspects the approved
+MissionComposer is an `aleph-composer` DSH subagent. It inspects the queued
 queue and calls `aleph_form_batch`.
 
 - One machine runs one batch at a time and the batch owns that machine.
-- The batch branch is created from `template` and merges approved mission
+- The batch branch is created from `template` and merges queued mission
   branches.
 - Composer resolves merge conflicts and records each mission's pre-batch tip.
 - A single merged entrypoint runs the missions and writes per-mission outputs.

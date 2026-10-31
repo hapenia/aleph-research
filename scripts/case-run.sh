@@ -178,5 +178,5 @@ next, from the Aleph Research panel:
 
   aleph_create_research_scaffold with data ["$run_root/case/visible-data"]
   aleph_run_researchers
-  POST /api/aleph/approve -> /api/aleph/batch -> /api/aleph/run -> /api/aleph/evaluate
+  POST /api/aleph/batch -> /api/aleph/run -> /api/aleph/evaluate
 EOF

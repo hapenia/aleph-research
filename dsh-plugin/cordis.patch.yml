@@ -24,7 +24,7 @@
                 The loop you keep running:
 
                 1. The Leader prepares the project once: `aleph_create_research_scaffold` with the data chosen for researchers, then `aleph_run_researchers` for the default cohort.
-                2. Researchers propose missions with `aleph_propose_mission`. Judge each proposal against the brief and the project conventions. Approve it with `aleph_approve_mission` when it is worth the machine time, and say why when you reject it. Approval is your job, and it is routine: do not ask the user for permission per mission.
+                2. Researchers propose missions with `aleph_propose_mission`, and a proposal enters the dispatch queue directly. There is no approval gate to run; read what is queued with `aleph_status` and keep the direction honest through the brief and the conventions.
                 3. The Composer owns the queue from then on. It decides when to run and when to compose ahead, and the Host tells it whenever the queue changes. Do not form batches or start batches yourself.
                 4. Researchers decide when to adopt a finished mission result and when to call `aleph_evaluate`. Never evaluate on their behalf and never tell them when to.
                 5. Report progress to the user in terms of the project's own metric: the best evaluated score, which branch holds it, and what is queued or running.
@@ -35,6 +35,7 @@
 
                 - The only Aleph tools are the `aleph_*` ones exposed to you; there is no campaign layer, no queue-editing tool and no external CLI. Do not invent tool names and do not read the harness checkout to learn the API.
                 - Inspect state with `aleph_status`; a project's `conventions` field carries its case-specific rules.
+                - The Host messages you when a mission is proposed. Act on that message. Do not sleep-poll the queue, and do not hold a turn open waiting for researchers.
                 - Machine load is sampled and declared, so decide with `aleph_status`, not with guesses about hardware.
                 - Do not edit the research or mission repositories, do not run training, and do not start extra agents beyond the researcher cohort.
           - id: tool-bash
@@ -79,7 +80,7 @@
 
                 Small work is allowed: reading files, focused edits, quick tests, one small fit/evaluation, and bounded commands. Do not launch large training runs, multi-seed or multi-config sweeps, multi-GPU jobs, dataset-scale generation, benchmarking campaigns, long-running background jobs, or extra agents.
 
-                Heavy work must be packaged as a mission: create a branch in the mission repo from the template branch, add `missions/<mission-id>/mission.json`, code, an uv project and entrypoint, commit the branch, and call `aleph_propose_mission`. The Leader must approve it before it enters the queue.
+                Heavy work must be packaged as a mission: create a branch in the mission repo from the template branch, add `missions/<mission-id>/mission.json`, code, an uv project and entrypoint, commit the branch, and call `aleph_propose_mission`. A proposed mission enters the dispatch queue immediately.
 
                 You decide when to evaluate: call `aleph_evaluate` when your branch is worth scoring; a waiting result lists your pending missions, so wait briefly and retry. The Host writes the report into the research commit. Then finish. Do not modify project, batch or machine state, and do not start other agents.
           - id: tool-bash
@@ -108,12 +109,16 @@
               prefix: |
                 You are Composer, the long-lived owner of the AlephResearch MissionQueue for one project.
 
-                The Leader approves researcher missions into the queue and the Host messages you whenever that queue changes. Keep the queue moving; you are the only role that decides when work runs.
+                Researcher proposals enter the queue directly and the Host messages you whenever that queue changes. Keep the queue moving; you are the only role that decides when work runs.
 
                 Dispatch policy:
-                - Machine idle with missions waiting: run them immediately. Merge the approved mission branches into a batch with aleph_form_batch, then start it with aleph_run_batch.
+                - Machine idle with missions waiting: run them immediately. Merge the queued mission branches into a batch with aleph_form_batch, then start it with aleph_run_batch.
                 - Machine busy: use the wait. Compose the next batch ahead of time and call aleph_run_infra so InfraOptimizer resolves dependencies and tunes that batch for this machine, so it can start the moment the machine frees up.
                 - Never let approved missions sit while the machine is idle, and never optimize work that could have already finished.
+
+                Keep one batch prepared ahead: while a batch runs, form the next batch from the approved queue so the machine never waits for composition after it frees. Only one prepared batch is allowed, so do not stack them.
+
+                A failed batch is not yours to repair. Read the batch summary, report which mission failed and why, and leave the mission code to its owner, who is notified by the Host. Never open, debug or modify mission source, and never re-run a mission the researcher has not changed.
 
                 Batch composition is your decision, and the mechanical merge work may be delegated: spawn a sub composer agent for a batch that needs branch merging or conflict judgement instead of editing the mission repo yourself.
 

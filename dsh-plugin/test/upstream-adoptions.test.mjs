@@ -152,7 +152,6 @@ test('result delivery refuses to overwrite commits pushed after batching', async
 
     let current = await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
     const missionId = current.missions[0].id;
-    await service.approve({ projectId: project.id, missionId });
     current = await service.formBatch({ projectId: project.id });
     const batchId = current.batches[0].id;
 
@@ -196,7 +195,6 @@ test('a Host restart frees the machine and fails interrupted work', async () => 
 
     let current = await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
     const missionId = current.missions[0].id;
-    await service.approve({ projectId: project.id, missionId });
     current = await service.formBatch({ projectId: project.id });
     const batchId = current.batches[0].id;
 
@@ -281,7 +279,6 @@ test('a prepared batch does not claim the machine until it runs', async () => {
 
     let current = await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
     const missionId = current.missions[0].id;
-    await service.approve({ projectId: project.id, missionId });
     current = await service.formBatch({ projectId: project.id });
     const batchId = current.batches[0].id;
     assert.equal(current.machines[0].status, 'idle', 'a forming batch must not claim the machine');
@@ -352,7 +349,6 @@ test('a researcher can adopt a finished mission code and results', async () => {
 
     let current = await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
     const missionId = current.missions[0].id;
-    await service.approve({ projectId: project.id, missionId });
     current = await service.formBatch({ projectId: project.id });
     await service.runBatch({ projectId: project.id, batchId: current.batches[0].id });
 
@@ -414,6 +410,92 @@ test('a scaffold without explicit data uses the data the project offers', async 
     const scaffolded = await service.scaffoldResearch({ projectId: project.id });
     assert.ok(existsSync(join(project.researchRoot, 'data', 'well_01.txt')), 'offered data is copied into the scaffold');
     assert.equal(scaffolded.visibleData, join(project.researchRoot, 'data'));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a prepared batch may wait behind a running one', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-queue-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    const repo = project.missionRoot;
+
+    const makeApprovedMission = async (name) => {
+      const branch = `missions/${name}`;
+      git(repo, ['switch', '-c', branch, 'template']);
+      await mkdir(join(repo, 'missions', name), { recursive: true });
+      await writeFile(join(repo, 'missions', name, 'mission.json'), JSON.stringify({ id: name, entrypoint: 'run.sh' }));
+      await writeFile(join(repo, 'missions', name, 'run.sh'), '#!/usr/bin/env bash\nset -e\nsleep 1\nprintf \'{}\' > "$ALEPH_OUTPUT_DIR/result.json"\n');
+      git(repo, ['add', '-A']);
+      git(repo, [...identity(repo), 'commit', '-m', `mission ${name}`]);
+      git(repo, ['switch', 'template']);
+      const proposed = await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
+      const created = proposed.missions[proposed.missions.length - 1];
+      return created.id;
+    };
+
+    await makeApprovedMission('first');
+    const runningBatch = (await service.formBatch({ projectId: project.id })).batches[0];
+    assert.equal(service.get(project.id).machines[0].status, 'idle', 'preparation alone does not claim the machine');
+
+    const running = service.runBatch({ projectId: project.id, batchId: runningBatch.id });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+
+    await makeApprovedMission('second');
+    const prepared = (await service.formBatch({ projectId: project.id })).batches[1];
+    assert.equal(prepared.status, 'forming', 'a batch may be prepared while another runs');
+
+    // The queue depth is one: a third prepared batch is refused.
+    await makeApprovedMission('third');
+    await assert.rejects(() => service.formBatch({ projectId: project.id }), /already has forming batch/);
+
+    const done = await running;
+    assert.equal(done.batches.find((b) => b.id === runningBatch.id).status, 'done');
+    assert.equal(done.machines[0].status, 'idle', 'the machine frees when the running batch ends');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a finished mission notifies its owner with the outcome', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-notify-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    const repo = project.missionRoot;
+    const branch = 'missions/reports-back';
+    git(repo, ['switch', '-c', branch, 'template']);
+    await mkdir(join(repo, 'missions', 'reports-back'), { recursive: true });
+    await writeFile(join(repo, 'missions', 'reports-back', 'mission.json'), JSON.stringify({ id: 'reports-back', entrypoint: 'run.sh' }));
+    await writeFile(join(repo, 'missions', 'reports-back', 'run.sh'), '#!/usr/bin/env bash\nset -e\nexit 3\n');
+    git(repo, ['add', '-A']);
+    git(repo, [...identity(repo), 'commit', '-m', 'failing mission']);
+    git(repo, ['switch', 'template']);
+
+    const proposed = await service.propose({ projectId: project.id, branch, agent: { id: 'researcher-owner' } });
+    const mission = proposed.missions[0];
+    const batch = (await service.formBatch({ projectId: project.id })).batches[0];
+
+    const delivered = [];
+    const parent = { id: 'leader' };
+    service.subagents = {
+      async sendMessage(sender, targetId, blocks) { delivered.push({ targetId, text: blocks[0].text }); },
+    };
+    service.parentAgents = new Map([['researcher-owner', parent]]);
+
+    const done = await service.runBatch({ projectId: project.id, batchId: batch.id });
+    assert.equal(done.missions.find((m) => m.id === mission.id).status, 'failed');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const notice = delivered.find((entry) => entry.targetId === 'researcher-owner');
+    assert.ok(notice, 'the owner is told about its failed mission');
+    assert.match(notice.text, /failed/);
+    assert.match(notice.text, /Result commit|No result commit/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

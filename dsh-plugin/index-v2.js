@@ -88,6 +88,7 @@ const projectSchema = z.object({
   conventions: z.string().nullable().optional(),
   brief: z.string().optional(),
   researcherCount: z.number().int().optional(),
+  exploration: z.enum(['low', 'normal', 'high']).optional(),
   prepared: z.boolean().optional(),
   pythonPath: z.string().nullable().optional(),
   visibleData: z.string().nullable().optional(),
@@ -359,6 +360,7 @@ class ProjectService {
       conventions: conventions ?? null,
       brief: brief ?? '',
       researcherCount: Number.isFinite(Number(researchers)) ? Number(researchers) : 4,
+      exploration: 'normal',
       prepared: false,
       visibleData: visibleData ? resolve(visibleData) : null,
       testsetPath: testsetPath ? resolve(testsetPath) : null,
@@ -550,7 +552,7 @@ class ProjectService {
         branch,
         manifestId: manifest.id ?? manifest.__manifestPath.split('/')[1],
         manifestPath: manifest.__manifestPath,
-        status: 'proposed',
+        status: 'approved',
         entrypoint: manifest.entrypoint ?? null,
         outputs: Array.isArray(manifest.outputs) ? manifest.outputs : [],
         resource: manifest.resource ?? null,
@@ -559,11 +561,19 @@ class ProjectService {
         resultCommit: null,
         error: null,
         createdAt: now(),
-        approvedAt: null,
+        approvedAt: now(),
         finishedAt: null,
       }],
     }));
     await this.removeMissionWorktree(project, branch);
+    const created = registered.missions[registered.missions.length - 1];
+    const orchestrator = this.get(projectId)?.orchestratorSessionId ?? null;
+    if (orchestrator && created) {
+      this.notifySession({
+        sessionId: orchestrator,
+        text: `Mission ${created.manifestId ?? created.id} entered the queue from branch ${created.branch}; the Composer dispatches it. Review the research direction only if the brief changed.`,
+      }).catch(() => undefined);
+    }
     return registered;
   }
 
@@ -578,6 +588,45 @@ class ProjectService {
       } catch { /* the runner has not published yet */ }
     }
     return Object.keys(out).length > 0 ? out : null;
+  }
+
+  /** How many researchers an exploration level keeps alive. */
+  explorationTarget(project) {
+    const size = project.researcherCount ?? 4;
+    const level = project.exploration ?? 'normal';
+    if (level === 'high') return size;
+    if (level === 'normal') return Math.max(1, Math.ceil(size / 2));
+    return 0;
+  }
+
+  async setExploration({ projectId, level }) {
+    if (!['low', 'normal', 'high'].includes(level)) throw new Error(`unknown exploration level: ${level}`);
+    await this.mutate(projectId, (current) => ({ ...current, exploration: level }));
+    const dispatched = await this.maybeDispatchReplacement({ projectId }).catch(() => null);
+    const project = this.get(projectId);
+    return {
+      projectId,
+      exploration: level,
+      target: this.explorationTarget(project),
+      running: (project.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'running').length,
+      dispatched,
+    };
+  }
+
+  /**
+   * A researcher finishing is the moment to decide whether exploration continues.
+   * The level, not the caller, decides how many researchers stay alive.
+   */
+  async maybeDispatchReplacement({ projectId }) {
+    const project = this.get(projectId);
+    if (!project) return { dispatched: false, reason: 'no project' };
+    const running = (project.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'running').length;
+    const target = this.explorationTarget(project);
+    if (running >= target) return { dispatched: false, running, target, reason: 'cohort is at its target' };
+    const parent = project.orchestratorSessionId ? this.ctx?.agents?.get?.(project.orchestratorSessionId) : null;
+    if (!parent) return { dispatched: false, running, target, reason: 'no live orchestrator session to dispatch from' };
+    const started = await this.startResearcher({ projectId, agent: parent });
+    return { dispatched: true, running: running + 1, target, childId: started.childId, branch: started.branch };
   }
 
   /** Observed machine capacity and current pressure. Cheap enough to sample on demand. */
@@ -642,20 +691,6 @@ class ProjectService {
     await this.mutate(projectId, (current) => ({ ...current, orchestratorSessionId: agent.id })).catch(() => undefined);
   }
 
-  async approve({ projectId, missionId, agent = null }) {
-    await this.rememberOrchestrator(projectId, agent);
-    const updated = await this.mutate(projectId, (project) => ({
-      ...project,
-      missions: project.missions.map((mission) => (
-        mission.id === missionId && mission.status === 'proposed'
-          ? { ...mission, status: 'approved', approvedAt: now() }
-          : mission
-      )),
-    }));
-    await this.notifyComposer({ projectId, agent, event: 'mission approved', detail: missionId }).catch(() => undefined);
-    return updated;
-  }
-
   killUnder(rootPath) {
     const root = resolve(rootPath);
     let killed = 0;
@@ -679,6 +714,9 @@ class ProjectService {
     // One mission runs at a time, so it may use most of the machine without starving the desktop.
     const threads = Math.max(1, Math.min(cores - 2, 16));
     const uvCache = join(batchWorktree, '.uv-cache');
+    const timeoutMs = Number(process.env.ALEPH_BATCH_TIMEOUT_MS) > 0
+      ? Number(process.env.ALEPH_BATCH_TIMEOUT_MS)
+      : 6 * 60 * 60 * 1000;
     const env = {
       ALEPH_THREADS: String(threads),
       OMP_NUM_THREADS: String(threads),
@@ -702,7 +740,7 @@ class ProjectService {
         prepared.push({ mission: mission.id, status: 'sync-failed', error: String(error?.message ?? error).slice(0, 400) });
       }
     }
-    const infra = { cores, threads, missions: prepared, runner: project.pythonPath ?? 'python3', timeout_ms: Number(process.env.ALEPH_BATCH_TIMEOUT_MS) > 0 ? Number(process.env.ALEPH_BATCH_TIMEOUT_MS) : 6 * 60 * 60 * 1000 };
+    const infra = { cores, threads, missions: prepared, runner: project.pythonPath ?? 'python3', timeout_ms: timeoutMs };
     await writeFile(join(batchWorktree, 'infra.json'), JSON.stringify(infra, null, 2), 'utf8').catch(() => undefined);
     return { ...infra, env };
   }
@@ -858,6 +896,17 @@ class ProjectService {
         await rm(missionWorktree, { recursive: true, force: true }).catch(() => undefined);
       }
       outcomes.push({ missionId: mission.id, manifestId, manifestPath, status: envelope.status, resultCommit, envelope });
+      if (mission.ownerSession) {
+        const lines = [
+          `Your mission ${mission.id} (${manifestId}) finished with status ${envelope.status}.`,
+          resultCommit ? `Result commit: ${resultCommit}` : 'No result commit was delivered.',
+          envelope.error ? `Error: ${String(envelope.error).split('\n').slice(0, 6).join(' ')}` : 'Read results/' + manifestId + ' on the mission branch for metrics and artifacts.',
+          envelope.status === 'done'
+            ? 'Adopt it with aleph_adopt_mission when you want to use it, then commit and evaluate when you decide.'
+            : 'Fix what the log shows in a new mission branch; do not rerun the same failing mission.',
+        ];
+        this.notifySession({ sessionId: mission.ownerSession, text: lines.join('\n') }).catch(() => undefined);
+      }
     }
 
     // A timed-out runner leaves its mission children behind; never leave them consuming the machine.
@@ -898,7 +947,13 @@ class ProjectService {
         summary: { runnerError, missions: outcomes.map(({ envelope, ...rest }) => rest) },
       } : item),
     }));
-    await this.notifyComposer({ projectId, agent: null, event: 'batch finished', detail: batch.id }).catch(() => undefined);
+    const queued = (this.get(projectId)?.batches ?? []).find((item) => item.machineId === batch.machineId && item.status === 'forming');
+    await this.notifyComposer({
+      projectId,
+      agent: null,
+      event: 'batch finished',
+      detail: queued ? `${batch.id} freed the machine and batch ${queued.id} is prepared and waiting` : batch.id,
+    }).catch(() => undefined);
     return settled;
   }
 
@@ -1052,12 +1107,15 @@ class ProjectService {
     this.parentAgents ??= new Map();
     if (agent) this.parentAgents.set(childId, agent);
     // Ownership is exact: only this activation may settle its own record.
-    const settle = (status, summary) => this.mutate(projectId, (current) => ({
-      ...current,
-      agents: (current.agents ?? []).map((item) => (item.role === 'researcher' && item.childId === childId && item.status === 'running'
-        ? { ...item, status, summary, updatedAt: now() }
-        : item)),
-    })).catch(() => undefined);
+    const settle = async (status, summary) => {
+      await this.mutate(projectId, (current) => ({
+        ...current,
+        agents: (current.agents ?? []).map((item) => (item.role === 'researcher' && item.childId === childId && item.status === 'running'
+          ? { ...item, status, summary, updatedAt: now() }
+          : item)),
+      })).catch(() => undefined);
+      await this.maybeDispatchReplacement({ projectId }).catch(() => undefined);
+    };
     activation.result.then(async (result) => {
       const summary = (result?.output ?? []).filter((block) => block?.type === 'text').map((block) => block.text).join('\n').trim().slice(0, 8000) || '(no summary)';
       await settle('done', summary);
@@ -1379,6 +1437,31 @@ class ProjectService {
     return { projectId, childId: started.childId, started: true };
   }
 
+  /** Deliver a Host message to a live session, using the remembered orchestrator as the parent. */
+  async notifySession({ sessionId, text }) {
+    if (!sessionId || !this.subagents) return { delivered: false, reason: 'no session or subagents' };
+    let target = null;
+    for (const [childId, parent] of this.parentAgents ?? []) {
+      if (childId === sessionId) { target = parent; break; }
+    }
+    if (!target) {
+      for (const [, parent] of this.parentAgents ?? []) { target = parent; break; }
+    }
+    if (!target && this.get?.length) {
+      for (const project of this.list()) {
+        const parent = project.orchestratorSessionId ? this.ctx?.agents?.get?.(project.orchestratorSessionId) : null;
+        if (parent) { target = parent; break; }
+      }
+    }
+    if (!target) return { delivered: false, reason: 'no live parent session' };
+    try {
+      await this.subagents.sendMessage(target, sessionId, [{ type: 'text', text }], { signal: new AbortController().signal });
+      return { delivered: true };
+    } catch (error) {
+      return { delivered: false, reason: String(error?.message ?? error) };
+    }
+  }
+
   /** Tell the Composer the MissionQueue changed. */
   async notifyComposer({ projectId, agent, event, detail }) {
     const project = this.get(projectId);
@@ -1544,9 +1627,10 @@ class ProjectService {
     if (!project) throw new Error(`project not found: ${projectId}`);
     const machine = project.machines.find((item) => item.id === machineId);
     if (!machine) throw new Error(`machine not found: ${machineId}`);
-    // A forming batch is prepared work, not running work: the machine stays idle until it starts.
-    const active = (project.batches ?? []).find((batch) => batch.machineId === machineId && ['forming', 'running'].includes(batch.status));
-    if (active) throw new Error(`machine ${machineId} already has ${active.status} batch ${active.id}`);
+    // Prepared work may wait behind the batch that is running: that queue is the point.
+    // Only a second *prepared* batch is refused, because the queue depth is one.
+    const prepared = (project.batches ?? []).find((batch) => batch.machineId === machineId && batch.status === 'forming');
+    if (prepared) throw new Error(`machine ${machineId} already has forming batch ${prepared.id}`);
     const approvedAll = project.missions.filter((mission) => mission.status === 'approved');
     const terminalBranches = new Set(project.missions.filter((mission) => ['done', 'failed', 'batched'].includes(mission.status)).map((mission) => mission.branch));
     const seenBranches = new Set();
@@ -1629,7 +1713,7 @@ async function gitSnapshot(project) {
     const commitText = await safe(root, ['log', '--all', '--date=short', '--format=%h	%d	%s	%ad', '-n', '30']);
     const commits = commitText.split(/\r?\n/).filter(Boolean).map((line) => {
       const [hash, refs, subject, date] = line.split('\t');
-      return { hash, refs: refs.replace(/^\(|\)$/g, ''), subject, date };
+      return { hash, refs: refs.trim().replace(/^\((.*)\)$/, '$1'), subject, date };
     });
     return { root, branches, worktrees, commits };
   };
@@ -1656,6 +1740,7 @@ function snapshot(project, options = {}) {
       evaluations: (project.evaluations ?? []).slice(-20),
       brief: project.brief ?? '',
       researcher_count: project.researcherCount ?? 4,
+      exploration: project.exploration ?? 'normal',
       prepared: project.prepared === true,
       python_path: project.pythonPath ?? null,
       visible_data: project.visibleData ?? null,
@@ -1828,12 +1913,6 @@ export async function apply(ctx) {
       async (args, exec) => service.propose({ projectId: args.project_id, branch: args.branch, agent: exec.agent }),
     ), { when: ({ agent }) => isAleph(agent) }),
     ctx.tools.register(tool(
-      'aleph_approve_mission',
-      'Approve a proposed mission and move it to the approved queue.',
-      { ...projectIdParam, mission_id: { type: 'string', required: true } },
-      async (args, exec) => service.approve({ projectId: args.project_id, missionId: args.mission_id, agent: exec.agent }),
-    ), { when: ({ agent }) => isLeader(agent) }),
-    ctx.tools.register(tool(
       'aleph_form_batch',
       'MissionComposer entry: merge approved missions into a machine-bound batch branch.',
       { ...projectIdParam, machine_id: { type: 'string', description: 'Machine id, default local' } },
@@ -1856,6 +1935,12 @@ export async function apply(ctx) {
       'Start a researcher subagent in the research repo; it proposes missions and waits only for its own missions.',
       { ...projectIdParam },
       async (args, exec) => service.startResearcher({ projectId: args.project_id, agent: exec.agent }),
+    ), { when: ({ agent }) => isLeader(agent) }),
+    ctx.tools.register(tool(
+      'aleph_set_exploration',
+      'Set how many researchers stay alive as they finish: low stops after the current cohort, normal keeps half the cohort, high keeps it full.',
+      { ...projectIdParam, level: { type: 'string', required: true, description: 'low, normal or high' } },
+      async (args) => service.setExploration({ projectId: args.project_id, level: args.level }),
     ), { when: ({ agent }) => isLeader(agent) }),
     ctx.tools.register(tool(
       'aleph_run_researchers',
@@ -2002,35 +2087,6 @@ export async function apply(ctx) {
         return sendJson(res, 200, { ok: true, ...result });
       } catch (error) {
         return sendJson(res, 500, { ok: false, error: { code: 'aleph/scaffold-failed', message: String(error?.message ?? error) } });
-      }
-    },
-  });
-  ctx.webServer.register({
-    kind: 'exact',
-    path: '/api/aleph/approve',
-    async handler(req, res) {
-      if (req.method !== 'POST') return sendJson(res, 405, { ok: false });
-      let body = '';
-      for await (const chunk of req) body += chunk;
-      try {
-        const args = body ? JSON.parse(body) : {};
-        const projectId = args.project_id ?? args.projectId;
-        const project = service.get(projectId);
-        if (!project) return sendJson(res, 404, { ok: false, error: { code: 'aleph/no-project' } });
-        const terminalBranches = new Set(project.missions.filter((mission) => ['done', 'failed', 'batched'].includes(mission.status)).map((mission) => mission.branch));
-        const wanted = args.mission_id ? [args.mission_id] : project.missions.filter((mission) => mission.status === 'proposed').map((mission) => mission.id);
-        const approved = [];
-        const skipped = [];
-        for (const id of wanted) {
-          const mission = project.missions.find((item) => item.id === id);
-          if (!mission || mission.status !== 'proposed') { skipped.push({ id, reason: 'not proposed' }); continue; }
-          if (terminalBranches.has(mission.branch)) { skipped.push({ id, reason: 'branch already has a terminal mission' }); continue; }
-          await service.approve({ projectId, missionId: id });
-          approved.push({ id, branch: mission.branch });
-        }
-        return sendJson(res, 200, { ok: true, approved, skipped });
-      } catch (error) {
-        return sendJson(res, 500, { ok: false, error: { code: 'aleph/approve-failed', message: String(error?.message ?? error) } });
       }
     },
   });

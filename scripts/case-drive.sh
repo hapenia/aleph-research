@@ -4,7 +4,7 @@
 # them needs a live Leader agent.
 #
 # Usage: scripts/case-drive.sh <run-root> [step]
-#   step: scaffold | approve | batch | run | retry | evaluate | all (default all)
+#   step: scaffold | batch | run | retry | evaluate | all (default all)
 set -euo pipefail
 run_root="${1:?usage: case-drive.sh <run-root> [step]}"
 step="${2:-all}"
@@ -31,9 +31,6 @@ case "$step" in
   scaffold)
     post /api/aleph/scaffold "{\"project_id\":\"$project\",\"title\":\"$project\",\"data\":[\"$visible\"],\"python\":\"$runtime_python\"}"
     ;;
-  approve)
-    post /api/aleph/approve "{\"project_id\":\"$project\"}"
-    ;;
   batch)
     post /api/aleph/batch "{\"project_id\":\"$project\"}" | tee "$run_root/batch.json"
     ;;
@@ -56,8 +53,6 @@ case "$step" in
     ;;
   all)
     post /api/aleph/scaffold "{\"project_id\":\"$project\",\"title\":\"$project\",\"data\":[\"$visible\"],\"python\":\"$runtime_python\"}"
-    echo
-    post /api/aleph/approve "{\"project_id\":\"$project\"}"
     echo
     post /api/aleph/batch "{\"project_id\":\"$project\"}" | tee "$run_root/batch.json"
     echo

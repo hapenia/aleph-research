@@ -47,7 +47,7 @@ test('project mission flows through approval, batch, result cherry-pick and eval
     const researcher = { id: 'researcher-test' };
     let current = await service.propose({ projectId: project.id, branch: 'mission/test', agent: researcher });
     const mission = current.missions[0];
-    assert.equal(mission.status, 'proposed');
+    assert.equal(mission.status, 'approved');
 
     const waiting = await service.evaluate({ projectId: project.id, agent: researcher });
     assert.equal(waiting.status, 'waiting');
@@ -56,8 +56,6 @@ test('project mission flows through approval, batch, result cherry-pick and eval
     const otherResearcher = await service.evaluate({ projectId: project.id, agent: { id: 'other' } });
     assert.equal(otherResearcher.status, 'done');
 
-    current = await service.approve({ projectId: project.id, missionId: mission.id });
-    assert.equal(current.missions[0].status, 'approved');
 
     current = await service.formBatch({ projectId: project.id });
     const batch = current.batches[0];
