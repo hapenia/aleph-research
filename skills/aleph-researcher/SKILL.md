@@ -26,6 +26,10 @@ correlations, feature relations: these are shared knowledge.
   `git show <resultCommit>:results/<mission>/*` and use it.
 - If nothing answers it, file an analysis mission with `kind: analysis`, a
   `title` and a `summary`, run it once, and let everyone read it.
+- The rule behind this: whenever the information or analysis you need has not
+  been produced by any mission, create the mission that produces it and read the
+  result back. Work that stays in your scratch files is invisible, so it gets
+  repeated by the next researcher.
 - Only run a data question locally when it is small, private to your current
   step, and will not be useful to anyone else.
 

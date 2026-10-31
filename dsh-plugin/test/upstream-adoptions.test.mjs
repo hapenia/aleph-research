@@ -813,6 +813,28 @@ test('one InfraOptimizer serves every batch of a machine and dispatch does not b
   }
 });
 
+test('the researcher prompt requires a mission for information no mission produced', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-rule-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    await service.scaffoldResearch({ projectId: project.id });
+    const prompts = [];
+    service.subagents = {
+      async startActivation(options) { prompts.push(options.request.prompt?.[0]?.text ?? ''); return { childId: `child-${prompts.length}`, result: new Promise(() => {}) }; },
+      async sendMessage() { return { id: 'm' }; },
+    };
+    await service.startBootstrap({ projectId: project.id, agent: { id: 'leader' } });
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0], /has not been produced by any mission yet, create the mission that produces it/);
+    assert.match(prompts[0], /aleph_list_missions/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('the project opens with one researcher and starts the cohort after its evaluation', async () => {
   const root = await mkdtemp(join(tmpdir(), 'aleph-bootstrap-'));
   try {
