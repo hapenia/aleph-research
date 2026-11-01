@@ -32,15 +32,32 @@ describes v3 and will be rewritten afterwards.
 - **Artifact**: model weights, reports, logs and figures stored by the Host with retention.
 - **Audit entry**: every Host decision with actor, action, subject and facts checked.
 
-## What "mainline" means without merges
+## Base selection: Boltzmann sampling, no mainline, no best
 
-The research repository has one scaffold branch that only contains project plumbing
-(scaffold, data loading, submission skeleton). It is the explore base and never receives
-experiment code. An exploit Experiment branches from the commit of the current best
-result; an explore Experiment branches from the scaffold branch. "Best" is a Host record
-pointing at an Experiment commit and its artifacts, not a branch that receives merges.
+There is no "best" and no fixed exploit/explore quota. The Host chooses the base of a new
+Experiment by sampling from the previous Experiments with a Boltzmann distribution:
 
-This removes the need for merge, cherry-pick or conflict handling entirely.
+- each candidate Experiment gets a weight `exp(utility / temperature)`;
+- the Operator's exploration degree sets the temperature: a low temperature concentrates
+  on high-utility results, a high temperature makes the choice nearly uniform;
+- a separate fresh-start probability chooses "start from zero": branch from the scaffold
+  and attempt a direction not present in the current population (including methods no
+  human has tried in this project);
+- with an empty population, the first Experiment is always a fresh start.
+
+There is no merge target. The research repository keeps one scaffold branch with project
+plumbing; every Experiment branches from either a previous Experiment's commit or the
+scaffold, and never merges. This removes merge, cherry-pick and conflict handling
+entirely. The exploration level is therefore an algorithmic parameter, not a quota.
+
+## Results and metrics, not a single best
+
+Research quality is not one number. Every CI run reports a set of named metrics (the
+Program's evaluation contract lists the required ones; the entry may report more). The
+Host stores every run, and exposes a results table per Program: metric values by
+Experiment, CI run, commit and time, with filtering and sorting. There is no "best"
+record. A Researcher reads the table to decide what to propose next; the Boltzmann
+sampler reads a utility computed from the same table.
 
 ## Lifecycle
 
@@ -67,16 +84,17 @@ Issue opened (Operator or Researcher)
 The Program is not a merge target; closing the last Issue ends it, or the Operator stops
 it when the budget is exhausted.
 
-## Exploration without a merge mainline
+## Boltzmann exploration
 
-- Operator sets `low | normal | high`.
-- Fixed quota: `low` exploits only; `normal` one explore in every three new Experiments;
-  `high` one explore in every two.
-- Below the quota denominator (bootstrap), the first Experiment is forced to explore from
-  the scaffold branch so the Program does not start from an empty best.
-- Exploit requires a best result; if no best exists yet, the Host uses explore.
-- The quota counts Experiment creation, not CI runs: retries and iterations on the same
-  Experiment do not consume the diversity budget.
+- Operator sets the exploration level (`low | normal | high`), which maps to a sampling
+  temperature and a fresh-start probability; the Operator may override the exact numbers.
+- Candidate weights use a utility configured per Program over the reported metrics
+  (weights and directions per metric), normalized across the current population.
+- Fresh start (branch from the scaffold) is always available with a probability that grows
+  with the exploration level; with no history it is the only choice.
+- Iterating on the same Experiment does not sample a new base and does not change the
+  population; only a new Experiment adds a candidate.
+- There is no quota counter.
 
 ## Review and iteration
 
@@ -88,12 +106,13 @@ it when the budget is exhausted.
 - A Researcher may only act on the Issue it is assigned to; other Researchers see the
   Experiment and its audit but cannot modify it.
 
-## Best result
+## Results table
 
-Only the Host writes `best`. It is updated from a `PassedCIRun` when the score is at least
-the current best (or when the first valid score appears). The best record points at the
-Experiment, commit, CI run and its artifacts; later exploit Experiments branch from that
-commit and may consume those artifacts through typed inputs.
+The Host owns a metrics registry: one row per CI run with `metrics`, plus a per-Experiment
+view of the latest run. The panel and the Researcher tools query it (filter by Issue,
+strategy, time; sort by any metric). The sampler computes weights from the utility the
+Operator configures over those metrics. Artifacts stay attached to their CI run and
+Experiment; a later Experiment may consume them through typed inputs.
 
 ## Budget and cancellation
 
@@ -125,17 +144,27 @@ commit and may consume those artifacts through typed inputs.
 - State and audit live in the Host storage domain; the research repository holds code and
   environment declarations only.
 
+## Resolved in this round
+
+- No "best" and no quota: quality is a multi-metric results table; exploration is a
+  Boltzmann-weighted base choice with a fresh-start probability.
+- Experiment record is created when the Researcher proposes it, and the Host assigns the
+  sampled base at that moment.
+- The same Experiment may receive new commits and repeated CI (iteration).
+- CI is requested explicitly by the Researcher.
+- The first Experiment (empty population) is a fresh start from the scaffold.
+
 ## Open questions for this round
 
-1. Mainline: fixed scaffold branch (proposed) versus a branch the Host advances from
-   accepted results (that would reintroduce adoption/merge semantics).
-2. When is the Experiment record created: at Researcher proposal (proposed) or only after
-   the Implementer marks it ready?
-3. Iteration on one Experiment: allow new commits and repeated CI on the same Experiment
-   (proposed) or require a new Experiment for every change?
-4. Best update: automatic when a passed score is at least the best (proposed) or only after
-   Researcher/Operator adoption?
-5. Exploration quota window: the last N Experiment creations counted globally (proposed,
-   N from the level) or a different accounting?
-6. Bootstrap: force the first Experiment to explore from the scaffold (proposed) or let the
-   Operator choose the first strategy?
+1. **Utility over multiple metrics.** How is the Boltzmann weight computed when a CI run
+   reports several metrics? Options: Operator configures weights and a direction per
+   metric and the utility is a normalized weighted sum (proposed); a single Program score
+   field is required and used (contradicts multi-metric); the Researcher supplies a utility
+   per sampling; Pareto rank instead of a scalar.
+2. **Exploration level mapping.** Fixed presets for `low | normal | high` (temperatures and
+   fresh-start probabilities) with an Operator override, or only presets, or fully manual
+   numbers?
+3. **Candidate population.** All Experiments with at least one valid CI run in this
+   Program, or a time window, or per Issue?
+4. **Results table storage.** Store every CI run's metrics plus a latest-per-Experiment
+   view and query it by metric (proposed), or store only aggregated values?
