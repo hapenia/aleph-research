@@ -15,6 +15,7 @@ The rewrite puts the illegal states into the type system before writing behaviou
   ids, timestamps and commands; inside the domain every value already satisfies its
   invariants.
 - **Branded identities.** A `ProgramId` cannot be passed where an `IssueId` is expected.
+  Humans read an Issue's title, not its id; ids stay opaque generated strings.
 - **Discriminated state machines.** An Issue is `open | assigned | in-review | closed`;
   a Pull request is `open | ci-requested | ci-running | ci-passed | ci-failed | merged |
   closed`. Fields that only make sense in one state exist only in that variant, so
@@ -23,7 +24,8 @@ The rewrite puts the illegal states into the type system before writing behaviou
   refusals are values with closed codes mapped to HTTP statuses.
 - **Event sourcing with a pure decider and reducer.** `Decider<C>` and `Reducer` are
   total functions; the Host appends events with an expected version and folds read
-  models from the same stream.
+  models from the same stream. Whether the system keeps the full event history or only
+  a current-state record is a review question (see the end).
 - **Capabilities.** Each Session role has an explicit `Capability[]`; commands are
   authorized against the role and, for Researchers, against the Issue assignee.
 - **Ports for effects.** git, CI execution, environment building, Session wake-up,
@@ -42,6 +44,7 @@ research-core/
     pull-request.ts   Pull request state machine, ReviewComment, merge evidence
     ci.ts             CI run state machine, checks, request
     environment.ts    environment declaration, built environment, snapshot
+    artifacts.ts      stored results: model weights, reports, retention
     roles.ts          SessionRole, Capability, identities
     session.ts        Researcher pool config, wake reasons, assignments
     attention.ts      Attention and its subjects
@@ -64,24 +67,23 @@ interface Program {
   id: ProgramId
   name: string
   goal: string                      // operator-owned
-  contract: EvaluationContract      // CI entry, score field, acceptance rule
+  contract: EvaluationContract      // CI entry and score field
   budget: Budget
   status: 'running' | 'paused' | 'stopped'
   best: BestResult | null
+  autoMerge: AutoMergePolicy        // decided by the Host, never by a model
   createdAt: IsoTimestamp
 }
 ```
 
-Acceptance is a closed union, evaluated by the Host (`MergeGate`), not by a model:
+The review rejected a general acceptance-rule language as meaningless. The blueprint
+replaces it with one explicit `AutoMergePolicy` value on the Program
+(`never | when-ci-passes | when-ci-passes-and-score-not-worse`); the exact value for the
+first Program is a review question. `MergeGate` returns the evidence it checked, so the
+Host decision is auditable without a rule engine.
 
-```ts
-type AcceptanceRule =
-  | { kind: 'ci-passed' }
-  | { kind: 'score-improvement'; minDelta: number }
-  | { kind: 'score-at-least'; minScore: number }
-  | { kind: 'all'; rules: readonly AcceptanceRule[] }
-  | { kind: 'any'; rules: readonly AcceptanceRule[] }
-```
+Results are stored, not discarded: a passed CI run carries `ArtifactRef[]` (model
+weights, reports, figures) and `BestResult` points at the artifacts of the best score.
 
 Pull request merge evidence is part of the state, so the merge state cannot exist
 without the CI run and score it was merged on:
@@ -127,6 +129,10 @@ issues and stops it; Researcher claims, comments, proposes experiments, requests
 reviews, merges by request; Implementer only submits; Watchdog only raises attention;
 Router has no research capabilities.
 
+A Researcher is identified by its Session (review decision): there is no separate
+ResearcherId. A restart creates a new Session and therefore a new Researcher, and the
+Issue assignee is a `SessionId`.
+
 ## From research events to SuperAgent Triggers
 
 The rewrite does not reimplement Eval or execution. `trigger.ts` maps an appended event
@@ -164,6 +170,9 @@ buttons.
 5. **Case migration**: kunlungpt as a Program with Issues and Pull requests; 24-hour run;
    retirement of the superseded soak loop and the old extension.
 
+Artifact persistence (port plus filesystem store) belongs to phase 3; pause/stop
+cancellation belongs to phase 2 with the Session pool and Ticket cancellation.
+
 ## Deliberate non-goals
 
 No missions, machine registry, batch composition or InfraOptimizer; no scheduling of
@@ -172,22 +181,38 @@ in version 1; no second source of truth for research state outside Host storage.
 
 ## Review questions
 
-1. Event sourcing versus a current-state repository: the blueprint chooses events for
-   audit and replay. Is that the intended cost?
-2. The acceptance rule union above: which rule kinds are actually needed for the first
-   Program, and should the merge rule be part of the Program contract (as proposed) or
-   of the Issue?
-3. Issue ids: human-readable (`0001-slug`) versus generated opaque ids. The blueprint
-   currently leaves `IssueId` as a branded string and stores titles separately.
-4. Researcher pool size and how a Researcher is identified across restarts: a stable
-   `ResearcherId` mapped to a Session, or the Session itself?
-5. CI reuse: rerun on every request, or reuse a passed run for the same commit and
-   environment digest?
-6. Should `ExperimentPlan` live on the Issue comment only, or also as a typed record on
-   the Pull request (the blueprint puts the plan in the command and the Issue comment)?
-7. Environment scope: one environment per Pull request, or allow multiple named
-   environments per repository for analysis versus training?
-8. Does the operator need pause/stop in version 1, or is stopping the Program simply a
-   status change with no in-flight cancellation?
-9. The uv runtime and the methodology skill from the gap review: keep as prerequisites
-   for CI and Worker instructions, or move methodology into the Program contract?
+Answered in this revision:
+
+- Issue ids stay opaque; humans read the title.
+- A Researcher is the Session; no separate ResearcherId, and an Issue assignee is a
+  `SessionId`.
+- Experiment plans live in Issue comments.
+- Every Pull request builds its own uv environment; no Program-runtime fallback.
+- Pause and stop cancel in-flight Implementer work.
+- Artifacts (model weights, reports) are stored and referenced from CI runs and the best
+  result.
+
+Still open:
+
+1. **State storage.** The blueprint currently describes both an event log and read
+   models. Should the system permanently keep every change as an event history that can
+   be replayed and audited (more storage and code), or only keep the current state of
+   each record, overwritten in place (simpler, loses history)? Recommended: keep a small
+   event history for Program-level decisions and current-state records for Issues and
+   Pull requests.
+2. **When does the Host auto-merge a passed Pull request?** The previous rule language
+   was rejected. Options: merge as soon as CI passes; merge only when the score is at
+   least the current best (never regress the mainline); never auto-merge (a Researcher
+   must request the merge). Recommended: merge only when CI passes and the score is at
+   least the best.
+3. **Who owns the uv runtime and the methodology instructions?** Two separate things:
+   the case runtime with uv (technical prerequisite for CI) and the research
+   methodology text (how a Worker should work). Options: both fixed in the extension
+   image; both declared per Program and editable; uv fixed but methodology per Program.
+   Recommended: uv fixed, methodology per Program so the operating rules can change
+   without a deploy.
+4. **Artifact location and retention.** Model weights can be large. Options: Host
+   filesystem store with references in Host state (recommended); inside the research
+   repository (git history grows, needs LFS); keep only the best result's artifacts and
+   discard the rest. Recommended: Host store, keep the best result and recent
+   experiments, prune temporary artifacts.

@@ -17,7 +17,6 @@ export type PullRequestId = Brand<string, 'PullRequestId'>
 export type CIRunId = Brand<string, 'CIRunId'>
 export type CommentId = Brand<string, 'CommentId'>
 export type EventId = Brand<string, 'EventId'>
-export type ResearcherId = Brand<string, 'ResearcherId'>
 export type ImplementerId = Brand<string, 'ImplementerId'>
 export type SessionId = Brand<string, 'SessionId'>
 export type TicketId = Brand<string, 'TicketId'>

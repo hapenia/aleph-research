@@ -1,5 +1,6 @@
 /** CI runs: requested by a Researcher, executed by the Host in the PR environment. */
-import type { CIRunId, CommitSha, IsoTimestamp, PullRequestId, ResearcherId, Score } from './ids.js'
+import type { ArtifactRef } from './artifacts.js'
+import type { CIRunId, CommitSha, IsoTimestamp, PullRequestId, SessionId, Score } from './ids.js'
 
 export type CIStatus = 'requested' | 'running' | 'passed' | 'failed'
 export type CIFailureReason =
@@ -13,7 +14,7 @@ interface CIRunBase {
   readonly id: CIRunId
   readonly pullRequestId: PullRequestId
   readonly commit: CommitSha
-  readonly requestedBy: ResearcherId
+  readonly requestedBy: SessionId
   readonly requestedAt: IsoTimestamp
   /** Digest of the environment the run used, so a result is reproducible. */
   readonly environmentDigest?: string
@@ -28,6 +29,8 @@ export type CIRun =
       readonly finishedAt: IsoTimestamp
       readonly score: Score
       readonly checks: readonly CheckResult[]
+      /** Persisted results such as model weights and reports. */
+      readonly artifacts: readonly ArtifactRef[]
       readonly logPath: string
       readonly durationMs: number
     })
@@ -50,5 +53,5 @@ export interface CheckResult {
 export interface CIRequest {
   readonly pullRequestId: PullRequestId
   readonly commit: CommitSha
-  readonly requestedBy: ResearcherId
+  readonly requestedBy: SessionId
 }

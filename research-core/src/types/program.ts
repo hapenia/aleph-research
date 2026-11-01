@@ -1,5 +1,6 @@
 /** The Program: goal, evaluation contract, budget and best result. */
 import type { CIRunId, CommitSha, IsoTimestamp, ProgramId, PullRequestId, Score } from './ids.js'
+import type { ArtifactRef } from './artifacts.js'
 
 export type ProgramStatus = 'running' | 'paused' | 'stopped'
 export type StopReason = 'goal-met' | 'budget-exhausted' | 'operator' | 'error'
@@ -17,14 +18,6 @@ export interface BudgetUsage {
   readonly tokens: number
 }
 
-/** The Program's acceptance rule for a Pull request; the Host evaluates it, not a model. */
-export type AcceptanceRule =
-  | { readonly kind: 'ci-passed' }
-  | { readonly kind: 'score-improvement'; readonly minDelta: number }
-  | { readonly kind: 'score-at-least'; readonly minScore: number }
-  | { readonly kind: 'all'; readonly rules: readonly AcceptanceRule[] }
-  | { readonly kind: 'any'; readonly rules: readonly AcceptanceRule[] }
-
 /** The evaluation contract names the CI entry and how a score is read from it. */
 export interface EvaluationContract {
   /** Command run in the Pull request environment, for example `eval/ci.sh`. */
@@ -33,15 +26,22 @@ export interface EvaluationContract {
   readonly timeoutMs: number
   /** The JSON score is read from this field of the entry's stdout. */
   readonly scoreField: string
-  /** The Host merges a Pull request only when this rule holds. */
-  readonly acceptance: AcceptanceRule
 }
+
+/**
+ * When the Host merges a passed Pull request without a person. The final choice is an
+ * open review question; the blueprint keeps the value explicit on the Program instead
+ * of hiding it in a rule language.
+ */
+export type AutoMergePolicy = 'never' | 'when-ci-passes' | 'when-ci-passes-and-score-not-worse'
 
 export interface BestResult {
   readonly score: Score
   readonly pullRequestId: PullRequestId
   readonly commit: CommitSha
   readonly ciRunId: CIRunId
+  /** The persisted model weights or report this score belongs to. */
+  readonly artifacts: readonly ArtifactRef[]
   readonly at: IsoTimestamp
 }
 
@@ -55,6 +55,7 @@ export interface Program {
   readonly status: ProgramStatus
   readonly stopReason?: StopReason
   readonly best: BestResult | null
+  readonly autoMerge: AutoMergePolicy
   readonly createdAt: IsoTimestamp
 }
 

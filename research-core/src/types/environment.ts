@@ -1,6 +1,11 @@
 /** What a Pull request branch declares so the Host can build its CI environment. */
 import type { BranchName, CommitSha } from './ids.js'
 
+/**
+ * Every Pull request gets its own environment built with uv. There is no shared
+ * Program runtime fallback (review decision): a Pull request without a declaration is
+ * invalid, not silently accepted.
+ */
 export type EnvironmentDeclaration =
   | {
       readonly kind: 'uv-lock'
@@ -13,7 +18,6 @@ export type EnvironmentDeclaration =
       readonly requirementsFile: string
       readonly pythonVersion: string
     }
-  | { readonly kind: 'program-runtime' }
 
 /** The built environment handed to the CI entry. */
 export interface BuiltEnvironment {

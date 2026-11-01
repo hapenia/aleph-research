@@ -4,7 +4,7 @@
  */
 import type { CIRun, CheckResult, CIRequest } from './ci.js'
 import type { BuiltEnvironment, EnvironmentDeclaration, RepositorySnapshot } from './environment.js'
-import type { EvaluationContract, AcceptanceRule, Program } from './program.js'
+import type { EvaluationContract, Program } from './program.js'
 import type { PullRequest } from './pull-request.js'
 import type { DomainError, Result } from './errors.js'
 import type { BranchName, CommitSha, IsoTimestamp, SessionId } from './ids.js'
@@ -56,23 +56,26 @@ export interface GitService {
   }): Promise<Result<{ readonly mergeCommit: CommitSha }, DomainError>>
 }
 
-/** Result of applying the Program's acceptance rule to a Pull request. */
+/** Result of applying the Program's auto-merge policy to a Pull request. */
 export interface MergeDecision {
   readonly allowed: boolean
-  readonly ruleTrace: readonly RuleEvaluation[]
+  /** Why: the CI evidence and the score comparison the Host checked. */
+  readonly evidence: readonly string[]
   readonly reason: string
 }
 
-export interface RuleEvaluation {
-  readonly rule: AcceptanceRule
-  readonly passed: boolean
-  readonly detail: string
-}
-
-/** The Host decides merges; a model only proposes them. */
+/** The Host decides merges from CI evidence; a model only proposes them. */
 export interface MergeGate {
   decide(program: Program, pullRequest: PullRequest, ciRun: CIRun): MergeDecision
 }
+
+/** Pause/stop immediately cancel the Implementer work already running. */
+export interface RunCanceller {
+  cancelOpenImplementers(programId: string, reason: string): Promise<readonly string[]>
+}
+
+/** Persists results across runs; declared in artifacts.ts. */
+export type { ArtifactStore } from './artifacts.js'
 
 /** Holds the resident Researcher Sessions and wakes the right one. */
 export interface SessionPool {

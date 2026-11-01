@@ -1,5 +1,5 @@
 /** Issues: research questions claimed by one Researcher and worked to completion. */
-import type { CommitSha, IsoTimestamp, IssueId, ProgramId, PullRequestId, ResearcherId, SessionId } from './ids.js'
+import type { CommitSha, IsoTimestamp, IssueId, ProgramId, PullRequestId, SessionId } from './ids.js'
 
 export type IssueStatus = 'open' | 'assigned' | 'in-review' | 'closed'
 export type IssueResolution = 'accepted' | 'rejected' | 'abandoned'
@@ -21,12 +21,12 @@ export type Issue =
   | (IssueBase & { readonly status: 'open' })
   | (IssueBase & {
       readonly status: 'assigned'
-      readonly assignee: ResearcherId
+      readonly assignee: SessionId
       readonly assignedAt: IsoTimestamp
     })
   | (IssueBase & {
       readonly status: 'in-review'
-      readonly assignee: ResearcherId
+      readonly assignee: SessionId
       readonly assignedAt: IsoTimestamp
       /** The Pull request whose CI is being reviewed. */
       readonly pullRequestId: PullRequestId
@@ -34,7 +34,7 @@ export type Issue =
     })
   | (IssueBase & {
       readonly status: 'closed'
-      readonly assignee: ResearcherId | null
+      readonly assignee: SessionId | null
       readonly closedAt: IsoTimestamp
       readonly resolution: IssueResolution
     })

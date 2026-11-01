@@ -1,12 +1,10 @@
 /** Researcher pool configuration and wake policy. */
-import type { ResearcherId } from './ids.js'
+import type { SessionId } from './ids.js'
 
 export interface ResearcherPoolConfig {
   /** How many Researcher Sessions exist at once. */
   readonly size: number
   readonly preset: string
-  /** Every Researcher gets a stable id derived from its Session. */
-  readonly idPrefix: string
 }
 
 export type WakeReason =
@@ -16,6 +14,6 @@ export type WakeReason =
   | { readonly kind: 'timer-tick'; readonly at: string }
 
 export interface ResearcherAssignment {
-  readonly researcherId: ResearcherId
+  readonly sessionId: SessionId
   readonly activeIssueId: string | null
 }

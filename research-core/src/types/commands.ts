@@ -2,7 +2,7 @@
 import type { Budget, EvaluationContract } from './program.js'
 import type { IssueLabel } from './issue.js'
 import type { EnvironmentDeclaration } from './environment.js'
-import type { CommitSha, IssueId, ProgramId, PullRequestId, ResearcherId, TicketId } from './ids.js'
+import type { CommitSha, IssueId, ProgramId, PullRequestId, TicketId } from './ids.js'
 
 /** What the operator creates; the only command that carries the whole contract. */
 export interface CreateProgramCommand {
@@ -32,11 +32,11 @@ export interface CreateIssueCommand {
   readonly labels: readonly IssueLabel[]
 }
 
+/** The claiming Researcher is the Session in the decision context, not a command field. */
 export interface ClaimIssueCommand {
   readonly type: 'issue.claim'
   readonly programId: ProgramId
   readonly issueId: IssueId
-  readonly researcherId: ResearcherId
 }
 
 export interface CommentOnIssueCommand {

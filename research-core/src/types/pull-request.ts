@@ -8,7 +8,6 @@ import type {
   IssueId,
   ProgramId,
   PullRequestId,
-  ResearcherId,
   Score,
   SessionId,
 } from './ids.js'
@@ -53,7 +52,7 @@ export type PullRequest =
       readonly status: 'ci-passed'
       readonly ciRunId: CIRunId
       readonly score: Score
-      readonly reviewedBy: ResearcherId
+      readonly reviewedBy: SessionId
     })
   | (PullRequestBase & {
       readonly status: 'ci-failed'
@@ -77,7 +76,7 @@ export type PullRequest =
 export interface ReviewComment {
   readonly id: CommentId
   readonly pullRequestId: PullRequestId
-  readonly author: ResearcherId
+  readonly author: SessionId
   readonly body: string
   readonly at: IsoTimestamp
   readonly kind: 'review' | 'ci-request' | 'merge-request'

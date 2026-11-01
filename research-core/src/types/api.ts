@@ -5,6 +5,7 @@
  * command and returns a Result. The panel in version 1 consumes the read models only.
  */
 import type { CIRun } from './ci.js'
+import type { ArtifactMetadata } from './artifacts.js'
 import type { Issue, IssueComment } from './issue.js'
 import type { Program, Paginated } from './program.js'
 import type { PullRequest, ReviewComment } from './pull-request.js'
@@ -34,6 +35,7 @@ export interface ProgramSnapshot {
   readonly reviews: Readonly<Record<string, readonly ReviewComment[]>>
   readonly ciRuns: Paginated<CIRun>
   readonly attention: readonly Attention[]
+  readonly artifacts: Paginated<ArtifactMetadata>
 }
 
 /** Operator routes; the panel stays read-only until the mechanism is proven. */
@@ -43,7 +45,6 @@ export interface CreateProgramRequest {
     readonly ciEntry: string
     readonly timeoutMs: number
     readonly scoreField: string
-    readonly acceptance: unknown
   }
   readonly budget: { readonly maxPullRequests: number; readonly maxComputeMinutes: number; readonly maxTokens: number }
 }

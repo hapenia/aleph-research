@@ -1,5 +1,5 @@
 /** Session roles and their capabilities; the Host authorizes commands against these. */
-import type { ProgramId, ResearcherId, SessionId, TicketId } from './ids.js'
+import type { ProgramId, SessionId, TicketId } from './ids.js'
 
 export type SessionRole = 'operator' | 'researcher' | 'implementer' | 'watchdog' | 'router'
 
@@ -27,9 +27,12 @@ export interface SessionIdentity {
   readonly preset: string
 }
 
+/**
+ * A Researcher is identified by its Session: there is no separate stable researcher id
+ * (review decision). A restart creates a new Session and therefore a new Researcher.
+ */
 export interface ResearcherIdentity extends SessionIdentity {
   readonly role: 'researcher'
-  readonly researcherId: ResearcherId
   /** Every command from a Researcher carries the Program it works for. */
   readonly programId: ProgramId
 }
