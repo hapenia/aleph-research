@@ -5,16 +5,44 @@
   "description": "Type blueprint for the AlephResearch rewrite: Program, Issue, Experiment and CI domain.",
   "type": "module",
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "npm run lint:eslint && npm run lint:ast-grep",
     "lint:eslint": "eslint src",
     "lint:ast-grep": "ast-grep scan --config ast-grep/sgconfig.yml",
-    "test:mutation": "bash scripts/type-mutation-check.sh"
+    "test:mutation": "bash scripts/type-mutation-check.sh",
+    "test": "node --import tsx --test \"test/*.test.ts\"",
+    "test:one": "node --import tsx --test",
+    "test:dist": "node --test test/dist.test.mjs",
+    "lint:fixtures": "bash scripts/lint-fixtures.sh"
   },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./runtime/*": {
+      "types": "./dist/runtime/*.d.ts",
+      "default": "./dist/runtime/*.js"
+    },
+    "./adapter/*": {
+      "types": "./dist/adapter/*.d.ts",
+      "default": "./dist/adapter/*.js"
+    },
+    "./types/*": {
+      "types": "./dist/types/*.d.ts",
+      "default": "./dist/types/*.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
   "devDependencies": {
     "@ast-grep/cli": "^0.51.0",
     "@eslint/js": "^9.39.5",
     "eslint": "^9.39.4",
+    "tsx": "^4.23.15",
     "typescript": "6.0.3",
     "typescript-eslint": "^8.72.1"
   }

@@ -12,14 +12,24 @@
     ".": "./index.js",
     "./client": "./client.js",
     "./package.json": "./package.json",
-    "./request-tool": "./request-tool.js"
+    "./request-tool": "./request-tool.js",
+    "./research-host": "./research-host.js",
+    "./research-sessions": "./research-sessions.js",
+    "./research-storage": "./research-storage.js",
+    "./research-tools": "./research-tools.js",
+    "./research-trigger-bridge": "./research-trigger-bridge.js"
   },
   "files": [
     "index.js",
     "client.js",
     "cordis.patch.yml",
     "research-extension.js",
-    "request-tool.js"
+    "request-tool.js",
+    "research-host.js",
+    "research-sessions.js",
+    "research-storage.js",
+    "research-tools.js",
+    "research-trigger-bridge.js"
   ],
   "dsh": {
     "bundle": {
@@ -36,6 +46,7 @@
     }
   },
   "scripts": {
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "lint": "node ../research-core/node_modules/eslint/bin/eslint.js ."
   }
 }

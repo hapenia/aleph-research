@@ -1,5 +1,5 @@
 /** Persisted results: model weights, reports, figures and logs. */
-import type { ArtifactId, CIRunId, CommitSha, ExperimentId, IsoTimestamp, ProgramId } from './ids.js'
+import type { ArtifactId, CIRunId, CommitSha, ExperimentId, IsoTimestamp, NonEmptyString, ProgramId } from './ids.js'
 import type { Result, StoreError } from './errors.js'
 
 export type ArtifactKind = 'model-weights' | 'report' | 'figure' | 'logs' | 'other'
@@ -21,6 +21,12 @@ export declare class ArtifactRef {
 }
 
 /** A result file the CI entry produced; the Host copies it into ArtifactStore. */
+/** A typed reference the model supplies: which stored artifact to mount, and where. */
+export interface ArtifactInput {
+  readonly artifactId: ArtifactId
+  readonly mountAs: NonEmptyString
+}
+
 export interface ArtifactCandidate {
   readonly kind: ArtifactKind
   readonly path: string

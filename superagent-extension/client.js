@@ -7,7 +7,13 @@
  * The layout service selects the page by that key, so the entry needs no extra
  * Host route: mounting this bundle is enough for the panel to appear.
  *
- * While the page is mounted it polls three same-origin Host routes every 10 s:
+ * While the page is mounted it polls same-origin Host routes every 10 s. The
+ * "Research runtime" tab polls the compiled research runtime:
+ *   GET /aleph/api/research/health    -> { ok, version, persistent }
+ *   GET /aleph/api/research/programs  -> { ok, count, programs }
+ * and fetches one Program snapshot on demand:
+ *   GET /aleph/api/research/programs/:id -> { ok, value: ProgramSnapshot, audit }
+ * The older "Legacy loop" tab keeps the prototype routes:
  *   GET /aleph/api/results       -> { ok, count, best, brief, recent }
  *   GET /aleph/api/state         -> { ok, openTickets, tickets }
  *   GET /orchestrator/api/state  -> { setup, load, masterId, paused, health }
@@ -15,6 +21,13 @@
  * the header `x-orchestrator-request: 1`. Each route degrades to a localized
  * warning card when it is unreachable, so a partially wired Host still shows
  * whatever it does serve.
+ *
+ * A research Host whose `research-core/dist` is missing answers the health route
+ * with 503 `research/build-missing`; a deployment without the research plugin
+ * answers 404. Both are rendered as a "runtime not mounted/built" state instead
+ * of a generic error. The research poll is skipped while the document is hidden,
+ * never overlaps an earlier request, and releases its interval and visibility
+ * listener when the page unmounts.
  *
  * "Reload research extension" posts to RELOAD_PATH. That Host route is not part
  * of this client deliverable; the Lead wires it later. Contract:
@@ -37,16 +50,26 @@ window.__ModuleLoader__.load({
     const RESULTS_PATH = '/aleph/api/results';
     const STATE_PATH = '/aleph/api/state';
     const ORCHESTRATOR_PATH = '/orchestrator/api/state';
+    const RESEARCH_HEALTH_PATH = '/aleph/api/research/health';
+    const RESEARCH_PROGRAMS_PATH = '/aleph/api/research/programs';
+    const RESEARCH_BUILD_MISSING = 'research/build-missing';
 
     const dict = {
       en: {
         nav: 'Aleph',
         'page.title': 'AlephResearch panel',
-        'page.subtitle': 'Read-only view of research results, open tickets and orchestrator load.',
+        'page.subtitle': 'Read-only view of research programs, runtime health, results and open tickets.',
         'action.refresh': 'Refresh',
         'action.reload': 'Reload research extension',
         'action.reloading': 'Reloading…',
         'action.back': 'Back to conversation',
+        'tab.research': 'Research runtime',
+        'tab.legacy': 'Legacy loop',
+        'section.research': 'Research runtime',
+        'section.health': 'Runtime health',
+        'section.programs': 'Research programs',
+        'section.audit': 'Recent audit',
+        'section.attention': 'Attention',
         'section.results': 'Results',
         'section.trajectory': 'Recent evaluations',
         'section.tickets': 'Open tickets',
@@ -70,33 +93,78 @@ window.__ModuleLoader__.load({
         'field.paused': 'Paused',
         'field.health': 'Health',
         'field.updated': 'Updated',
+        'field.programs': 'Programs',
+        'field.persistent': 'Persistent',
+        'field.version': 'Version',
+        'field.status': 'Status',
+        'field.exploration': 'Exploration',
+        'field.issues': 'Issues',
+        'field.experiments': 'Experiments',
+        'field.ciRecords': 'CI records',
+        'field.attention': 'Attention',
+        'field.createdAt': 'Created',
+        'field.action': 'Action',
+        'field.actor': 'Actor',
+        'field.subject': 'Subject',
+        'field.severity': 'Severity',
+        'field.reason': 'Reason',
         'value.none': '—',
         'value.yes': 'yes',
         'value.no': 'no',
+        'health.reachable': 'reachable',
+        'empty.programs': 'No research program yet.',
+        'empty.audit': 'No audit entry for this program.',
+        'empty.attention': 'No attention entry for this program.',
         'empty.results': 'No evaluation recorded yet.',
         'empty.trajectory': 'No scored evaluation yet.',
         'empty.tickets': 'No open ticket.',
         'error.results': 'Cannot read the research results.',
         'error.tickets': 'Cannot read the open tickets.',
         'error.orchestrator': 'Cannot read the orchestrator state; this deployment may not mount that route.',
+        'error.health': 'Cannot read the research runtime health.',
+        'error.programs': 'Cannot read the research programs.',
+        'error.program': 'Cannot read this research program.',
+        'error.programBody': 'The research runtime returned an unexpected program snapshot.',
+        'runtime.buildMissing': 'Research runtime not built',
+        'runtime.buildMissingHint': 'The Host is mounted but research-core has no compiled dist. Run "npm run build" in research-core, then reload the Host.',
+        'runtime.notMounted': 'Research runtime not mounted',
+        'runtime.notMountedHint': 'This deployment does not serve /aleph/api/research. Mount the aleph-research-host plugin to see programs here.',
         'state.loading': 'Loading the research panel…',
+        'state.researchLoading': 'Loading the research runtime…',
+        'state.detailLoading': 'Loading program details…',
         'reload.ok': 'The Host accepted the reload request.',
         'reload.missing': 'The Host has no reload route yet.',
         'reload.error': 'Reload failed.',
         'status.ready': 'ready',
         'status.starting': 'starting',
         'status.paused': 'paused',
+        'status.running': 'running',
+        'status.stopped': 'stopped',
+        'status.completed': 'completed',
         'status.error': 'error',
         'status.unknown': 'unknown',
+        'severity.info': 'info',
+        'severity.warning': 'warning',
+        'severity.blocked': 'blocked',
+        'exploration.low': 'low',
+        'exploration.normal': 'normal',
+        'exploration.high': 'high',
       },
       zh: {
         nav: 'Aleph',
         'page.title': 'AlephResearch 研究面板',
-        'page.subtitle': '研究结果、开放工单与编排器负载的只读视图。',
+        'page.subtitle': '研究计划、运行时健康状态、研究结果与开放工单的只读视图。',
         'action.refresh': '刷新',
         'action.reload': '重新加载研究扩展',
         'action.reloading': '正在重新加载…',
         'action.back': '返回对话',
+        'tab.research': '研究运行时',
+        'tab.legacy': '旧版研究循环',
+        'section.research': '研究运行时',
+        'section.health': '运行时健康',
+        'section.programs': '研究计划',
+        'section.audit': '最近审计',
+        'section.attention': '待关注事项',
         'section.results': '研究结果',
         'section.trajectory': '最近评测',
         'section.tickets': '开放工单',
@@ -120,24 +188,62 @@ window.__ModuleLoader__.load({
         'field.paused': '暂停',
         'field.health': '健康状态',
         'field.updated': '最后更新',
+        'field.programs': '研究计划数',
+        'field.persistent': '持久化',
+        'field.version': '版本',
+        'field.status': '状态',
+        'field.exploration': '探索级别',
+        'field.issues': '议题数',
+        'field.experiments': '实验数',
+        'field.ciRecords': 'CI 记录数',
+        'field.attention': '待关注数',
+        'field.createdAt': '创建时间',
+        'field.action': '动作',
+        'field.actor': '操作者',
+        'field.subject': '对象',
+        'field.severity': '严重级别',
+        'field.reason': '原因',
         'value.none': '—',
         'value.yes': '是',
         'value.no': '否',
+        'health.reachable': '可达',
+        'empty.programs': '暂无研究计划。',
+        'empty.audit': '该计划暂无审计记录。',
+        'empty.attention': '该计划暂无待关注事项。',
         'empty.results': '暂无评测结果。',
         'empty.trajectory': '暂无带分数的评测记录。',
         'empty.tickets': '暂无开放工单。',
         'error.results': '无法读取研究结果。',
         'error.tickets': '无法读取开放工单。',
         'error.orchestrator': '无法读取编排器状态；当前部署可能没有挂载该路由。',
+        'error.health': '无法读取研究运行时健康状态。',
+        'error.programs': '无法读取研究计划列表。',
+        'error.program': '无法读取该研究计划。',
+        'error.programBody': '研究运行时返回了无法识别的计划快照。',
+        'runtime.buildMissing': '研究运行时尚未构建',
+        'runtime.buildMissingHint': 'Host 已挂载，但 research-core 没有编译产物。请在 research-core 运行 "npm run build"，然后重新加载 Host。',
+        'runtime.notMounted': '研究运行时未挂载',
+        'runtime.notMountedHint': '当前部署没有提供 /aleph/api/research。挂载 aleph-research-host 插件后即可在此查看研究计划。',
         'state.loading': '正在加载研究面板…',
+        'state.researchLoading': '正在加载研究运行时…',
+        'state.detailLoading': '正在加载计划详情…',
         'reload.ok': 'Host 已接受重新加载请求。',
         'reload.missing': 'Host 尚未提供重新加载路由。',
         'reload.error': '重新加载失败。',
         'status.ready': '就绪',
         'status.starting': '启动中',
         'status.paused': '已暂停',
+        'status.running': '运行中',
+        'status.stopped': '已停止',
+        'status.completed': '已完成',
         'status.error': '错误',
         'status.unknown': '未知',
+        'severity.info': '提示',
+        'severity.warning': '警告',
+        'severity.blocked': '阻塞',
+        'exploration.low': '低',
+        'exploration.normal': '常规',
+        'exploration.high': '高',
       },
     };
 
@@ -165,6 +271,20 @@ window.__ModuleLoader__.load({
       paused: TOKENS.warn,
       error: TOKENS.error,
       unknown: TOKENS.labelTertiary,
+    };
+
+    const PROGRAM_STATUS_COLORS = {
+      running: TOKENS.success,
+      paused: TOKENS.warn,
+      stopped: TOKENS.labelTertiary,
+      completed: TOKENS.business,
+      unknown: TOKENS.labelTertiary,
+    };
+
+    const SEVERITY_COLORS = {
+      info: TOKENS.business,
+      warning: TOKENS.warn,
+      blocked: TOKENS.error,
     };
 
     const styles = {
@@ -280,9 +400,95 @@ window.__ModuleLoader__.load({
         color: TOKENS.labelTertiary,
         fontSize: 12.5,
       },
+      stateTitle: { fontSize: 14, fontWeight: 600, color: TOKENS.labelPrimary, marginBottom: 6 },
+      stateHint: { color: TOKENS.labelTertiary, fontSize: 12, lineHeight: 1.6, maxWidth: 680, margin: '0 auto' },
+      stateError: { color: TOKENS.labelSecondary, fontSize: 11.5, marginTop: 8, overflowWrap: 'anywhere' },
       reloadOk: { border: `1px solid ${TOKENS.success}`, borderRadius: 8, padding: '6px 10px', fontSize: 12, color: TOKENS.labelSecondary },
       reloadWarn: { border: `1px solid ${TOKENS.warn}`, borderRadius: 8, padding: '6px 10px', fontSize: 12, color: TOKENS.labelSecondary },
       reloadError: { border: `1px solid ${TOKENS.error}`, borderRadius: 8, padding: '6px 10px', fontSize: 12, color: TOKENS.labelSecondary },
+      tabs: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 2,
+        padding: 2,
+        borderRadius: 10,
+        border: `1px solid ${TOKENS.borderL2}`,
+        background: TOKENS.bgLayer2,
+        alignSelf: 'flex-start',
+      },
+      tab: {
+        appearance: 'none',
+        border: 0,
+        borderRadius: 8,
+        background: 'transparent',
+        color: TOKENS.labelSecondary,
+        fontFamily: 'inherit',
+        fontSize: 12.5,
+        lineHeight: '18px',
+        padding: '4px 12px',
+        cursor: 'pointer',
+      },
+      tabActive: {
+        background: TOKENS.bgLayer1,
+        color: TOKENS.labelPrimary,
+        fontWeight: 600,
+        boxShadow: '0 1px 2px rgba(0, 0, 0, 0.08)',
+      },
+      programList: { display: 'flex', flexDirection: 'column', gap: 8 },
+      programRow: {
+        border: `1px solid ${TOKENS.borderL1}`,
+        borderRadius: 10,
+        background: TOKENS.bgBase,
+        overflow: 'hidden',
+      },
+      programButton: {
+        appearance: 'none',
+        border: 0,
+        width: '100%',
+        background: 'transparent',
+        color: TOKENS.labelPrimary,
+        fontFamily: 'inherit',
+        fontSize: 12.5,
+        textAlign: 'left',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '10px 12px',
+        cursor: 'pointer',
+        flexWrap: 'wrap',
+      },
+      programName: {
+        flex: '1 1 200px',
+        minWidth: 0,
+        fontWeight: 500,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      },
+      programMeta: { color: TOKENS.labelTertiary, whiteSpace: 'nowrap' },
+      programChevron: { color: TOKENS.labelTertiary, flex: '0 0 auto' },
+      programDetail: {
+        borderTop: `1px solid ${TOKENS.borderL1}`,
+        padding: 12,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      },
+      detailState: { padding: '18px 12px', textAlign: 'center', color: TOKENS.labelTertiary, fontSize: 12.5 },
+      attentionList: { display: 'flex', flexDirection: 'column', gap: 8 },
+      attentionRow: {
+        border: `1px solid ${TOKENS.borderL1}`,
+        borderRadius: 8,
+        padding: '8px 10px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 3,
+        background: TOKENS.bgLayer2,
+      },
+      attentionHead: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+      attentionReason: { fontWeight: 600, color: TOKENS.labelPrimary, fontSize: 12.5 },
+      attentionDetail: { color: TOKENS.labelSecondary, fontSize: 12, overflowWrap: 'anywhere' },
+      attentionMeta: { color: TOKENS.labelTertiary, fontSize: 11.5 },
       footer: { display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', color: TOKENS.labelTertiary, fontSize: 11.5, paddingTop: 4 },
     };
 
@@ -327,30 +533,91 @@ window.__ModuleLoader__.load({
       return typeof value === 'number' && Number.isFinite(value) ? String(value) : null;
     }
 
-    /** Fetch one JSON Host route; failures become data instead of exceptions. */
+    /**
+     * Fetch one JSON Host route; failures become data instead of exceptions.
+     * A non-2xx answer keeps its status and the Host error code so the caller can
+     * distinguish 404/503 "not mounted/built" from a real failure.
+     */
     async function readEndpoint(path, headers) {
       try {
         const response = await fetch(path, {
           cache: 'no-store',
           headers: { accept: 'application/json', ...(headers ?? {}) },
         });
+        const status = response.status;
         const body = await response.json().catch(() => null);
-        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const reported = body && typeof body === 'object' && body.error && typeof body.error === 'object'
+          ? body.error
+          : null;
+        const code = reported && typeof reported.code === 'string' && reported.code !== '' ? reported.code : null;
+        const reportedMessage = reported && typeof reported.message === 'string' && reported.message !== ''
+          ? reported.message
+          : null;
+        if (!response.ok) {
+          return {
+            ok: false,
+            status,
+            data: body,
+            error: { status, code, message: reportedMessage ?? 'HTTP ' + status },
+          };
+        }
         if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('unexpected response body');
         if (body.ok === false) {
-          throw new Error(typeof body.error === 'string' && body.error !== '' ? body.error : 'the Host reported a failure');
+          return {
+            ok: false,
+            status,
+            data: body,
+            error: { status, code, message: reportedMessage ?? 'the Host reported a failure' },
+          };
         }
-        return { ok: true, data: body, error: null };
+        return { ok: true, status, data: body, error: null };
       } catch (error) {
-        return { ok: false, data: null, error: { message: error instanceof Error ? error.message : String(error) } };
+        return {
+          ok: false,
+          status: 0,
+          data: null,
+          error: {
+            status: 0,
+            code: null,
+            message: error instanceof Error ? error.message : String(error),
+          },
+        };
       }
     }
 
+    /** A localizable one-line description of a failed endpoint read. */
+    function describeFailure(result) {
+      if (!result || result.ok) return null;
+      const error = result.error && typeof result.error === 'object' ? result.error : {};
+      const parts = [];
+      if (typeof error.status === 'number' && error.status > 0) parts.push('HTTP ' + error.status);
+      if (typeof error.code === 'string' && error.code !== '') parts.push(error.code);
+      if (typeof error.message === 'string' && error.message !== '') parts.push(error.message);
+      return parts.length === 0 ? null : parts.join(' · ');
+    }
+
     /**
-     * Poll the three routes while the panel is mounted.
+     * Whether the research route family is absent rather than merely failing.
+     * `build-missing` wins: the Host is mounted but `research-core/dist` is absent.
+     * A 404 list route only counts as unmounted when health is not reachable either,
+     * because an injected Host may serve health but be unable to list programs.
+     */
+    function runtimeUnavailable(health, programs) {
+      const failed = (result, status) => Boolean(
+        result && result.ok === false && result.status === status,
+      );
+      const buildMissing = (result) => failed(result, 503)
+        && result.error?.code === RESEARCH_BUILD_MISSING;
+      if (buildMissing(health) || buildMissing(programs)) return 'build-missing';
+      if (health?.ok !== true && (failed(health, 404) || failed(programs, 404))) return 'not-mounted';
+      return null;
+    }
+
+    /**
+     * Poll the three legacy routes while that tab is active.
      * Returns the last snapshot plus a stable manual-refresh function.
      */
-    function usePanelData() {
+    function usePanelData(active) {
       const [state, setState] = React.useState({
         phase: 'loading',
         results: null,
@@ -361,6 +628,7 @@ window.__ModuleLoader__.load({
       const pollRef = React.useRef(null);
 
       React.useEffect(() => {
+        if (!active) return undefined;
         let stopped = false;
         let timer = null;
         let inFlight = false;
@@ -394,7 +662,7 @@ window.__ModuleLoader__.load({
           pollRef.current = null;
           if (timer !== null) clearInterval(timer);
         };
-      }, []);
+      }, [active]);
 
       const refresh = React.useCallback(() => {
         const poll = pollRef.current;
@@ -402,6 +670,143 @@ window.__ModuleLoader__.load({
       }, []);
 
       return { ...state, refresh };
+    }
+
+    /**
+     * Poll the compiled research runtime while its tab is visible.
+     *
+     * The list and health routes share one interval; a detail snapshot is fetched
+     * when a Program row is expanded and again on a manual refresh. Every request
+     * path is guarded by an in-flight flag, so a slow Host can never build a queue,
+     * and the interval plus the `visibilitychange` listener are released on cleanup.
+     */
+    function useResearchData(active) {
+      const [state, setState] = React.useState({
+        phase: 'loading',
+        health: null,
+        programs: null,
+        fetchedAt: null,
+        unavailable: null,
+        expandedId: null,
+        details: {},
+      });
+      const pollRef = React.useRef(null);
+      const expandedRef = React.useRef(null);
+      const detailInFlight = React.useRef(new Set());
+
+      React.useEffect(() => {
+        expandedRef.current = state.expandedId;
+      }, [state.expandedId]);
+
+      const loadDetail = React.useCallback(async (programId) => {
+        if (typeof programId !== 'string' || programId === '' || detailInFlight.current.has(programId)) return;
+        detailInFlight.current.add(programId);
+        setState((previous) => ({
+          ...previous,
+          details: {
+            ...previous.details,
+            [programId]: { phase: 'loading', result: previous.details[programId]?.result ?? null },
+          },
+        }));
+        try {
+          const result = await readEndpoint(RESEARCH_PROGRAMS_PATH + '/' + encodeURIComponent(programId));
+          setState((previous) => ({
+            ...previous,
+            details: { ...previous.details, [programId]: { phase: 'ready', result } },
+          }));
+        } catch (error) {
+          // readEndpoint absorbs transport errors; keep a renderable state if that changes.
+          setState((previous) => ({
+            ...previous,
+            details: {
+              ...previous.details,
+              [programId]: {
+                phase: 'ready',
+                result: {
+                  ok: false,
+                  status: 0,
+                  data: null,
+                  error: { status: 0, code: null, message: error instanceof Error ? error.message : String(error) },
+                },
+              },
+            },
+          }));
+        } finally {
+          detailInFlight.current.delete(programId);
+        }
+      }, []);
+
+      const toggle = React.useCallback((programId) => {
+        if (typeof programId !== 'string' || programId === '') return;
+        setState((previous) => ({
+          ...previous,
+          expandedId: previous.expandedId === programId ? null : programId,
+        }));
+      }, []);
+
+      React.useEffect(() => {
+        const programId = state.expandedId;
+        if (typeof programId === 'string' && programId !== '') void loadDetail(programId);
+      }, [state.expandedId, loadDetail]);
+
+      React.useEffect(() => {
+        if (!active) return undefined;
+        let stopped = false;
+        let timer = null;
+        let inFlight = false;
+        const documentVisible = () => typeof document === 'undefined' || document.visibilityState !== 'hidden';
+
+        async function poll() {
+          if (stopped || inFlight || !documentVisible()) return;
+          inFlight = true;
+          try {
+            const [health, programs] = await Promise.all([
+              readEndpoint(RESEARCH_HEALTH_PATH),
+              readEndpoint(RESEARCH_PROGRAMS_PATH),
+            ]);
+            if (stopped) return;
+            setState((previous) => ({
+              ...previous,
+              phase: 'ready',
+              health,
+              programs,
+              unavailable: runtimeUnavailable(health, programs),
+              fetchedAt: Date.now(),
+            }));
+          } catch (error) {
+            // readEndpoint absorbs failures; keep the panel rendered if that changes.
+            if (stopped) return;
+            setState((previous) => ({ ...previous, phase: 'ready' }));
+          } finally {
+            inFlight = false;
+          }
+        }
+
+        pollRef.current = poll;
+        void poll();
+        timer = setInterval(() => { void poll(); }, POLL_MS);
+        const onVisibilityChange = () => { if (documentVisible()) void poll(); };
+        if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+          document.addEventListener('visibilitychange', onVisibilityChange);
+        }
+        return () => {
+          stopped = true;
+          pollRef.current = null;
+          if (timer !== null) clearInterval(timer);
+          if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+          }
+        };
+      }, [active]);
+
+      const refresh = React.useCallback(() => {
+        const poll = pollRef.current;
+        if (poll) void poll();
+        const programId = expandedRef.current;
+        if (typeof programId === 'string' && programId !== '') void loadDetail(programId);
+      }, [loadDetail]);
+
+      return { ...state, refresh, toggle };
     }
 
     /** Localized "reload research extension" action and its last outcome. */
@@ -548,6 +953,267 @@ window.__ModuleLoader__.load({
       );
     }
 
+    /** A generic colored pill used by the research runtime cards. */
+    function badge(text, color) {
+      return h(
+        'span',
+        { style: styles.badge },
+        h('span', { style: { ...styles.dot, background: color } }),
+        text,
+      );
+    }
+
+    /** A Program status pill; unknown statuses are shown verbatim. */
+    function statusBadge(t, value) {
+      const status = typeof value === 'string' && value !== '' ? value : 'unknown';
+      const known = ['ready', 'starting', 'paused', 'running', 'stopped', 'completed', 'error', 'unknown'];
+      const text = known.includes(status) ? t('status.' + status) : status;
+      return badge(text, PROGRAM_STATUS_COLORS[status] ?? HEALTH_COLORS.unknown);
+    }
+
+    /** An attention severity pill. */
+    function severityBadge(t, value) {
+      const severity = typeof value === 'string' && value !== '' ? value : 'info';
+      const known = ['info', 'warning', 'blocked'];
+      const text = known.includes(severity) ? t('severity.' + severity) : severity;
+      return badge(text, SEVERITY_COLORS[severity] ?? SEVERITY_COLORS.info);
+    }
+
+    /** The runtime's storage mode; absent for an older Host that does not report it. */
+    function persistentBadge(t, value) {
+      if (typeof value !== 'boolean') return h('span', { style: styles.metricValue }, t('value.none'));
+      return badge(value ? t('value.yes') : t('value.no'), value ? TOKENS.success : TOKENS.warn);
+    }
+
+    /** Translate the three exploration levels; an unknown level is shown verbatim. */
+    function explorationText(t, value) {
+      if (typeof value !== 'string' || value === '') return null;
+      const known = ['low', 'normal', 'high'];
+      return known.includes(value) ? t('exploration.' + value) : value;
+    }
+
+    /**
+     * Unwrap the runtime's `ApiResponse<ProgramSnapshot>` body. The list route and the
+     * snapshot route are the only readers; a malformed body yields null, never a throw.
+     */
+    function snapshotOf(result) {
+      if (!result || !result.ok || !result.data || typeof result.data !== 'object') return null;
+      const body = result.data;
+      const value = body.value && typeof body.value === 'object' ? body.value : null;
+      if (value && value.program && typeof value.program === 'object') return value;
+      if (body.program && typeof body.program === 'object') return body;
+      return null;
+    }
+
+    /** Render an audit subject as `kind:id`, tolerating a missing id. */
+    function subjectText(subject) {
+      if (!subject || typeof subject !== 'object') return '—';
+      const kind = typeof subject.kind === 'string' && subject.kind !== '' ? subject.kind : 'subject';
+      const id = typeof subject.id === 'string' ? subject.id : '';
+      return id === '' ? kind : kind + ':' + id;
+    }
+
+    /** Render an audit actor by its kind; the principal id is not needed in a list. */
+    function actorText(actor) {
+      if (!actor || typeof actor !== 'object') return '—';
+      return typeof actor.kind === 'string' && actor.kind !== '' ? actor.kind : '—';
+    }
+
+    /** One expandable Program row plus its lazily fetched snapshot. */
+    function programRow(t, program, detail, expanded, onToggle) {
+      const id = typeof program.id === 'string' ? program.id : '';
+      const name = typeof program.name === 'string' && program.name !== '' ? program.name : (id || '—');
+      const createdAt = formatDate(program.createdAt);
+      return h(
+        'div',
+        { key: id === '' ? 'program' : id, style: styles.programRow },
+        h(
+          'button',
+          {
+            type: 'button',
+            style: styles.programButton,
+            onClick: () => onToggle(id),
+            'aria-expanded': expanded,
+            'data-program-id': id,
+          },
+          h('span', { style: styles.programName, title: typeof program.id === 'string' ? program.id : undefined }, name),
+          statusBadge(t, program.status),
+          h('span', { style: { ...styles.programMeta, ...styles.mono } }, id || '—'),
+          h('span', { style: styles.programMeta }, createdAt ?? '—'),
+          h('span', { style: styles.programChevron, 'aria-hidden': 'true' }, expanded ? '▾' : '▸'),
+        ),
+        expanded ? h('div', { style: styles.programDetail }, programDetail(t, detail)) : null,
+      );
+    }
+
+    /** One attention entry in the Program detail. */
+    function attentionRow(t, entry, index) {
+      const key = typeof entry.id === 'string' && entry.id !== '' ? entry.id : 'attention-' + String(index);
+      const reason = typeof entry.reason === 'string' && entry.reason !== '' ? entry.reason : '—';
+      const detail = typeof entry.detail === 'string' && entry.detail !== '' ? entry.detail : null;
+      const meta = [formatDate(entry.at), subjectText(entry.subject), formatDate(entry.acknowledgedAt)]
+        .filter((part) => typeof part === 'string' && part !== '')
+        .join(' · ');
+      return h(
+        'div',
+        { key, style: styles.attentionRow },
+        h(
+          'div',
+          { style: styles.attentionHead },
+          severityBadge(t, entry.severity),
+          h('span', { style: styles.attentionReason }, reason),
+        ),
+        detail ? h('div', { style: styles.attentionDetail }, detail) : null,
+        meta !== '' ? h('div', { style: styles.attentionMeta }, meta) : null,
+      );
+    }
+
+    /** The snapshot body of one Program: metrics, recent audit and attention. */
+    function programDetail(t, detail) {
+      if (!detail || detail.phase === 'loading') {
+        return h('div', { style: styles.detailState, role: 'status' }, t('state.detailLoading'));
+      }
+      if (!detail.result || !detail.result.ok) {
+        return warning(t('error.program'), describeFailure(detail.result));
+      }
+      const snapshot = snapshotOf(detail.result);
+      if (snapshot === null) return warning(t('error.program'), t('error.programBody'));
+
+      const program = snapshot.program && typeof snapshot.program === 'object' ? snapshot.program : {};
+      const issues = Array.isArray(snapshot.issues) ? snapshot.issues : [];
+      const experiments = Array.isArray(snapshot.experiments) ? snapshot.experiments : [];
+      const ciRecords = Array.isArray(snapshot.ciRecords) ? snapshot.ciRecords : [];
+      const attention = Array.isArray(snapshot.attention)
+        ? snapshot.attention.filter((entry) => entry && typeof entry === 'object')
+        : [];
+      const audit = Array.isArray(snapshot.audit)
+        ? snapshot.audit.filter((entry) => entry && typeof entry === 'object').slice(-8).reverse()
+        : [];
+      const auditColumns = [
+        { label: t('field.at'), width: 'minmax(140px, 1.2fr)', render: (entry) => formatDate(entry.at) ?? '—' },
+        { label: t('field.action'), width: 'minmax(150px, 1.3fr)', primary: true, render: (entry) => (typeof entry.action === 'string' && entry.action !== '' ? entry.action : '—') },
+        { label: t('field.actor'), width: 'minmax(90px, 0.7fr)', render: (entry) => actorText(entry.actor) },
+        { label: t('field.subject'), width: 'minmax(180px, 1.6fr)', mono: true, title: (entry) => subjectText(entry.subject), render: (entry) => subjectText(entry.subject) },
+      ];
+
+      return h(
+        React.Fragment,
+        null,
+        h(
+          'div',
+          { style: styles.metricGrid },
+          metricNode(t('field.status'), statusBadge(t, program.status)),
+          metric(t('field.exploration'), explorationText(t, program.exploration)),
+          metric(t('field.issues'), countText(issues.length)),
+          metric(t('field.experiments'), countText(experiments.length)),
+          metric(t('field.ciRecords'), countText(ciRecords.length)),
+          metric(t('field.attention'), countText(attention.length)),
+        ),
+        h('h3', { style: styles.subTitle }, t('section.audit')),
+        table(auditColumns, audit, t('empty.audit')),
+        h('h3', { style: styles.subTitle }, t('section.attention')),
+        attention.length === 0
+          ? h('div', { style: styles.empty }, t('empty.attention'))
+          : h('div', { style: styles.attentionList }, attention.map((entry, index) => attentionRow(t, entry, index))),
+      );
+    }
+
+    /** Health card: build/mount state first, then version and persistence. */
+    function researchHealthCard(t, research) {
+      const result = research.health;
+      const data = result && result.ok ? result.data : null;
+      let body;
+      if (research.unavailable === 'build-missing') {
+        body = h(
+          'div',
+          { style: styles.stateCard, role: 'status' },
+          h('div', { style: styles.stateTitle }, t('runtime.buildMissing')),
+          h('div', { style: styles.stateHint }, t('runtime.buildMissingHint')),
+          describeFailure(result) ? h('div', { ...styles.stateError, ...styles.mono }, describeFailure(result)) : null,
+        );
+      } else if (research.unavailable === 'not-mounted') {
+        body = h(
+          'div',
+          { style: styles.stateCard, role: 'status' },
+          h('div', { style: styles.stateTitle }, t('runtime.notMounted')),
+          h('div', { style: styles.stateHint }, t('runtime.notMountedHint')),
+          describeFailure(result) ? h('div', { ...styles.stateError, ...styles.mono }, describeFailure(result)) : null,
+        );
+      } else if (result === null) {
+        body = h('div', { style: styles.detailState, role: 'status' }, t('state.researchLoading'));
+      } else if (!result.ok) {
+        body = warning(t('error.health'), describeFailure(result));
+      } else {
+        body = h(
+          'div',
+          { style: styles.metricGrid },
+          metricNode(t('field.health'), badge(t('health.reachable'), TOKENS.success)),
+          metricNode(t('field.persistent'), persistentBadge(t, data?.persistent)),
+          metricMono(t('field.version'), data && typeof data.version === 'string' ? data.version : null),
+        );
+      }
+      return h(
+        'section',
+        { style: styles.card },
+        h('h2', { style: styles.sectionTitle }, t('section.health')),
+        body,
+      );
+    }
+
+    /** Programs card: count plus one expandable row per Program. */
+    function researchProgramsCard(t, research) {
+      if (research.unavailable !== null) return null;
+      const result = research.programs;
+      if (result === null) return null;
+      const data = result.ok ? result.data : null;
+      const programs = data && Array.isArray(data.programs)
+        ? data.programs.filter((program) => program && typeof program === 'object')
+        : [];
+      const count = data ? (countText(data.count) ?? String(programs.length)) : null;
+      return h(
+        'section',
+        { style: styles.card },
+        h('h2', { style: styles.sectionTitle }, t('section.programs')),
+        result.ok
+          ? h('div', { style: styles.metricGrid }, metric(t('field.programs'), count))
+          : warning(t('error.programs'), describeFailure(result)),
+        result.ok
+          ? (programs.length === 0
+            ? h('div', { style: styles.empty }, t('empty.programs'))
+            : h(
+              'div',
+              { style: styles.programList },
+              programs.map((program) => {
+                const id = typeof program.id === 'string' ? program.id : '';
+                const expanded = id !== '' && research.expandedId === id;
+                return programRow(t, program, research.details[id], expanded, research.toggle);
+              }),
+            ))
+          : null,
+      );
+    }
+
+    /** The new runtime view: health (including persistence) and the Program list. */
+    function researchSection(t, research) {
+      return h(
+        React.Fragment,
+        null,
+        researchHealthCard(t, research),
+        researchProgramsCard(t, research),
+      );
+    }
+
+    /** The pre-runtime view, kept so existing results/tickets/orchestrator users lose nothing. */
+    function legacySection(t, panel) {
+      return h(
+        React.Fragment,
+        null,
+        resultsCard(t, panel.results),
+        ticketsCard(t, panel.tickets),
+        orchestratorCard(t, panel.orchestrator),
+      );
+    }
+
     /** Results card: best score and commit, count, then the recent score trajectory. */
     function resultsCard(t, result) {
       const data = result.ok ? result.data : null;
@@ -636,27 +1302,44 @@ window.__ModuleLoader__.load({
       );
     }
 
-    /** The panel page body: loading state, then the three read-only sections. */
-    function panelBody(t, panel) {
-      if (panel.phase === 'loading') {
-        return h('div', { style: styles.stateCard, role: 'status' }, t('state.loading'));
-      }
+    /** One tab button; the two views share the panel header and refresh action. */
+    function tabButton(t, key, active, onSelect) {
       return h(
-        React.Fragment,
-        null,
-        resultsCard(t, panel.results),
-        ticketsCard(t, panel.tickets),
-        orchestratorCard(t, panel.orchestrator),
+        'button',
+        {
+          type: 'button',
+          role: 'tab',
+          'aria-selected': active,
+          style: { ...styles.tab, ...(active ? styles.tabActive : null) },
+          onClick: () => onSelect(key),
+        },
+        t(key === 'research' ? 'tab.research' : 'tab.legacy'),
       );
     }
 
-    /** Full panel page: header actions, reload feedback, and the polling sections. */
+    /** The active tab's body: the runtime view or the pre-runtime loop. */
+    function panelBody(t, panel, research, tab) {
+      if (tab === 'research') return researchSection(t, research);
+      if (panel.phase === 'loading') {
+        return h('div', { style: styles.stateCard, role: 'status' }, t('state.loading'));
+      }
+      return legacySection(t, panel);
+    }
+
+    /** Full panel page: header actions, reload feedback, tabs and the polling sections. */
     function PanelView(props) {
       const t = props.t;
-      const panel = usePanelData();
-      const [reload, reloadNow] = useReloader(panel.refresh);
+      const [tab, setTab] = React.useState('research');
+      const legacyActive = tab === 'legacy';
+      const panel = usePanelData(legacyActive);
+      const research = useResearchData(!legacyActive);
+      const refreshActive = React.useCallback(() => {
+        if (legacyActive) panel.refresh();
+        else research.refresh();
+      }, [legacyActive, panel.refresh, research.refresh]);
+      const [reload, reloadNow] = useReloader(refreshActive);
 
-      const updated = formatClock(panel.fetchedAt);
+      const updated = formatClock(legacyActive ? panel.fetchedAt : research.fetchedAt);
       const reloadRunning = reload.phase === 'running';
       let reloadText = null;
       let reloadStyle = null;
@@ -686,7 +1369,7 @@ window.__ModuleLoader__.load({
               'div',
               { style: styles.headerActions },
               updated ? h('span', { style: styles.updated }, t('field.updated') + ': ' + updated) : null,
-              h('button', { type: 'button', style: styles.button, onClick: () => panel.refresh() }, t('action.refresh')),
+              h('button', { type: 'button', style: styles.button, onClick: refreshActive }, t('action.refresh')),
               h(
                 'button',
                 {
@@ -700,8 +1383,14 @@ window.__ModuleLoader__.load({
               h('button', { type: 'button', style: styles.button, onClick: props.onClose }, t('action.back')),
             ),
           ),
+          h(
+            'div',
+            { style: styles.tabs, role: 'tablist', 'aria-label': t('page.title') },
+            tabButton(t, 'research', !legacyActive, setTab),
+            tabButton(t, 'legacy', legacyActive, setTab),
+          ),
           reloadText ? h('div', { style: reloadStyle, role: 'status' }, reloadText) : null,
-          panelBody(t, panel),
+          panelBody(t, panel, research, tab),
           h(
             'div',
             { style: styles.footer },

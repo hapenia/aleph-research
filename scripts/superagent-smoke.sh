@@ -56,6 +56,15 @@ check() {
   fi
 }
 
+# The research Host plugin registers its own health route on the same webserver. A missing
+# build, a disabled host or a failed activation leaves it absent, and curl -f then reports
+# a failure. The lab mounts the storage plugin and waits for alephResearchStore, so this
+# run should report persistent:true; ok:true with persistent:false is still accepted for a
+# profile that does not mount storage.
+research_health="$(curl -fsS -m 10 "http://127.0.0.1:$port/aleph/api/research/health" 2>/dev/null || true)"
+research_health_ok="$(printf '%s' "$research_health" | jq -r 'if .ok == true and (.persistent == true or .persistent == false) then 1 else 0 end' 2>/dev/null || echo 0)"
+check "research health" "${research_health_ok:-0}" "${research_health:-no response}"
+
 # The Eval model decides and launches the Worker before any ticket exists, so wait
 # for the ticket first, then for the Worker turn to finish.
 deadline=$((SECONDS + 420))
@@ -80,15 +89,17 @@ load=""
 while [ "$SECONDS" -lt "$deadline" ]; do
   state_payload="$(curl -sS -m 5 -H 'x-orchestrator-request: 1' "$api/state" 2>/dev/null || true)"
   load="$(printf '%s' "$state_payload" | jq -c '.load' 2>/dev/null || true)"
+  running_now="$(printf '%s' "$state_payload" | jq -r '.load.running // 0' 2>/dev/null || echo 0)"
+  queued_now="$(printf '%s' "$state_payload" | jq -r '.load.queued // 0' 2>/dev/null || echo 0)"
   open_now="$(curl -sS -m 5 "http://127.0.0.1:$port/aleph/api/state" 2>/dev/null | jq -r '.openTickets // 1' 2>/dev/null || echo 1)"
-  case "$load" in
-    *'"running":0'*|*'"running": 0'*) break ;;
-  esac
+  if [ "$running_now" = "0" ] && [ "$queued_now" = "0" ]; then break; fi
   [ "${open_now:-1}" = "0" ] && break
   sleep 4
 done
 finished=0
-case "$load" in *'"running":0'*|*'"running": 0'*) finished=1 ;; esac
+running_now="${running_now:-1}"
+queued_now="${queued_now:-1}"
+if [ "$running_now" = "0" ] && [ "$queued_now" = "0" ]; then finished=1; fi
 [ "${open_now:-1}" = "0" ] && finished=1
 check "worker finished" "$finished" "$load openTickets=${open_now:-?}"
 phase "worker turn"

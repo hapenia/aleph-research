@@ -91,6 +91,20 @@ if [ -n "${ALEPH_REBUILD_VENDOR:-}" ] || ! vendor_is_current; then
 fi
 phase "vendored prototype"
 
+# The extension's Host and Tools adapters import research-core's compiled dist/ when their
+# plugin fibers mount, and the Storage adapter imports its DSH domain store. Build it on
+# every run so the host can never boot against a stale or absent dist/: the host would
+# then only serve its 503 health route.
+research_core="$repo/research-core"
+if [ -d "$research_core" ]; then
+  echo "building research-core"
+  if [ ! -d "$research_core/node_modules" ]; then
+    (cd "$research_core" && npm install --no-audit --no-fund --silent)
+  fi
+  (cd "$research_core" && npm run -s build)
+fi
+phase "research-core build"
+
 mkdir -p "$run_root/dsh/home" "$run_root/work"
 export DSH_HOME="$run_root/dsh"
 export HOME="$run_root/dsh/home"
@@ -190,6 +204,15 @@ cat >> "$patch" <<YAML
     providers:
       opencode-go:
         apiKeyEnv: OPENCODE_GO_API_KEY
+# The extension mounts research-storage and research-host in one loader batch. The
+# storage plugin provides alephResearchStore only after it has opened the aleph_research
+# domain, while the host row reads that optional service at apply time; both fibers start
+# concurrently, so the host could resolve the store before it exists and run in memory
+# while storage is active. This profile mounts both, so the host entry waits for the
+# service; if the domain cannot open, the research health route stays absent and the
+# smoke health check fails instead of silently dropping persistence.
+- id: aleph-research-host
+  inject: ['alephResearchStore']
 YAML
 
 real_home="${ALEPH_REAL_HOME:-/home/hapenia}"

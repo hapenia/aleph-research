@@ -88,6 +88,22 @@ export default tseslint.config(
     },
   },
   {
+    // The command parser reuses parsers.ts; it gets only the import exemption, not the
+    // assertion/predicate/JSON allowlist.
+    files: ['src/parsers-commands.ts'],
+    rules: {
+      'no-restricted-imports': 'off',
+    },
+  },
+  {
+    // The command handler layer is a composition layer and must construct states through
+    // the factory boundary; only the import restriction is lifted here.
+    files: ['src/runtime/handlers.ts', 'src/adapter/**/*.ts'],
+    rules: {
+      'no-restricted-imports': 'off',
+    },
+  },
+  {
     files: ['src/types/**/*.ts'],
     rules: {
       // Type-only declarations do not execute; unused imports are checked by tsc.
