@@ -146,9 +146,25 @@ Three modules were written by teammates in isolated worktrees and reviewed befor
 
 All three are pure Node ESM with no dependencies; 98 extension tests pass in total.
 
-Not yet done in Phase 1: wiring the channel and result log into the Source kind and the
-Worker toolset, the Watchdog Session itself, the panel, and retirement of the old
-plugin's roles.
+### Phase 1 acceptance and Phase 2 start
+
+An independent verification run on `main` 0a17b4a (real `gh`, no stub) observed the whole
+path in 408 s:
+
+- ticket worktree prepared from the fixture, `findings.md` committed (`bbc09e7`);
+- `aleph_submit_result` visible in the Worker's tool list and called once; the result
+  carried `ok: true`, `score: 80`, the committed SHA and an `evaluationMarker`;
+- the fixture printed `{"score": 80.0}` and `.aleph-eval-ran` named the same commit;
+- the Channel log held two records (acknowledgement and final report);
+- the Host log had zero activation warnings; the ticket closed with `running: 0`.
+
+The result submission now also appends to the results log (`ALEPH_RESULTS_DIR`) and
+reports the best score and commit next to the new score; `GET /aleph/api/results`
+returns the brief, the best record and the recent evaluations for the panel and the
+Watchdog.
+
+Not yet done in Phase 2/3: wiring the budget decision into acceptance, the Watchdog
+Session itself, the panel, and retirement of the old plugin's roles.
 
 ## Next phases
 

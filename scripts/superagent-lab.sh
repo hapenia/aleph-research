@@ -132,7 +132,7 @@ aleph_read_roots="${ALEPH_READ_ROOTS:-/usr:/bin:/sbin:/lib:/lib64:/etc:/opt:/run
 
 # Sessions keep the prototype's danger-full-access unless the deployment asks for
 # confinement; the lab wants the sandbox runner to be the enforcement point.
-DSH_HOME="$DSH_HOME" HOME="$HOME" GH_CONFIG_DIR="$gh_config_dir" ALEPH_READ_ROOTS="$aleph_read_roots" ALEPH_SESSION_PERMISSION="${ALEPH_SESSION_PERMISSION:-workspace-write}" ALEPH_CHANNEL_DIR="$run_root/state/aleph-channel" ALEPH_WORKER_TOOLS="aleph_submit_result" OPENCODE_GO_API_KEY="$api_key" \
+DSH_HOME="$DSH_HOME" HOME="$HOME" GH_CONFIG_DIR="$gh_config_dir" ALEPH_READ_ROOTS="$aleph_read_roots" ALEPH_SESSION_PERMISSION="${ALEPH_SESSION_PERMISSION:-workspace-write}" ALEPH_CHANNEL_DIR="$run_root/state/aleph-channel" ALEPH_RESULTS_DIR="$run_root/state/results" ALEPH_WORKER_TOOLS="aleph_submit_result" OPENCODE_GO_API_KEY="$api_key" \
   nohup dsh --profile "$profile" --no-open --host 127.0.0.1 --port "$port" \
   > "$run_root/host.log" 2>&1 &
 echo $! > "$run_root/host.pid"
