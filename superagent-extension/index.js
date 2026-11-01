@@ -17,7 +17,7 @@ import { createResearchChannel } from './research-channel.js'
 import { findTicketForDirectory, resultTrigger } from './submit-result.js'
 
 export const name = 'dsh-aleph-superagent'
-export const inject = ['orchestrator', 'tools', 'sessions', 'agentPresets']
+export const inject = ['orchestrator', 'tools']
 
 /** Source configuration: one research project per Source instance. */
 const AlephConfigSchema = z.object({
@@ -184,13 +184,6 @@ export function apply(ctx) {
     })
   })
 
-  /** Whether this Agent runs the prototype's Worker preset. */
-  const isWorker = (agent) => {
-    const session = ctx.sessions?.get?.(agent?.id)
-    const preset = session ? ctx.agentPresets?.presetForSession?.(session) : undefined
-    return preset === 'dsh-superagent-worker'
-  }
-
   const sourceContext = () => ctx.orchestrator.context(alephKind)
 
   ctx.tools.register(defineTool({
@@ -205,15 +198,16 @@ export function apply(ctx) {
     },
     execute: async (args, exec) => {
       const agent = exec?.agent
-      if (!isWorker(agent)) return { ok: false, error: 'aleph_submit_result is only available to a Worker session' }
       const cwd = agent?.session?.header?.cwd
       if (!cwd) return { ok: false, error: 'the Worker session has no working directory' }
 
       const source = sourceContext()
       const config = source.config('aleph') ?? {}
       const project = String(config.project ?? 'default')
+      // The ticket directory is the authorization: only an open ticket's Worker runs
+      // there, so a preset lookup (unreliable before the first turn) is unnecessary.
       const ticket = findTicketForDirectory(source.tickets.open(), cwd)
-      if (!ticket) return { ok: false, error: `no open Aleph ticket owns ${cwd}` }
+      if (!ticket) return { ok: false, error: `aleph_submit_result is only available inside an open ticket worktree; nothing owns ${cwd}` }
 
       const git = promisify(execFile)
       let status = ''
