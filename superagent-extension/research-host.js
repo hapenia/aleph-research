@@ -55,10 +55,14 @@
  *   and a resolved `domainStore` replaces it with the persistent UnitOfWork.
  *
  * The dynamic import is the build boundary: `research-core` returns TypeScript, so this
- * adapter consumes `dist/`. A missing or broken `dist/` fails startup with the build
- * command to run instead of registering a half-working route table. Only
- * `dist/adapter/composition.js` is loaded when persistence is off;
- * `dist/adapter/storage-domain.js` is loaded on demand when a `DomainStore` is used.
+ * adapter consumes `dist/`. A missing `dist/` does not fail the plugin: the fiber then
+ * registers only `GET /aleph/api/research/health`, which answers 503
+ * `{ ok: false, error: { code: 'research/build-missing' } }`, so the host process still
+ * starts and the missing build is visible over HTTP. Every other import failure (a
+ * broken or stale build) still fails startup with the build command to run, instead of
+ * registering a half-working route table. Only `dist/adapter/composition.js` is loaded
+ * when persistence is off; `dist/adapter/storage-domain.js` is loaded on demand when a
+ * `DomainStore` is used.
  *
  * `JSON.parse` is deliberately absent: the adapter's ESLint boundary confines it to the
  * designated format-parser modules, so the request body goes through the platform
@@ -70,6 +74,12 @@ export const inject = ['webServer']
 
 /** Reported by GET /aleph/api/research/health. */
 export const VERSION = 'research-host/1'
+
+/** Health error code when `research-core` has not been built into `dist/`. */
+export const BUILD_MISSING_CODE = 'research/build-missing'
+
+/** The build command the 503 health body and the load error name. */
+const BUILD_COMMAND = 'Run "npm run build" in research-core.'
 
 const HEALTH_PATH = '/aleph/api/research/health'
 const REQUESTS_PATH = '/aleph/api/research/requests'
@@ -222,7 +232,7 @@ const actorKindFor = (requested, allowed) => {
   return requested
 }
 
-/** Import one compiled runtime module; a missing dist is a startup error naming the fix. */
+/** Import one compiled runtime module; a failing import names the build command. */
 const importCompiled = async (url) => {
   try {
     return await import(url.href)
@@ -230,10 +240,26 @@ const importCompiled = async (url) => {
     const reason = String(error?.message ?? error)
     throw new Error(
       `aleph-research-host: cannot load the compiled research runtime at ${url.pathname} (${reason}). `
-      + 'Run "npm run build" in research-core.',
+      + BUILD_COMMAND,
       { cause: error },
     )
   }
+}
+
+/**
+ * True when a wrapped import failure is a missing compiled file.
+ *
+ * Only `ERR_MODULE_NOT_FOUND` is the absent-`dist/` boundary that may degrade to a 503
+ * health route. A syntax error, a missing export or any other import failure is a broken
+ * or stale build and stays a startup error, because a half-working route table would hide
+ * it. `importCompiled` wraps the original error as `cause`, so the chain is walked rather
+ * than the message parsed.
+ */
+const isBuildMissing = (error) => {
+  for (let cursor = error; cursor !== null && cursor !== undefined; cursor = cursor.cause) {
+    if (cursor?.code === 'ERR_MODULE_NOT_FOUND') return true
+  }
+  return false
 }
 
 /**
@@ -318,7 +344,7 @@ const composePersistentStore = (ctx, storageDomain, domainStore) => {
   if (typeof create !== 'function') {
     throw new Error(
       'aleph-research-host: the compiled research runtime does not export createStorageDomainUnitOfWork. '
-      + 'Run "npm run build" in research-core.',
+      + BUILD_COMMAND,
     )
   }
   try {
@@ -506,6 +532,38 @@ const registerRoutes = (ctx, host, actorKinds, maxBodyBytes, persistent, dispose
 }
 
 /**
+ * Register the only route a fiber without a compiled runtime can serve.
+ *
+ * A missing `dist/` is an installation state, not a transport bug: the plugin stays
+ * mounted, answers 503 with a machine-readable code, and keeps the build command in the
+ * message so the recovery step travels with the response. Every other route is absent
+ * and therefore 404, which is the truthful answer: this host cannot serve them.
+ */
+const registerBuildMissingHealth = (ctx, disposers, reason) => {
+  ctx.logger?.warn?.(
+    'aleph-research-host: %s; serving GET %s with %s until research-core is built',
+    reason,
+    HEALTH_PATH,
+    BUILD_MISSING_CODE,
+  )
+  const dispose = ctx.webServer.register({
+    kind: 'exact',
+    path: HEALTH_PATH,
+    async handler(req, res) {
+      if (req.method !== 'GET') return methodNotAllowed(res, 'GET')
+      sendJson(res, 503, {
+        ok: false,
+        error: {
+          code: BUILD_MISSING_CODE,
+          message: `the compiled research runtime is missing. ${BUILD_COMMAND}`,
+        },
+      })
+    },
+  })
+  if (typeof dispose === 'function') disposers.push(dispose)
+}
+
+/**
  * Start the research transport.
  *
  * The effect is registered before the first await and its cleanup drains the same
@@ -553,12 +611,20 @@ export const apply = async (ctx, config) => {
   if (settings.host !== undefined) {
     composed = assertHost(settings.host, 'config.host')
   } else {
-    const runtime = await loadRuntime(domainStore !== undefined)
+    let runtime
+    try {
+      runtime = await loadRuntime(domainStore !== undefined)
+    } catch (error) {
+      if (!isBuildMissing(error)) throw error
+      if (disposed) return
+      registerBuildMissingHealth(ctx, routeDisposers, String(error?.message ?? error))
+      return
+    }
     if (disposed) return
     if (typeof runtime.composition.createResearchHost !== 'function') {
       throw new Error(
         'aleph-research-host: the compiled research runtime does not export createResearchHost. '
-        + 'Run "npm run build" in research-core.',
+        + BUILD_COMMAND,
       )
     }
     const options = hostOptionsOf(settings)

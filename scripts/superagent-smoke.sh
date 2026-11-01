@@ -56,6 +56,15 @@ check() {
   fi
 }
 
+# The research Host plugin registers its own health route on the same webserver. A missing
+# build, a disabled host or a failed activation leaves it absent, and curl -f then reports
+# a failure. The lab mounts the storage plugin and waits for alephResearchStore, so this
+# run should report persistent:true; ok:true with persistent:false is still accepted for a
+# profile that does not mount storage.
+research_health="$(curl -fsS -m 10 "http://127.0.0.1:$port/aleph/api/research/health" 2>/dev/null || true)"
+research_health_ok="$(printf '%s' "$research_health" | jq -r 'if .ok == true and (.persistent == true or .persistent == false) then 1 else 0 end' 2>/dev/null || echo 0)"
+check "research health" "${research_health_ok:-0}" "${research_health:-no response}"
+
 # The Eval model decides and launches the Worker before any ticket exists, so wait
 # for the ticket first, then for the Worker turn to finish.
 deadline=$((SECONDS + 420))
