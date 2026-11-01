@@ -10,6 +10,7 @@ import type {
   CIFailedExperiment,
   CommandContext,
   CommandExecutor,
+  UserCommand,
   CommandOf,
   Decision,
   DerivedLineage,
@@ -53,6 +54,16 @@ declare const requestId: string
 // @ts-expect-error a spread object lacks the private brand of RunningProgram
 const forgedRunning: RunningProgram = { ...running, stopReason: 'operator' }
 
+// The lookalike attack: a spread that changes the status and supplies the status fields
+// has every field of StoppedProgram and would compile if the private brand were removed.
+// @ts-expect-error the private brand of StoppedProgram is missing
+const lookalikeStopped: StoppedProgram = {
+  ...running,
+  status: 'stopped',
+  stoppedAt: at,
+  stopReason: 'budget' as NonEmptyString,
+}
+
 // Variants do not convert into each other.
 // @ts-expect-error a paused Program is not a running Program
 const wrongProgramState: RunningProgram = paused
@@ -66,11 +77,16 @@ const passedFromFailure: CIPassedExperiment = failedRun
 // @ts-expect-error a failed CI experiment is not an open one
 const openFromFailure: OpenIssue = failedRun
 
-// The executor's generic cannot be chosen by the caller.
+// The executor has one method per command; a widened command cannot be passed.
+declare const widenedCommand: UserCommand
+// @ts-expect-error a widened user command is not a program.pause payload
+executor['program.pause'](widenedCommand, { actor: operator, at, requestId })
 // @ts-expect-error a Researcher cannot execute an operator-only command
-executor.execute(pauseCommand, { actor: researcher, at, requestId })
+executor['program.pause'](pauseCommand, { actor: researcher, at, requestId })
 // @ts-expect-error the host principal cannot execute a user command
-executor.execute(pauseCommand, { actor: host, at, requestId })
+executor['program.pause'](pauseCommand, { actor: host, at, requestId })
+// accepted: an operator may pause with the exact command
+executor['program.pause'](pauseCommand, { actor: operator, at, requestId })
 
 // Storage ids are nominal.
 // @ts-expect-error a ProgramId is not an IssueId
@@ -123,6 +139,8 @@ const wrongLineage2: FreshLineage = derivedLineage
 
 export {
   forgedRunning,
+  lookalikeStopped,
+  widenedCommand,
   wrongProgramState,
   wrongStop,
   failedRun,

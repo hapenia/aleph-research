@@ -20,6 +20,7 @@ import type { IssueLabel, IssueResolution, IssueComment } from './issue.js'
 import type { ExperimentReview, ExperimentPlan, OpenExperiment, CIPendingExperiment, ClosedExperiment } from './experiment.js'
 import type { RequestedCIRun } from './ci.js'
 import type { AuditEntry } from './audit.js'
+import type { DomainError } from './errors.js'
 import type { Capability } from './actors.js'
 import type { AssignedIssue, ClosedIssue, OpenIssue, InReviewIssue } from './issue.js'
 import type { PausedProgram, RunningProgram, StoppedProgram } from './program.js'
@@ -216,8 +217,24 @@ export interface CommandContext<K extends CommandType> {
   readonly requestId: string
 }
 
-/** A successful command returns its value and the audit entries written with it. */
-export interface Decision<T> {
+/**
+ * The outcome of one command: both the accepted and the refused path carry the audit
+ * entries that explain the decision, so a refusal cannot be silent.
+ */
+export type CommandOutcome<K extends CommandType> =
+  | {
+      readonly ok: true
+      readonly value: CommandResult<K>
+      readonly audit: NonEmptyArray<AuditEntry>
+    }
+  | {
+      readonly ok: false
+      readonly error: DomainError
+      readonly audit: NonEmptyArray<AuditEntry>
+    }
+
+/** Backwards-compatible alias for a successful outcome. */
+export type Decision<T> = {
   readonly value: T
   readonly audit: NonEmptyArray<AuditEntry>
 }

@@ -1,20 +1,15 @@
 /**
- * The one write path. The generic is constrained by the command literal, so the result
- * type cannot be chosen by the caller and unknown commands do not exist.
+ * The one write path, as one method per command literal. A widened `UserCommand` or a
+ * generic `CommandType` cannot be passed to a specific method, so the actor, payload and
+ * result cannot be decoupled.
  */
-import type { CommandOf, CommandContext, CommandResult, CommandType, Decision } from './commands.js'
-import type { DomainError, Result } from './errors.js'
+import type { CommandOf, CommandContext, CommandOutcome, CommandType } from './commands.js'
 
 export type CommandHandlers = {
   readonly [K in CommandType]: (
     command: CommandOf<K>,
     context: CommandContext<K>,
-  ) => Promise<Result<Decision<CommandResult<K>>, DomainError>>
+  ) => Promise<CommandOutcome<K>>
 }
 
-export interface CommandExecutor {
-  execute<K extends CommandType>(
-    command: CommandOf<K>,
-    context: CommandContext<K>,
-  ): Promise<Result<Decision<CommandResult<K>>, DomainError>>
-}
+export type CommandExecutor = CommandHandlers
