@@ -1790,6 +1790,16 @@ class ProjectService {
     for (const project of projects) {
       if ((project.pendingNotices ?? []).length > 0) this.flushPendingNotices(project).catch(() => undefined);
     }
+    for (const project of projects) {
+      if (project.paused) continue;
+      if ((project.pendingNotices ?? []).length === 0) continue;
+      // Notices are parked because no parent is live; keep the loop moving meanwhile.
+      // Skip when the Composer itself can still be woken through its own parent.
+      const composerWakeable = (project.agents ?? []).some((item) => item.role === 'composer' && item.childId
+        && (this.parentAgents?.has(item.childId)
+          || (item.parentSessionId ? Boolean(this.ctx?.agents?.get?.(item.parentSessionId)) : false)));
+      if (!composerWakeable) this.mechanicalDispatch(project).catch(() => undefined);
+    }
     // A cohort that drained while the Leader session was cold resumes here.
     for (const project of projects) {
       if (!project.pendingDispatch || !this.liveOrchestrator(project)) continue;
@@ -2252,6 +2262,37 @@ class ProjectService {
       }));
     }
     return { projectId, batchId, machineId: batch.machineId ?? 'local', childId: infra.childId, worktree, dispatched: true, delivery: sent?.delivered ? 'sent' : 'queued' };
+  }
+
+  /**
+   * Dispatch queued work when the queue owner cannot be woken at all.
+   *
+   * The Composer is a subagent, so waking it needs a live parent session. When the
+   * Leader session is cold, every notification is parked and the research loop would
+   * stop with work approved and the machine idle. Dispatching is then the same action
+   * the Composer's policy prescribes, so the Host does it and records why.
+   */
+  async mechanicalDispatch(project) {
+    const queued = (project.missions ?? []).filter((mission) => mission.status === 'approved');
+    if (queued.length === 0) return { dispatched: false, reason: 'nothing queued' };
+    const machine = (project.machines ?? []).find((item) => item.id === 'local');
+    if (!machine || machine.status !== 'idle') return { dispatched: false, reason: 'machine is not idle' };
+    if ((project.batches ?? []).some((batch) => ['forming', 'running'].includes(batch.status))) {
+      return { dispatched: false, reason: 'a batch is already open' };
+    }
+    try {
+      const formed = await this.formBatch({ projectId: project.id, machineId: machine.id });
+      const batch = formed.batches[formed.batches.length - 1];
+      if (!batch) return { dispatched: false, reason: 'no batch formed' };
+      this.startBatch({ projectId: project.id, batchId: batch.id });
+      await this.mutate(project.id, (current) => ({
+        ...current,
+        violations: [...(current.violations ?? []), `${now()} the Host dispatched batch ${batch.id}: the Composer could not be woken`].slice(-50),
+      })).catch(() => undefined);
+      return { dispatched: true, batchId: batch.id };
+    } catch (error) {
+      return { dispatched: false, reason: String(error?.message ?? error) };
+    }
   }
 
   /** Settle a batch whose runner exited without reporting. */
