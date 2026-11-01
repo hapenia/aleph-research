@@ -10,7 +10,6 @@ export type CommentId = Brand<string, 'CommentId'>
 export type ReviewId = Brand<string, 'ReviewId'>
 export type ArtifactId = Brand<string, 'ArtifactId'>
 export type AuditId = Brand<string, 'AuditId'>
-export type AttentionId = Brand<string, 'AttentionId'>
 export type RequestId = Brand<string, 'RequestId'>
 export type MetricName = Brand<string, 'MetricName'>
 

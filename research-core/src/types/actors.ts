@@ -62,8 +62,6 @@ export type Principal =
   | HostPrincipal
   | RouterPrincipal
 
-export type SessionRole = 'operator' | 'researcher' | 'implementer' | 'watchdog' | 'router'
-
 /**
  * Proof that a Researcher is the current assignee of an Issue. Minted by
  * `AssignedIssue.authorize(actor)` after comparing the Session, never by a model.

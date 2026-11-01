@@ -23,12 +23,12 @@ mutation harness. The mechanism text below is the authority for the blueprint.
 
 ## Objects
 
-- **Program**: goal, methodology, evaluation contract (CI entry, timeout, score field),
+- **Program**: goal, methodology, evaluation contract (CI entry, timeout, required metrics),
   exploration level, budget and status.
 - **Issue**: research question with acceptance criteria; one assignee Researcher; comments;
   linked Experiments.
 - **Experiment**: one attempt at an Issue. Carries lineage (strategy, base, base commit),
-  branch, environment declaration, CI runs, score and artifacts. It is a snapshot; it is
+  branch, environment declaration, raw CI records and artifacts. It is a snapshot; it is
   never merged.
 - **CI run**: on-demand evaluation of one commit in the Experiment environment.
 - **Artifact**: model weights, reports, logs and figures stored by the Host with retention.

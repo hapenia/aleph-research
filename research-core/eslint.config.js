@@ -53,13 +53,19 @@ export default tseslint.config(
           message: 'Dynamic imports are not part of the domain package.',
         },
       ],
-      'no-restricted-globals': ['error', 'process', 'fetch', 'setTimeout', 'setInterval', 'globalThis'],
+      'no-restricted-globals': ['error', 'process', 'fetch', 'setTimeout', 'setInterval', 'globalThis', 'JSON', 'eval'],
+      'no-eval': 'error',
+      'no-new-func': 'error',
+      '@typescript-eslint/ban-ts-comment': [
+        'error',
+        { 'ts-expect-error': true, 'ts-ignore': true, 'ts-nocheck': true, 'ts-check': false },
+      ],
       'no-restricted-imports': [
         'error',
         {
           patterns: [
             {
-              group: ['**/factories.js', '**/hydration.js', '**/parsers.js'],
+              group: ['**/factories.js', '**/hydration.js', '**/parsers.js', '**/type-tests.js'],
               message: 'Boundary modules are imported only by the adapter/composition root.',
             },
           ],
@@ -78,6 +84,7 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',
       'no-restricted-imports': 'off',
+      '@typescript-eslint/ban-ts-comment': 'off',
     },
   },
   {

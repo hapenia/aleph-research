@@ -1,6 +1,11 @@
 # Type blueprint v3: nominal research domain, explicit trust boundaries
 
-Status: **v3, revised after the second independent adversarial review; review pending.**
+Status: **frozen type contract + runtime safety contract, approved for Phase 1.** Five
+independent adversarial reviews established that TypeScript and lint cannot enforce
+construction, ownership or untrusted-input safety inside a types-only package. The
+blueprint therefore guarantees the typed shape and the API/state contracts; every
+remaining safety rule is in `docs/runtime-safety-contract.md`, implemented and tested in
+Phase 1. No further adversarial type-review gate: the runtime tests are the gate.
 `research-core/src/types/` is the blueprint; the package contains types plus compile-time
 negative tests only. The JavaScript extension stays the runtime until the phased rewrite
 reaches parity.
@@ -21,7 +26,7 @@ snapshots; iteration reuses one Experiment; CI is requested explicitly.
 
 ## Nominal states and the trust boundary
 
-`Program`, `Issue`, `Experiment`, `CIRun` states are nominal classes: private
+`Program`, `Issue` and `Experiment` states are nominal classes: private
 constructors, private brand fields, fields owned by their variant. Variants cannot be
 assigned to each other, and the spread lookalike that supplies every field of another
 state is rejected by the private brand (compile-time test).
@@ -39,7 +44,9 @@ single construction/hydration boundary instead of pretending there is none:
   type predicates, `JSON`/`globalThis` parsing, assertions, `any`, global clocks and
   dynamic imports outside the boundary; the adapter must run the same rules (listed as an
   outstanding composition-root task, because the adapter package is separate);
-- repositories and services accept constructed classes only, never raw rows;
+- aggregate repositories accept constructed state classes; structural records (CI
+  records, Tickets, comments, reviews, attention) are documented contracts validated at
+  the repository boundary (runtime contract);
 - `DomainFailureMapper.toFailure` is the single place mapping a refusal code to its HTTP
   status.
 
@@ -128,12 +135,13 @@ section rather than claimed as compiler guarantees.
 ## Tools and API
 
 - `Schema<T>` is a plain interface with `parse` and `toJsonSchema`; the adapter supplies both.
+- The index-route parser table and the runtime checklist are the remaining link between
+  route bodies and commands.
 - Command tools carry the command literal; Implementer submit input omits `binding`;
   output is `ReadyExperiment`.
-- Writes have one path: a write route only parses (`ApiWriteRoutes` maps each command to
-  a parser returning that command), and the generic `executeRoute` takes the parser
-  result, the typed actor and the executor. A route cannot fabricate an outcome or call
-  another command's executor slot.
+- Writes have one route family: a route only parses (`ApiWriteRoutes` maps each command
+  to a parser). `executeRoute` owns executor access and Host injection; Phase 1 tests
+  that a route cannot return an outcome or call another command's executor slot.
 - The panel is the only non-write route family and reads `ProgramSnapshot` (current state,
   raw CI records, audit, artifacts, attention); no replay.
 - Responses are `ApiResponse<T>` = value or `DomainFailure`, both carrying audit; parsers
@@ -202,14 +210,13 @@ on API responses; `RouteSpec`; public `Schema` constructor taking a validator; a
 `program.budget-paused` action; and negative tests for success/refusal audit
 non-emptiness and wrong audit action.
 
-Third-review items now closed: transitions re-check token association
-(`assignment.issueId`, binding ticket/experiment/session, completion ciRunId/experiment/
-commit) and return `Result`; `Ticket` is a real aggregate with a real repository;
-`ApiWriteRoutes` makes the executor the only write path; the trigger mapper is typed to
-the action map; sampler candidates carry their CI run; `UsageRecorder` is the Host budget
-port; the capability map is load-bearing in a type test; and
-`scripts/type-mutation-check.sh` removes guarantees in a copy and fails if `tsc` still
-accepts the result (four mutations are killed, wired into verify and CI).
+Typed contracts already in place: transitions return `Result` so ownership association
+can be checked; `Ticket` is a discriminated status union; write routes only parse and
+`executeRoute` is the single executor entry; the trigger kind table is per-action literal;
+tool outputs derive from `CommandResultMap`; the capability map is load-bearing in a type
+test; and `scripts/type-mutation-check.sh` kills eight targeted mutations with expected
+diagnostics. The runtime contract lists the associated implementation tests that complete
+these guarantees.
 
 Remaining runtime-only rules: the Session comparison behind `authorize`, the token
 association comparisons inside transitions, the Ticket to Session binding, candidate
@@ -230,8 +237,10 @@ Known limits, stated instead of hidden:
 
 ## Phases
 
-1. Factory/hydration/parser implementations, command handlers and audit, DSH storage-domain
-   repositories, management routes, negative tests kept green.
+1. Runtime safety contract first: factory/hydration/parser implementations with the
+   ownership, association, structural-record, route-injection, parser-coverage and
+   preset tests; then command handlers/audit, DSH storage-domain repositories, management
+   routes, negative tests kept green.
 2. Host services: uv builder, CI runner, artifact store, sampler with injected RNG,
    session pool, attention, cancellation.
 3. Adapter: tool registration, Trigger seam, Researcher preset, panel.
@@ -242,8 +251,8 @@ Known limits, stated instead of hidden:
 No missions, machines, batches, merge/mainline semantics, scheduling, GitHub integration,
 stored best/aggregates, event replay or panel controls in v1.
 
-## Review request
+## Approval and next step
 
-Please review the factory/hydration boundary (`src/factories.ts`, `src/hydration.ts`), the
-ownership tokens (`IssueAssignment`, `TicketBinding`), and the cancellation/CI-record
-surface first. Implementation starts after approval.
+The scope decision is: **type contract + runtime safety contract**. Phase 1 starts with
+the runtime checks in `docs/runtime-safety-contract.md` and their tests. The type-review
+gate is closed; runtime evidence is the acceptance criterion.

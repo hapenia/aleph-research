@@ -54,7 +54,7 @@ end; `superagent-soak.sh` samples a case lab for long unattended runs.
 ## Rewrite in progress
 
 The research mechanism is being rewritten in TypeScript with a type-first design:
-`docs/type-blueprint.md` and `research-core/` define the Program, Issue, Pull request
+`docs/type-blueprint.md` and `research-core/` define the Program, Issue, Experiment
 and CI domain before any implementation. The current JavaScript extension stays the
 runtime until the phased rewrite reaches parity.
 

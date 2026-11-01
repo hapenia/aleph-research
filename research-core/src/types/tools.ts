@@ -17,12 +17,9 @@ import type { ExperimentId, IssueId, ProgramId } from './ids.js'
 import type { AttentionSubject } from './attention.js'
 
 /** A boundary schema: it parses untrusted input and emits JSON Schema for DSH tools. */
-export declare class Schema<T> {
-  private readonly __schema: (value: T) => T
-  /** The adapter supplies the validator and the JSON Schema emitter. */
-  constructor(parse: (input: unknown) => Result<T, DomainError>, toJsonSchema: () => unknown)
-  parse(input: unknown): Result<T, DomainError>
-  toJsonSchema(): unknown
+export interface Schema<T> {
+  readonly parse: (input: unknown) => Result<T, DomainError>
+  readonly toJsonSchema: () => unknown
 }
 
 export interface ToolDefinition<Input, Output> {

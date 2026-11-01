@@ -23,7 +23,7 @@ import type { CIRequestToken, FailedCICompletion, PassedCICompletion } from './t
 import type { DomainError, Result } from './types/errors.js'
 import type { DerivedLineage, FreshLineage, OpenExperiment } from './types/experiment.js'
 import type { OpenIssue } from './types/issue.js'
-import type { Program, RunningProgram } from './types/program.js'
+import type { RunningProgram } from './types/program.js'
 import type {
   CIRunId,
   CommitSha,
@@ -68,5 +68,3 @@ export declare function createCIRequestToken(input: unknown): Result<CIRequestTo
 export declare function createPassedCICompletion(input: unknown): Result<PassedCICompletion, DomainError>
 export declare function createFailedCICompletion(input: unknown): Result<FailedCICompletion, DomainError>
 
-/** A facts-only view used by the Host when it needs a Program before construction. */
-export declare function programOf(input: unknown): Result<Program, DomainError>

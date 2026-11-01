@@ -75,35 +75,6 @@ export type ActorKindForAction = {
   readonly 'command.refused': 'operator' | 'researcher' | 'implementer' | 'watchdog' | 'host'
 }
 
-export type SubjectKindForAction = {
-  readonly 'program.created': 'program'
-  readonly 'program.paused': 'program'
-  readonly 'program.budget-paused': 'program'
-  readonly 'program.resumed': 'program'
-  readonly 'program.stopped': 'program'
-  readonly 'program.goal-changed': 'program'
-  readonly 'program.methodology-changed': 'program'
-  readonly 'program.exploration-changed': 'program'
-  readonly 'program.completed': 'program'
-  readonly 'usage.recorded': 'program'
-  readonly 'issue.created': 'issue'
-  readonly 'issue.claimed': 'issue'
-  readonly 'issue.commented': 'issue'
-  readonly 'issue.closed': 'issue'
-  readonly 'experiment.proposed': 'issue'
-  readonly 'experiment.opened': 'experiment'
-  readonly 'experiment.revised': 'experiment'
-  readonly 'experiment.reviewed': 'experiment'
-  readonly 'experiment.closed': 'experiment'
-  readonly 'ci.requested': 'ci-run'
-  readonly 'ci.started': 'ci-run'
-  readonly 'ci.passed': 'ci-run'
-  readonly 'ci.failed': 'ci-run'
-  readonly 'artifact.stored': 'artifact'
-  readonly 'attention.raised': 'program'
-  readonly 'command.refused': 'program'
-}
-
 /** Typed subject per kind: the id type cannot be mixed with another subject. */
 export type SubjectForAction = {
   readonly 'program.created': { readonly kind: 'program'; readonly id: ProgramId }

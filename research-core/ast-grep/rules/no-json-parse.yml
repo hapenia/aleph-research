@@ -1,7 +1,7 @@
 id: no-json-parse
 language: TypeScript
 severity: error
-message: Hydration goes through the boundary parser, not JSON.parse (including globalThis.JSON).
+message: Hydration goes through the boundary parser, not JSON.
 files:
   - 'src/**/*.ts'
 ignores:
@@ -13,3 +13,5 @@ rule:
   any:
     - pattern: JSON.parse($ARG)
     - pattern: globalThis.JSON.parse($ARG)
+    - pattern: const { parse } = JSON
+    - pattern: const $L = JSON

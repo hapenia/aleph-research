@@ -55,7 +55,7 @@ export interface CIRecordRepository {
 
 /** The Host reads the Ticket to mint a TicketBinding; the model never supplies it. */
 export interface TicketRepository {
-  get(ticketId: TicketId): Promise<Ticket | undefined>
+  get(ticketId: TicketId): Promise<Versioned<Ticket> | undefined>
   listByExperiment(experimentId: ExperimentId): Promise<readonly Ticket[]>
   save(expected: Version, next: Ticket): Promise<Result<Version, StoreError>>
 }
