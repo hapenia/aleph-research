@@ -90,9 +90,35 @@ Verified in lab `sa7` (port 40208) with a fixture repository and a two-row CSV:
 - the Worker read the data, wrote `analyze.py` and `findings.md`, ran the analysis and
   committed the result, staying inside the worktree.
 
-Not yet done in Phase 1: shell-level read confinement (the bwrap provider that hides
-host paths), the evaluation tool, the reply Channel, and retirement of the old plugin's
-roles.
+### Phase 1: read confinement with bwrap
+
+DSH's stock sandbox governs writes only, and the prototype pins its sessions to
+`danger-full-access`, so a Worker could read the host filesystem. Three pieces fix that:
+
+- `vendor/patches/0001-configurable-session-permission.patch` lets a deployment choose
+  the session permission preset (`ALEPH_SESSION_PERMISSION`); the lab sets
+  `workspace-write`.
+- `scripts/bwrap-restricted.sh` is a bwrap-compatible runner installed as the sandbox
+  provider's `runnerCommand`. It drops the profile's read-only host root and binds only
+  the allowed system roots, so `/home` and the source data stay invisible; the
+  workspace and its build toolchain remain reachable.
+- `scripts/superagent-prepare.sh` now creates a **self-contained repository** in the
+  ticket directory (`git init` + fetch the template branch) instead of a linked
+  worktree, so the Worker needs no access to the research repository itself.
+
+Verified in lab `sa13` (port 40214) with a Worker-issued report:
+
+```text
+ls -d /home/hapenia                    -> No such file or directory
+ls -d <run>/fixtures/data              -> No such file or directory   (source data hidden)
+git status --short --branch             -> ## ticket/confinement-report-…
+```
+
+The same run's analysis Worker wrote `findings.md` and committed it inside the sandbox
+(`Add porosity summary: rows per well and clipped floor`).
+
+Not yet done in Phase 1: the evaluation tool, the reply Channel, and retirement of the
+old plugin's roles.
 
 ## Next phases
 
