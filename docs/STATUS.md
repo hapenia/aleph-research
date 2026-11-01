@@ -332,3 +332,17 @@ that no one can push to directly.
   to `pre-commit`.
 - This change itself arrived as pull request #33, passed CI in nineteen seconds and
   was squash-merged, which is the pattern for everything that follows.
+
+## Composer wake-ups
+
+The watchdog used to treat "missions queued and the Composer idle" as a state worth
+announcing, so it sent a dispatch-pending notice every five seconds. The Composer
+woke, read status once, found the machine busy with a prepared batch waiting, ended
+its turn, and was woken again. That is an idle polling loop: model turns spent to
+confirm that nothing changed.
+
+The Host now keeps a dispatch signature on the project (queued mission ids, open
+batches, paused flag), announces it only when it changes, and deduplicates an
+identical notice within a minute. The Composer persona and skill forbid polling: one
+`aleph_status` read per turn, then end the turn, and never wait for a batch inside a
+turn because the Host reports completion.
