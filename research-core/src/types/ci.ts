@@ -1,8 +1,9 @@
-/** CI runs: requested by a Researcher, executed by the Host in the declaration env. */
+/** CI completion tokens: only the Host CI runner can mint one. */
 import type { ArtifactRef } from './artifacts.js'
-import type { HostPrincipal, ResearcherPrincipal } from './actors.js'
-import type { MetricMap } from './metrics.js'
-import type { CIRunId, CommitSha, DurationMs, ExperimentId, IsoTimestamp, NonEmptyString } from './ids.js'
+import type { FailedCIRecord, PassedCIRecord } from './metrics.js'
+import type { DomainError } from './errors.js'
+import type { Result, StoreError } from './errors.js'
+import type { CommitSha, ExperimentId, IsoTimestamp } from './ids.js'
 
 export type CIFailureReason =
   | 'environment-build-failed'
@@ -11,76 +12,34 @@ export type CIFailureReason =
   | 'invalid-metrics'
   | 'timeout'
   | 'infrastructure'
+  | 'cancelled'
 
-export interface CIRequest {
-  readonly experimentId: ExperimentId
-  readonly commit: CommitSha
-  readonly requestedBy: ResearcherPrincipal
-}
-
-export declare class RequestedCIRun {
+/** Proof that a specific Experiment/commit finished CI successfully. */
+export declare class PassedCICompletion {
   private constructor()
-  private readonly __requested: true
-  readonly status: 'requested'
-  readonly id: CIRunId
+  private readonly __passedCompletion: true
+  readonly record: PassedCIRecord
   readonly experimentId: ExperimentId
   readonly commit: CommitSha
-  readonly requestedBy: ResearcherPrincipal
-  readonly requestedAt: IsoTimestamp
-  start(actor: HostPrincipal, environmentDigest: string, at: IsoTimestamp): RunningCIRun
-}
-
-export declare class RunningCIRun {
-  private constructor()
-  private readonly __running: true
-  readonly status: 'running'
-  readonly id: CIRunId
-  readonly experimentId: ExperimentId
-  readonly commit: CommitSha
-  readonly requestedBy: ResearcherPrincipal
-  readonly requestedAt: IsoTimestamp
-  readonly startedAt: IsoTimestamp
-  readonly environmentDigest: string
-  pass(
-    actor: HostPrincipal,
-    metrics: MetricMap,
-    artifacts: readonly ArtifactRef[],
-    durationMs: DurationMs,
-  ): PassedCIRun
-  fail(actor: HostPrincipal, reason: CIFailureReason, detail: NonEmptyString): FailedCIRun
-}
-
-export declare class PassedCIRun {
-  private constructor()
-  private readonly __passed: true
-  readonly status: 'passed'
-  readonly id: CIRunId
-  readonly experimentId: ExperimentId
-  readonly commit: CommitSha
-  readonly requestedBy: ResearcherPrincipal
-  readonly requestedAt: IsoTimestamp
-  readonly startedAt: IsoTimestamp
-  readonly finishedAt: IsoTimestamp
-  readonly environmentDigest: string
-  readonly metrics: MetricMap
+  readonly metrics: PassedCIRecord['metrics']
   readonly artifacts: readonly ArtifactRef[]
-  readonly durationMs: DurationMs
+  readonly environmentDigest: string
+  readonly durationMs: PassedCIRecord['durationMs']
+  readonly finishedAt: IsoTimestamp
+  static create(record: PassedCIRecord): Result<PassedCICompletion, DomainError>
+  static fromRow(row: unknown): Result<PassedCICompletion, StoreError>
 }
 
-export declare class FailedCIRun {
+/** Proof that a specific Experiment/commit failed CI for a stated reason. */
+export declare class FailedCICompletion {
   private constructor()
-  private readonly __failed: true
-  readonly status: 'failed'
-  readonly id: CIRunId
+  private readonly __failedCompletion: true
+  readonly record: FailedCIRecord
   readonly experimentId: ExperimentId
   readonly commit: CommitSha
-  readonly requestedBy: ResearcherPrincipal
-  readonly requestedAt: IsoTimestamp
-  readonly startedAt: IsoTimestamp
-  readonly finishedAt: IsoTimestamp
-  readonly environmentDigest: string
   readonly reason: CIFailureReason
-  readonly detail: NonEmptyString
+  readonly detail: string
+  readonly finishedAt: IsoTimestamp
+  static create(record: FailedCIRecord): Result<FailedCICompletion, DomainError>
+  static fromRow(row: unknown): Result<FailedCICompletion, StoreError>
 }
-
-export type CIRun = RequestedCIRun | RunningCIRun | PassedCIRun | FailedCIRun

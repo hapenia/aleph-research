@@ -2,7 +2,6 @@
  * Boltzmann base selection. There is no "best": every CI record contributes a weighted
  * candidate, and a fresh start is always possible with the level's fixed probability.
  */
-import type { BaseChoice } from './experiment.js'
 import type { DomainError, Result } from './errors.js'
 import type { CommitSha, ExperimentId } from './ids.js'
 import type { MetricDefinition, MetricMap } from './metrics.js'
@@ -19,6 +18,11 @@ export const EXPLORATION_PRESETS: Readonly<Record<ExplorationLevel, ExplorationP
   normal: { temperature: 1.0, freshStartProbability: 0.1 },
   high: { temperature: 3.0, freshStartProbability: 0.25 },
 }
+
+/** What the sampler chose; the Host turns it into a lineage and never trusts a caller. */
+export type BaseChoice =
+  | { readonly kind: 'derived'; readonly experimentId: ExperimentId; readonly commit: CommitSha }
+  | { readonly kind: 'fresh' }
 
 export interface SampleCandidate {
   readonly experimentId: ExperimentId

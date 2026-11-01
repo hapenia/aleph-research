@@ -1,241 +1,166 @@
-# Type blueprint v2: nominal research domain in TypeScript
+# Type blueprint v3: nominal research domain, explicit trust boundaries
 
-Status: **v2 rejected by the second adversarial review; v3 revision in progress.**
-`research-core/src/types/` is the v2 blueprint; the package contains types plus
-compile-time negative tests only. The JavaScript extension stays the runtime until the
-phased rewrite reaches parity.
+Status: **v3, revised after the second independent adversarial review; review pending.**
+`research-core/src/types/` is the blueprint; the package contains types plus compile-time
+negative tests only. The JavaScript extension stays the runtime until the phased rewrite
+reaches parity.
 
-The second review (independent, adversarial) found that the executor actor guarantee is
-defeated by widening, that nominal classes have no declared factory or trust boundary and
-can still be forced with ordinary assertions, that cancellation and failed-CI persistence
-are not representable, that ownership and Ticket/Experiment binding are unchecked, and
-that the mechanism document was internally inconsistent. The smallest defensible v3
-change set is being worked through next; do not implement v2.
+v2 claimed more than TypeScript can enforce: the executor was defeated by widening,
+nominal classes had no factory or hydration boundary, cancellation and failed CI could
+not be expressed, and ownership was unchecked. v3 keeps the nominal model but narrows its
+claims, adds the missing states and tokens, and states the one trust boundary honestly.
 
-This version replaces the first blueprint after an independent adversarial review. The
-review is responded to item by item below. The research mechanism it implements is
-`docs/research-mechanism.md` (v5): Boltzmann base sampling, raw multi-metric records, no
-best record, no merge semantics, iterative Experiments, explicit CI requests.
+## Mechanism
 
-## Why type-driven, and why nominal classes
+Mechanism v5 (`docs/research-mechanism.md`): no best, no quota, no merge. The Host samples
+each new Experiment's base by Boltzmann weight `exp(utility / temperature)` over previous
+Experiments with a valid CI record, or takes a fresh start from the scaffold. Fixed
+levels: `low` 0.2/2%, `normal` 1.0/10%, `high` 3.0/25%. Utility is the Operator's weighted
+sum of min-max normalized metrics. CI records are raw and multi-metric. Experiments are
+snapshots; iteration reuses one Experiment; CI is requested explicitly.
 
-The first version used interfaces and discriminated unions. The adversarial review showed
-that structural typing defeats exact-state claims: spreading a running object with a stop
-field still assigns to the running type, wrong pairs in flat unions typecheck, free
-generics let a caller choose any result, and repository parameters typed `string` erase
-nominal ids.
+## Nominal states and the trust boundary
 
-v2 therefore uses **nominal classes with private constructors and private brand fields**:
-an object of one state cannot be produced by object literal or spread, variants cannot be
-assigned to each other, and the only way to obtain a state is the factory or the
-transition method that is allowed to produce it. On top of that:
+`Program`, `Issue`, `Experiment`, `CIRun` states are nominal classes: private
+constructors, private brand fields, fields owned by their variant. Variants cannot be
+assigned to each other, and the spread lookalike that supplies every field of another
+state is rejected by the private brand (compile-time test).
 
-- a command's actor, capability and result are mapped from its literal at compile time;
-- the executor is generic only over the command literal, so the result cannot be chosen;
-- repositories take branded ids and versioned writes;
-- every claim in this document has a `@ts-expect-error` negative test in
-  `research-core/src/type-tests.ts`, compiled by `tsc`.
+A class cannot prevent `JSON.parse`, `any` or `as`. v3 therefore declares a real trust
+boundary instead of pretending there is none:
 
-## Mechanism in one paragraph
+- every state class declares `static create(...)` for Host-internal construction and
+  `static fromRow(row: unknown): Result<State, StoreError>` for hydration;
+- `fromRow` is the single place allowed to validate and (internally) cast a storage row;
+- repositories and services only accept constructed classes, never raw rows;
+- `DomainFailureMapper.toFailure` is the single place mapping a refusal code to its HTTP
+  status;
+- `Schema.fromRow` / `Schema.create` are the boundary for tool schemas.
 
-An Operator creates a Program with a goal, methodology, evaluation contract, metric
-definitions, budget and exploration level. Researchers claim Issues and propose typed
-Experiment plans. The Host picks each new Experiment's base by Boltzmann sampling over
-all Experiments with a valid CI record (weight `exp(utility / temperature)`), or a fresh
-start from the scaffold with a fixed probability; the level's temperature and
-fresh-start probability are fixed (`low` 0.2/2%, `normal` 1.0/10%, `high` 3.0/25%).
-An Implementer writes the experiment on a branch, declares a uv environment, commits and
-marks it ready. The Researcher requests CI explicitly; the Host builds the environment,
-runs the Program's CI entry, stores raw metric records and artifacts, and wakes the
-Researcher. Iteration reuses the same Experiment. There is no best score: quality is the
-queryable raw metric table. There is no merge: Experiments are snapshots, and a later
-Experiment starts from a sampled commit or the scaffold.
+The negative tests prove the boundary is load-bearing where the compiler can see it; they
+do not and cannot prove that a cast never happens inside `fromRow`.
 
-## Package layout
-
-```text
-research-core/
-  src/types/
-    ids.ts            branded ids, sessions, timestamps, versions, refinements
-    actors.ts         nominal Principals (operator/researcher/implementer/watchdog/host/router)
-    errors.ts         Result, per-code DomainError union, HTTP mapping, DomainFailure
-    metrics.ts        MetricDefinition, raw CIRecord, metric queries
-    sampling.ts       fixed exploration presets, SampleInput, BaseChoice, Sampler port
-    program.ts        RunningProgram/PausedProgram/StoppedProgram classes with transitions
-    issue.ts          OpenIssue/AssignedIssue/InReviewIssue/ClosedIssue classes
-    environment.ts    uv-only environment declaration, snapshot, built environment
-    artifacts.ts      nominal ArtifactRef, retention, ArtifactStore port
-    ci.ts             Requested/Running/Passed/Failed CI classes with transitions
-    experiment.ts     six Experiment state classes, nominal lineage, plan and review
-    attention.ts      attention subjects and severities
-    audit.ts          action-to-actor-to-subject mapped union, command audit map
-    commands.ts       user command union, capability/actor/result maps, context
-    executor.ts       CommandHandlers map and typed CommandExecutor
-    storage.ts        nominal, versioned repositories; unit of work; read model
-    services.ts       EnvironmentBuilder, RepositoryService, CIRunner, RunCanceller,
-                      SessionPool, AttentionSink, ArtifactStore, Sampler ports
-    tools.ts          Schema class, command-derived tool contracts per role
-    api.ts            raw DTOs, parsers, actor-typed routes, ProgramSnapshot
-    triggers.ts       audit fact to SuperAgent Trigger seam
-  src/type-tests.ts   compile-time positive and negative tests
-  src/index.ts        exports
-```
-
-## State machines as classes
-
-Each state class owns its fields and only its legal moves. For example:
+## State machines
 
 ```ts
-RunningProgram.pause(actor: OperatorPrincipal, at): PausedProgram
-RunningProgram.stop(actor: OperatorPrincipal, reason, at): StoppedProgram
-OpenIssue.claim(actor: ResearcherPrincipal, at): AssignedIssue
-AssignedIssue.attachExperiment(actor: ResearcherPrincipal, experimentId, head, at): InReviewIssue
-OpenExperiment.requestCI(actor: ResearcherPrincipal, ciRunId, at): CIPendingExperiment
-CIPendingExperiment.startCI(actor: HostPrincipal, digest, at): CIRunningExperiment
-CIRunningExperiment.passCI(actor: HostPrincipal, run, metrics, artifacts, at): CIPassedExperiment
-CIRunningExperiment.failCI(actor: HostPrincipal, reason, detail, at): CIFailedExperiment
-CIFailedExperiment.revise(actor: ImplementerPrincipal, head, environment, at): OpenExperiment
+RunningProgram.pause(OperatorPrincipal) / pauseForBudget(HostPrincipal) / stop / complete
+PausedProgram.resume / setGoal / setMethodology / setExploration / recordUsage
+AssignedIssue.authorize(ResearcherPrincipal): Result<IssueAssignment, DomainError>
+AssignedIssue.addExperiment(IssueAssignment, ExperimentId)
+OpenExperiment.submit(TicketBinding, head, environment): ReadyExperiment
+ReadyExperiment.requestCI(IssueAssignment, CIRunId): CIPendingExperiment
+CIPendingExperiment.startCI(HostPrincipal, digest): CIRunningExperiment
+CIRunningExperiment.passCI(HostPrincipal, PassedCICompletion): CIPassedExperiment
+CIRunningExperiment.failCI(HostPrincipal, FailedCICompletion): CIFailedExperiment
+CIPendingExperiment.cancel(HostPrincipal) / CIRunningExperiment.cancel(HostPrincipal)
+CIPassedExperiment.close(IssueAssignment) / CIFailedExperiment.revise(TicketBinding) / close
 ```
 
-Notable consequences:
+- `ReadyExperiment` is the readiness gate: CI cannot be requested before the Implementer
+  submits.
+- Cancellation is a Host transition on ready, pending and running Experiments; a
+  cancelled Experiment closes with `outcome: 'cancelled'`.
+- CI evidence comes from `PassedCICompletion` / `FailedCICompletion` tokens that only the
+  Host CI runner mints; a bare run object cannot be passed.
+- Program has `CompletedProgram`; closing the last Issue lets the Host complete it.
+- Budget usage is a `UsageDelta` of non-negative counters recorded by the Host; there is
+  no way to decrease usage or record it as a model.
 
-- A merged state does not exist; an Experiment closes with a reason.
-- A failed CI result cannot be turned into a passed Experiment: `failCI` returns
-  `CIFailedExperiment`, which has no metrics or artifacts.
-- Lineage is a nominal pair: `DerivedLineage` (sampled base Experiment) or `FreshLineage`
-  (scaffold); there is no "fresh from a sampled base" or "derived from nothing".
-- A stopped Program must carry `stoppedAt` and `stopReason`; running and paused Programs
-  cannot carry them.
+## Ownership tokens
 
-## Command surface, actors and results
+A role class alone does not prove ownership. Two nominal tokens express it:
 
-- `UserCommand` is a tagged union; `CommandOf<'program.pause'>` etc. extracts one payload.
-- `CapabilityForCommand`, `ActorForCommand` and `CommandResultMap` are compile-time maps:
-  the actor that may issue a command and the value it returns follow from the literal.
-- `CommandContext<K>` requires `ActorForCommand[K]`; the executor is
-  `execute<K extends CommandType>(command: CommandOf<K>, context: CommandContext<K>)`,
-  so a Researcher cannot execute an operator command, a host principal cannot execute a
-  user command, and the result type cannot be chosen by the caller.
-- `Decision<T>` carries a non-empty audit array; a command cannot silently produce no
-  audit record.
-- Host-internal work (open Experiment, start/finish CI, store artifact) is not a user
-  command; the Host performs it through services and writes `experiment.opened`,
-  `ci.started/passed/failed`, `artifact.stored` audit entries.
+- `IssueAssignment` is minted only by `AssignedIssue.authorize(actor)`, which compares the
+  actor Session with the assignee at runtime. `addExperiment`, `close`, `requestCI` and
+  Experiment closes require it.
+- `TicketBinding` is minted by the Host from a Ticket record and carries ticket, experiment
+  and Implementer Session. `submit`, `revise` require it; the submit tool input omits it,
+  so the model cannot choose another Ticket.
 
-## Audit
+The tokens prove that a runtime ownership check happened; they cannot prove at compile
+time that a Session id equals the stored assignee. That comparison is explicitly listed as
+a runtime rule.
 
-`AuditEntry` is a mapped union over actions: each action fixes the allowed actor kinds
-and a typed subject (`ProgramId`, `IssueId`, `ExperimentId`, `CIRunId`, `ArtifactId`).
-`CommandAuditMap` maps each user command to its action, and `AuditActionOf<T>` derives it.
-An `issue.claimed` entry cannot be written by the Host or point at a CI run.
+## Executor, commands and audit
 
-## Storage
+- The executor is one method per command literal (`executor['program.pause']`), not a
+  generic function; a widened `UserCommand`, a generic `CommandType` or a mismatched
+  context does not typecheck.
+- Each command maps at compile time to its capability, actor and result type.
+- `CommandOutcome<K>` carries a non-empty audit array on both success and refusal.
+- `TriggerKindForAction` is a total map from audit actions to trigger kinds, so a new
+  action forces a trigger decision.
+- `AuditEntry` is a mapped union: action fixes allowed actor kinds and subject id type.
 
-- Repositories take branded ids: `get(id: IssueId)`, `listAssignedTo(ResearcherSessionId)`;
-  a ProgramId cannot be passed to an Issue query.
-- Writes are versioned: `save(expected: Version, next: T)` returns
-  `Result<Version, StoreError>`; the version conflict path is typed.
-- `UnitOfWork` covers programs, issues, experiments, raw CI records, artifacts, attention
-  and the audit log, with comments and reviews as append operations on their aggregates.
-- `ReadModel.snapshot(programId)` produces the panel DTO from current-state records; no
-  replay engine exists.
+## Storage and metrics
 
-## Sampling and metrics
-
-- `Sampler.sample(SampleInput): Result<BaseChoice, DomainError>` takes the level, metric
-  definitions and the population of Experiments with valid CI records.
-- `EXPLORATION_PRESETS` is a fixed table; there is no per-Program override.
-- Raw records only: `CIRecord` rows are stored; latest/average/sorted views are computed
-  by `MetricQuery`, never persisted. There is no best record to forge.
+- Versioned, nominal repositories: `get(id: ProgramId)`, `listAssignedTo(ResearcherSessionId)`,
+  `save(expected: Version, next)`.
+- `UnitOfWork` covers programs, issues, experiments, CI records, tickets, artifacts,
+  attention and audit.
+- `CIRecord` is a status union (`requested/running/passed/failed`) with metrics, artifacts,
+  duration and environment digest where they exist; failed runs are persisted.
+- Only passed records with the required metrics feed the sampler (`listPassed`); validity
+  is computed by query, not stored.
+- No best record exists.
 
 ## Tools and API
 
-- Tools carry a nominal `Schema<T>` with `parse` and `toJsonSchema`, matching how DSH
-  registers tools (`parameters` JSON schema), and a command literal for command tools.
-- Implementer submit input is `Omit<CommandOf<'ticket.submit'>, 'ticketId' | 'experimentId'>`:
-  the Host injects both, and `Schema<T>` nominality prevents substituting a wider input.
-- API routes are actor-typed methods on `ManagementApi`; every response is either the
-  typed value or a `DomainFailure` whose HTTP status follows from the refusal code.
-- Raw DTOs and `RequestParsers` are separate from commands: boundary refinement
-  (`NonEmptyString`, `PositiveInt`, `DurationMs`) happens in parsers.
+- `Schema<T>` is nominal with `parse`, `toJsonSchema`, `create` and `fromRow`.
+- Command tools carry the command literal; Implementer submit input omits `binding`;
+  output is `ReadyExperiment`.
+- Routes are actor-typed; responses are `ApiResponse<T>` = value or `DomainFailure` whose
+  status is derived from the code. Parsers accept raw `unknown` and return commands.
+- Panel reads `ProgramSnapshot` (current state, raw CI records, audit, artifacts,
+  attention); no replay.
 
 ## DSH and dsh-superagent integration
 
-- `research-core` is a DSH-independent TypeScript library.
-- `superagent-extension` becomes the TypeScript adapter with the same bundle name,
-  bootstrap/hot reload and profile composition; it maps DSH services to the ports:
-  `webServer` routes, `tools` registration, `sessions`/`agentPresets` for the Researcher
-  pool, `ctx.orchestrator` for the Trigger seam, DSH storage domain `aleph_research` for
-  state, subprocess/shell for uv and CI, filesystem for artifacts, `effects` for
-  attention, `fiber` for reload.
-- Researcher Sessions are ordinary DSH sessions with a research preset; Implementer work
-  stays a prototype Ticket/Worker with the existing sandbox and prepare command.
-- The submit tool no longer scores inline: it asks the Host CI runner, which builds the
-  Experiment's uv environment and records raw metrics and artifacts.
-- The prototype Eval keeps per-Ticket authorization; the Main Session keeps routing
-  attention only.
+`research-core` is DSH-independent. `superagent-extension` becomes the TypeScript adapter
+with the same bundle name, bootstrap and profile composition. It maps DSH services to the
+ports: webServer routes, tool registration, sessions/agentPresets for Researcher sessions,
+`ctx.orchestrator` for the Trigger seam, the `aleph_research` DSH storage domain for state,
+subprocess/shell for uv and CI, filesystem for artifacts, effects for attention, fiber for
+hot reload. Researcher Sessions are DSH sessions with a research preset; Implementer work
+stays a prototype Ticket/Worker with the existing sandbox. The submit tool delegates to
+the Host CI runner and records raw metrics and artifacts; the Main Session keeps routing
+attention.
 
-## Compile-time guarantees and negative tests
+## Compile-time guarantees and tests
 
-`research-core/src/type-tests.ts` contains `@ts-expect-error` cases for:
+`research-core/src/type-tests.ts` covers: widened command rejection, per-command actor
+mismatch, executor host actor rejection, spread/status lookalike rejection, variant
+assignment rejection, failed-CI to passed assignment rejection, DomainFailure construction
+and status correlation, nomial id mixing, ownership-token substitution, Host-only
+cancellation, completed-Program transitions, empty audit rejection, tool input narrowing,
+and lineage separation.
 
-- forging a Program/Issue/Experiment variant with an object spread;
-- assigning one variant to another;
-- turning a failed CI Experiment into a passed one;
-- executing an operator-only command as a Researcher or as the Host;
-- passing a ProgramId where an IssueId is expected;
-- constructing a `DomainFailure` with a status that contradicts its code;
-- recording an audit action with the wrong actor;
-- producing a `Decision` with an empty audit array;
-- substituting a full submit command (with Host-injected ids) for the submit tool input;
-- treating a FreshLineage as DerivedLineage and vice versa.
+Known limits, stated instead of hidden:
 
-If a type becomes more permissive these tests fail with an unused `@ts-expect-error`.
-
-What remains a runtime check (it depends on the world, not on data shape): the real
-Session behind a principal, uv environment build success, the CI entry result, branch and
-commit existence, metric completeness, artifact bytes and retention, budget counters,
-cancellation reaching the executor, and the sampler's randomness.
-
-## Adversarial review response
-
-| Review finding | Resolution in v2 |
-| --- | --- |
-| B1 `DomainFailure` uninhabitable | `DomainError` is a per-code union; `DomainFailure` maps status from code; type test constructs a valid failure and rejects a wrong status. |
-| B2 `failCI` could return a passed Experiment | `failCI` returns `CIFailedExperiment`; `passCI` returns `CIPassedExperiment`; type test rejects the wrong target. |
-| B3 free generic executor | `CommandExecutor.execute<K extends CommandType>(CommandOf<K>, CommandContext<K>)`; result from `CommandResultMap[K]`; no free `R`. |
-| B4 flat lineage union | Nominal `DerivedLineage | FreshLineage` classes; Host factory takes `BaseChoice`; wrong pairs cannot be constructed. |
-| B5 Program boundary incomplete | `CreateProgramCommand` carries name, goal, methodology, contract, utility, exploration, budget; refined types; raw DTOs parsed by `RequestParsers`. |
-| B6 host identity impossible | `HostPrincipal` is a principal class; host work is not a user command, so no command context needs a host principal. |
-| B7 storage erased ids | Repositories take branded ids; writes versioned; `UnitOfWork` covers comments, reviews, CI records, artifacts, attention, audit. |
-| B8 tools cannot be registered / role scoping | `Schema<T>` with `toJsonSchema`; command tools carry the command literal; implementer input omits Host-injected ids. |
-| Structural width forges states | Nominal classes with private constructors/brands; negative tests for spread forging. |
-| Reviewer cast holes | `attachExperiment`, closes and reviews take the exact principal class. |
-| Best/evidence forgery | No best exists; `CIRecord` rows are raw; `PassedCIRun`/`CIPassedExperiment` carry their evidence. |
-| Empty decisions | `Decision.audit` is `NonEmptyArray`. |
-| Program state machine missing | Program classes own pause/resume/stop/goal/methodology/exploration transitions. |
-| Review flow missing | `ReviewExperimentCommand`, `ExperimentReview`, `reviewExperiment` route and `experiment:review` capability. |
-| Merge leftovers | Removed: no merged state, no merge-conflict, no discard-after-merge, no runtime fallback. |
-| Boundary refinements missing | `NonEmptyString`, `PositiveInt`, `DurationMs`, branded ids, nominal `Schema`. |
+- `as`, `any`, `JSON.parse` and reflection can defeat any TypeScript guarantee; the only
+  defence is the single `fromRow`/factory boundary and runtime validation there.
+- Class instances lose methods on JSON round-trip; storage must hydrate through `fromRow`.
+- Ownership tokens prove a runtime check happened, not Session equality at compile time.
+- Gossip of compile-time maps (`CapabilityForCommand`, `CommandAuditMap`) is checked by
+  tests only where used; adding a command requires touching the maps, which the compiler
+  enforces for the handler and audit maps.
 
 ## Phases
 
-1. Domain implementation: factories for the nominal classes, command handlers and audit
-   writing, DSH storage-domain repositories, management routes, and the negative tests
-   kept green.
-2. Host services: uv environment builder, CI runner, artifact store, sampler with a
-   seeded RNG, Researcher pool and attention sink, pause/stop cancellation.
-3. Adapter: tool registration, Trigger seam to the prototype, Researcher preset, panel.
-4. Case migration: kunlungpt as a Program with Issues and Experiments; then the 24-hour
-   run.
+1. Factories/fromRow implementations, command handlers and audit, DSH storage-domain
+   repositories, management routes, negative tests kept green.
+2. Host services: uv builder, CI runner, artifact store, sampler with injected RNG,
+   session pool, attention, cancellation.
+3. Adapter: tool registration, Trigger seam, Researcher preset, panel.
+4. Case migration and 24-hour run.
 
-## Deliberate non-goals
+## Non-goals
 
-No missions, machines, batches or merge/mainline semantics; no scheduling; no GitHub
-integration; no stored best or aggregate; no event replay; no panel controls in v1.
+No missions, machines, batches, merge/mainline semantics, scheduling, GitHub integration,
+stored best/aggregates, event replay or panel controls in v1.
 
 ## Review request
 
-The blueprint now answers the adversarial review item by item and has executable negative
-tests. Please review `research-core/src/type-tests.ts` first, then the state classes and
-the command/executor maps. Implementation starts after approval.
+Please review the trust boundary (`static create` / `fromRow` in the state classes), the
+ownership tokens (`IssueAssignment`, `TicketBinding`), and the cancellation/CI-record
+surface first. Implementation starts after approval.

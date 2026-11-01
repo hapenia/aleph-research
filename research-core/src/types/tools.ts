@@ -5,7 +5,7 @@
  */
 import type { ImplementerPrincipal, OperatorPrincipal, ResearcherPrincipal, WatchdogPrincipal } from './actors.js'
 import type { CIRecord, MetricQuery, MetricQueryResult } from './metrics.js'
-import type { Experiment, ExperimentReview, OpenExperiment } from './experiment.js'
+import type { Experiment, ExperimentReview, OpenExperiment, ReadyExperiment } from './experiment.js'
 import type { Issue } from './issue.js'
 import type { Program } from './program.js'
 import type { ArtifactRef } from './artifacts.js'
@@ -13,6 +13,7 @@ import type { Attention } from './attention.js'
 import type { CommandOf, CommandType } from './commands.js'
 import type { DomainError, Result } from './errors.js'
 import type { ExperimentId, IssueId, ProgramId } from './ids.js'
+import type { StoreError } from './errors.js'
 
 /** A boundary schema: it parses untrusted input and emits JSON Schema for DSH tools. */
 export declare class Schema<T> {
@@ -20,6 +21,8 @@ export declare class Schema<T> {
   private readonly __schema: (value: T) => T
   parse(input: unknown): Result<T, DomainError>
   toJsonSchema(): unknown
+  static create<T>(): Schema<T>
+  static fromRow<T>(row: unknown): Result<Schema<T>, StoreError>
 }
 
 export interface ToolDefinition<Input, Output> {
@@ -64,8 +67,8 @@ export interface ResearcherTools {
 export interface ImplementerTools {
   readonly submitImplementation: CommandTool<
     'ticket.submit',
-    OpenExperiment,
-    Omit<CommandOf<'ticket.submit'>, 'ticketId' | 'experimentId'>
+    ReadyExperiment,
+    Omit<CommandOf<'ticket.submit'>, 'binding'>
   >
   readonly readExperiment: ToolDefinition<{ readonly experimentId: ExperimentId }, Experiment>
 }

@@ -1,19 +1,41 @@
 /** Mapping research audit facts to SuperAgent Triggers. */
-import type { AuditEntry } from './audit.js'
+import type { AuditAction, AuditEntry } from './audit.js'
 import type { Principal } from './actors.js'
 import type { DomainError, Result } from './errors.js'
 import type { IsoTimestamp, NonEmptyArray, ProgramId, TicketId } from './ids.js'
 import type { ProgramSnapshot } from './api.js'
 
 export type ResearchTriggerKind =
+  | 'program-created'
+  | 'program-paused'
+  | 'program-resumed'
+  | 'program-stopped'
+  | 'program-completed'
+  | 'program-goal-changed'
+  | 'program-methodology-changed'
+  | 'program-exploration-changed'
   | 'issue-created'
   | 'issue-claimed'
+  | 'issue-commented'
+  | 'issue-closed'
   | 'experiment-proposed'
   | 'experiment-opened'
+  | 'experiment-ready'
+  | 'experiment-revised'
+  | 'experiment-reviewed'
+  | 'experiment-closed'
   | 'ci-requested'
-  | 'ci-completed'
-  | 'review-commented'
+  | 'ci-started'
+  | 'ci-passed'
+  | 'ci-failed'
+  | 'artifact-stored'
+  | 'usage-recorded'
   | 'attention-raised'
+
+/** Compile-time total map; adding an audit action forces a trigger decision. */
+export type TriggerKindForAction = {
+  readonly [A in AuditAction]: ResearchTriggerKind | null
+}
 
 export type ResearchThreadRef =
   | { readonly kind: 'program'; readonly id: string }

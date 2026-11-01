@@ -2,7 +2,7 @@
  * User commands. Payloads are data; who may issue them is fixed at compile time by
  * CapabilityForCommand and ActorForCommand, and the result type by CommandResultMap.
  */
-import type { ImplementerPrincipal, OperatorPrincipal, ResearcherPrincipal } from './actors.js'
+import type { ImplementerPrincipal, OperatorPrincipal, ResearcherPrincipal, TicketBinding } from './actors.js'
 import type {
   CommitSha,
   DurationMs,
@@ -17,12 +17,18 @@ import type {
 import type { Budget, EvaluationContract, ExplorationLevel, UtilityConfig } from './program.js'
 import type { EnvironmentDeclaration } from './environment.js'
 import type { IssueLabel, IssueResolution, IssueComment } from './issue.js'
-import type { ExperimentReview, ExperimentPlan, OpenExperiment, CIPendingExperiment, ClosedExperiment } from './experiment.js'
-import type { RequestedCIRun } from './ci.js'
+import type {
+  ClosedExperiment,
+  CIPendingExperiment,
+  ExperimentPlan,
+  ExperimentReview,
+  OpenExperiment,
+  ReadyExperiment,
+} from './experiment.js'
 import type { AuditEntry } from './audit.js'
 import type { DomainError } from './errors.js'
 import type { Capability } from './actors.js'
-import type { AssignedIssue, ClosedIssue, OpenIssue, InReviewIssue } from './issue.js'
+import type { AssignedIssue, ClosedIssue, OpenIssue } from './issue.js'
 import type { PausedProgram, RunningProgram, StoppedProgram } from './program.js'
 
 export interface CreateProgramCommand {
@@ -107,13 +113,11 @@ export interface RequestCICommand {
   readonly type: 'ci.request'
   readonly programId: ProgramId
   readonly experimentId: ExperimentId
-  readonly ciRunId: string
 }
-/** The Host injects ticketId and experimentId; the model only supplies the submission. */
+/** The Host injects the TicketBinding; the model only supplies the submission. */
 export interface SubmitImplementationCommand {
   readonly type: 'ticket.submit'
-  readonly ticketId: TicketId
-  readonly experimentId: ExperimentId
+  readonly binding: TicketBinding
   readonly head: CommitSha
   readonly environment: EnvironmentDeclaration
 }
@@ -205,8 +209,8 @@ export type CommandResultMap = {
   readonly 'experiment.propose': OpenExperiment
   readonly 'experiment.review': ExperimentReview
   readonly 'experiment.close': ClosedExperiment
-  readonly 'ci.request': RequestedCIRun
-  readonly 'ticket.submit': OpenExperiment
+  readonly 'ci.request': CIPendingExperiment
+  readonly 'ticket.submit': ReadyExperiment
 }
 
 export type CommandResult<T extends CommandType> = CommandResultMap[T]
@@ -214,7 +218,7 @@ export type CommandResult<T extends CommandType> = CommandResultMap[T]
 export interface CommandContext<K extends CommandType> {
   readonly actor: ActorOfCommand<K>
   readonly at: import('./ids.js').IsoTimestamp
-  readonly requestId: string
+  readonly requestId: import('./ids.js').RequestId
 }
 
 /**

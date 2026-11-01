@@ -23,6 +23,8 @@ export type AuditAction =
   | 'program.goal-changed'
   | 'program.methodology-changed'
   | 'program.exploration-changed'
+  | 'program.completed'
+  | 'usage.recorded'
   | 'issue.created'
   | 'issue.claimed'
   | 'issue.commented'
@@ -31,6 +33,8 @@ export type AuditAction =
   | 'experiment.opened'
   | 'experiment.revised'
   | 'experiment.reviewed'
+  | 'experiment.ready'
+  | 'experiment.cancelled'
   | 'experiment.closed'
   | 'ci.requested'
   | 'ci.started'
@@ -47,6 +51,8 @@ export type ActorKindForAction = {
   readonly 'program.goal-changed': 'operator'
   readonly 'program.methodology-changed': 'operator'
   readonly 'program.exploration-changed': 'operator'
+  readonly 'program.completed': 'host'
+  readonly 'usage.recorded': 'host'
   readonly 'issue.created': 'operator' | 'researcher'
   readonly 'issue.claimed': 'researcher'
   readonly 'issue.commented': 'researcher' | 'operator'
@@ -55,6 +61,8 @@ export type ActorKindForAction = {
   readonly 'experiment.opened': 'host'
   readonly 'experiment.revised': 'implementer'
   readonly 'experiment.reviewed': 'researcher'
+  readonly 'experiment.ready': 'implementer'
+  readonly 'experiment.cancelled': 'host'
   readonly 'experiment.closed': 'researcher'
   readonly 'ci.requested': 'researcher'
   readonly 'ci.started': 'host'
@@ -72,6 +80,8 @@ export type SubjectKindForAction = {
   readonly 'program.goal-changed': 'program'
   readonly 'program.methodology-changed': 'program'
   readonly 'program.exploration-changed': 'program'
+  readonly 'program.completed': 'program'
+  readonly 'usage.recorded': 'program'
   readonly 'issue.created': 'issue'
   readonly 'issue.claimed': 'issue'
   readonly 'issue.commented': 'issue'
@@ -98,6 +108,8 @@ export type SubjectForAction = {
   readonly 'program.goal-changed': { readonly kind: 'program'; readonly id: ProgramId }
   readonly 'program.methodology-changed': { readonly kind: 'program'; readonly id: ProgramId }
   readonly 'program.exploration-changed': { readonly kind: 'program'; readonly id: ProgramId }
+  readonly 'program.completed': { readonly kind: 'program'; readonly id: ProgramId }
+  readonly 'usage.recorded': { readonly kind: 'program'; readonly id: ProgramId }
   readonly 'issue.created': { readonly kind: 'issue'; readonly id: IssueId }
   readonly 'issue.claimed': { readonly kind: 'issue'; readonly id: IssueId }
   readonly 'issue.commented': { readonly kind: 'issue'; readonly id: IssueId }
@@ -106,6 +118,8 @@ export type SubjectForAction = {
   readonly 'experiment.opened': { readonly kind: 'experiment'; readonly id: ExperimentId }
   readonly 'experiment.revised': { readonly kind: 'experiment'; readonly id: ExperimentId }
   readonly 'experiment.reviewed': { readonly kind: 'experiment'; readonly id: ExperimentId }
+  readonly 'experiment.ready': { readonly kind: 'experiment'; readonly id: ExperimentId }
+  readonly 'experiment.cancelled': { readonly kind: 'experiment'; readonly id: ExperimentId }
   readonly 'experiment.closed': { readonly kind: 'experiment'; readonly id: ExperimentId }
   readonly 'ci.requested': { readonly kind: 'ci-run'; readonly id: CIRunId }
   readonly 'ci.started': { readonly kind: 'ci-run'; readonly id: CIRunId }
@@ -148,7 +162,7 @@ export type CommandAuditMap = {
   readonly 'experiment.review': 'experiment.reviewed'
   readonly 'experiment.close': 'experiment.closed'
   readonly 'ci.request': 'ci.requested'
-  readonly 'ticket.submit': 'experiment.revised'
+  readonly 'ticket.submit': 'experiment.ready'
 }
 
 export type AuditActionOf<T extends CommandType> = T extends keyof CommandAuditMap ? CommandAuditMap[T] : never

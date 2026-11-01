@@ -8,12 +8,18 @@ import type { ArtifactRef } from './artifacts.js'
 import type { Attention } from './attention.js'
 import type { AuditEntry } from './audit.js'
 import type { CIRecord } from './metrics.js'
-import type { Experiment } from './experiment.js'
-import type { Issue, IssueComment } from './issue.js'
-import type { PausedProgram, Program, RunningProgram, StoppedProgram } from './program.js'
+import type {
+  CIPendingExperiment,
+  ClosedExperiment,
+  Experiment,
+  ExperimentReview,
+  OpenExperiment,
+} from './experiment.js'
+import type { AssignedIssue, ClosedIssue, Issue, IssueComment, OpenIssue } from './issue.js'
+import type { ExplorationLevel, PausedProgram, Program, RunningProgram, StoppedProgram } from './program.js'
 import type { CommandOf } from './commands.js'
 import type { DomainError, DomainFailure, Result } from './errors.js'
-import type { ExperimentId, IssueId, ProgramId, Untrusted } from './ids.js'
+import type { ExperimentId, IssueId, NonEmptyString, ProgramId } from './ids.js'
 
 export type ApiResponse<T> = { readonly ok: true; readonly value: T } | DomainFailure
 
@@ -64,39 +70,39 @@ export interface CreateIssueDto {
 
 /** Parsers refine untrusted bodies into commands; validation errors are domain refusals. */
 export interface RequestParsers {
-  createProgram(input: Untrusted<unknown>): Result<CommandOf<'program.create'>, DomainError>
-  pauseProgram(input: Untrusted<unknown>): Result<CommandOf<'program.pause'>, DomainError>
-  resumeProgram(input: Untrusted<unknown>): Result<CommandOf<'program.resume'>, DomainError>
-  stopProgram(input: Untrusted<unknown>): Result<CommandOf<'program.stop'>, DomainError>
-  setGoal(input: Untrusted<unknown>): Result<CommandOf<'program.set-goal'>, DomainError>
-  setMethodology(input: Untrusted<unknown>): Result<CommandOf<'program.set-methodology'>, DomainError>
-  setExploration(input: Untrusted<unknown>): Result<CommandOf<'program.set-exploration'>, DomainError>
-  createIssue(input: Untrusted<unknown>): Result<CommandOf<'issue.create'>, DomainError>
-  claimIssue(input: Untrusted<unknown>): Result<CommandOf<'issue.claim'>, DomainError>
-  commentIssue(input: Untrusted<unknown>): Result<CommandOf<'issue.comment'>, DomainError>
-  closeIssue(input: Untrusted<unknown>): Result<CommandOf<'issue.close'>, DomainError>
-  proposeExperiment(input: Untrusted<unknown>): Result<CommandOf<'experiment.propose'>, DomainError>
-  reviewExperiment(input: Untrusted<unknown>): Result<CommandOf<'experiment.review'>, DomainError>
-  closeExperiment(input: Untrusted<unknown>): Result<CommandOf<'experiment.close'>, DomainError>
-  requestCI(input: Untrusted<unknown>): Result<CommandOf<'ci.request'>, DomainError>
+  createProgram(input: unknown): Result<CommandOf<'program.create'>, DomainError>
+  pauseProgram(input: unknown): Result<CommandOf<'program.pause'>, DomainError>
+  resumeProgram(input: unknown): Result<CommandOf<'program.resume'>, DomainError>
+  stopProgram(input: unknown): Result<CommandOf<'program.stop'>, DomainError>
+  setGoal(input: unknown): Result<CommandOf<'program.set-goal'>, DomainError>
+  setMethodology(input: unknown): Result<CommandOf<'program.set-methodology'>, DomainError>
+  setExploration(input: unknown): Result<CommandOf<'program.set-exploration'>, DomainError>
+  createIssue(input: unknown): Result<CommandOf<'issue.create'>, DomainError>
+  claimIssue(input: unknown): Result<CommandOf<'issue.claim'>, DomainError>
+  commentIssue(input: unknown): Result<CommandOf<'issue.comment'>, DomainError>
+  closeIssue(input: unknown): Result<CommandOf<'issue.close'>, DomainError>
+  proposeExperiment(input: unknown): Result<CommandOf<'experiment.propose'>, DomainError>
+  reviewExperiment(input: unknown): Result<CommandOf<'experiment.review'>, DomainError>
+  closeExperiment(input: unknown): Result<CommandOf<'experiment.close'>, DomainError>
+  requestCI(input: unknown): Result<CommandOf<'ci.request'>, DomainError>
 }
 
 /** Route surface; the actor parameter is the compile-time authorization. */
 export interface ManagementApi {
-  createProgram(actor: OperatorPrincipal, body: Untrusted<unknown>): Promise<ApiResponse<RunningProgram>>
+  createProgram(actor: OperatorPrincipal, body: unknown): Promise<ApiResponse<RunningProgram>>
   pauseProgram(actor: OperatorPrincipal, programId: ProgramId): Promise<ApiResponse<PausedProgram>>
   resumeProgram(actor: OperatorPrincipal, programId: ProgramId): Promise<ApiResponse<RunningProgram>>
   stopProgram(actor: OperatorPrincipal, programId: ProgramId): Promise<ApiResponse<StoppedProgram>>
-  setGoal(actor: OperatorPrincipal, programId: ProgramId, goal: string): Promise<ApiResponse<RunningProgram>>
-  setMethodology(actor: OperatorPrincipal, programId: ProgramId, methodology: string): Promise<ApiResponse<RunningProgram>>
-  setExploration(actor: OperatorPrincipal, programId: ProgramId, level: string): Promise<ApiResponse<RunningProgram>>
-  createIssue(actor: OperatorPrincipal | ResearcherPrincipal, body: Untrusted<unknown>): Promise<ApiResponse<Issue>>
-  claimIssue(actor: ResearcherPrincipal, issueId: IssueId): Promise<ApiResponse<Issue>>
-  commentIssue(actor: OperatorPrincipal | ResearcherPrincipal, issueId: IssueId, body: Untrusted<unknown>): Promise<ApiResponse<IssueComment>>
-  closeIssue(actor: OperatorPrincipal | ResearcherPrincipal, issueId: IssueId, body: Untrusted<unknown>): Promise<ApiResponse<Issue>>
-  proposeExperiment(actor: ResearcherPrincipal, issueId: IssueId, body: Untrusted<unknown>): Promise<ApiResponse<Experiment>>
-  reviewExperiment(actor: ResearcherPrincipal, experimentId: ExperimentId, body: Untrusted<unknown>): Promise<ApiResponse<Experiment>>
-  closeExperiment(actor: ResearcherPrincipal, experimentId: ExperimentId, body: Untrusted<unknown>): Promise<ApiResponse<Experiment>>
-  requestCI(actor: ResearcherPrincipal, experimentId: ExperimentId): Promise<ApiResponse<CIRecord>>
+  setGoal(actor: OperatorPrincipal, programId: ProgramId, goal: NonEmptyString): Promise<ApiResponse<RunningProgram>>
+  setMethodology(actor: OperatorPrincipal, programId: ProgramId, methodology: NonEmptyString): Promise<ApiResponse<RunningProgram>>
+  setExploration(actor: OperatorPrincipal, programId: ProgramId, level: ExplorationLevel): Promise<ApiResponse<RunningProgram>>
+  createIssue(actor: OperatorPrincipal | ResearcherPrincipal, body: unknown): Promise<ApiResponse<OpenIssue>>
+  claimIssue(actor: ResearcherPrincipal, issueId: IssueId): Promise<ApiResponse<AssignedIssue>>
+  commentIssue(actor: OperatorPrincipal | ResearcherPrincipal, issueId: IssueId, body: unknown): Promise<ApiResponse<IssueComment>>
+  closeIssue(actor: OperatorPrincipal | ResearcherPrincipal, issueId: IssueId, body: unknown): Promise<ApiResponse<ClosedIssue>>
+  proposeExperiment(actor: ResearcherPrincipal, issueId: IssueId, body: unknown): Promise<ApiResponse<OpenExperiment>>
+  reviewExperiment(actor: ResearcherPrincipal, experimentId: ExperimentId, body: unknown): Promise<ApiResponse<ExperimentReview>>
+  closeExperiment(actor: ResearcherPrincipal, experimentId: ExperimentId, body: unknown): Promise<ApiResponse<ClosedExperiment>>
+  requestCI(actor: ResearcherPrincipal, experimentId: ExperimentId): Promise<ApiResponse<CIPendingExperiment>>
   snapshot(actor: Principal, programId: ProgramId): Promise<ApiResponse<ProgramSnapshot>>
 }

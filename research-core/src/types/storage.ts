@@ -2,11 +2,11 @@
  * Host storage ports: current-state repositories plus an audit log. There is no replay
  * engine; every write is versioned for optimistic concurrency.
  */
-import type { ArtifactId, CIRunId, ExperimentId, IssueId, ProgramId, ResearcherSessionId, Version } from './ids.js'
+import type { ArtifactId, CIRunId, ExperimentId, ImplementerSessionId, IssueId, ProgramId, ResearcherSessionId, TicketId, Version } from './ids.js'
 import type { Program } from './program.js'
 import type { Issue, IssueComment } from './issue.js'
 import type { Experiment, ExperimentReview } from './experiment.js'
-import type { MetricQuery, MetricQueryResult, CIRecord } from './metrics.js'
+import type { MetricQuery, MetricQueryResult, CIRecord, PassedCIRecord } from './metrics.js'
 import type { ArtifactRef } from './artifacts.js'
 import type { Attention } from './attention.js'
 import type { AuditLog } from './audit.js'
@@ -46,8 +46,17 @@ export interface ExperimentRepository {
 export interface CIRecordRepository {
   get(id: CIRunId): Promise<CIRecord | undefined>
   listByExperiment(experimentId: ExperimentId): Promise<readonly CIRecord[]>
+  /** Only passed records with all required metrics; used by the sampler. */
+  listPassed(programId: ProgramId): Promise<readonly PassedCIRecord[]>
   query(query: MetricQuery): Promise<MetricQueryResult>
   append(record: CIRecord): Promise<Result<void, StoreError>>
+}
+
+/** The Host reads the Ticket to mint a TicketBinding; the model never supplies it. */
+export interface TicketRepository {
+  get(ticketId: TicketId): Promise<
+    { readonly experimentId: ExperimentId; readonly sessionId: ImplementerSessionId } | undefined
+  >
 }
 
 export interface ArtifactRepository {
@@ -66,6 +75,7 @@ export interface UnitOfWork {
   readonly issues: IssueRepository
   readonly experiments: ExperimentRepository
   readonly ciRecords: CIRecordRepository
+  readonly tickets: TicketRepository
   readonly artifacts: ArtifactRepository
   readonly attention: AttentionRepository
   readonly audit: AuditLog

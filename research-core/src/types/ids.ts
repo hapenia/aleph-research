@@ -27,6 +27,7 @@ export type IsoTimestamp = Brand<string, 'IsoTimestamp'>
 export type Version = Brand<number, 'Version'>
 export type NonEmptyString = Brand<string, 'NonEmptyString'>
 export type PositiveInt = Brand<number, 'PositiveInt'>
+export type PositiveNumber = Brand<number, 'PositiveNumber'>
 export type NonNegativeNumber = Brand<number, 'NonNegativeNumber'>
 export type DurationMs = Brand<number, 'DurationMs'>
 export type NonEmptyArray<T> = readonly [T, ...T[]]

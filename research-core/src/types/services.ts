@@ -7,7 +7,21 @@ import type { Attention } from './attention.js'
 import type { CIFailureReason } from './ci.js'
 import type { BuiltEnvironment, EnvironmentDeclaration, RepositorySnapshot } from './environment.js'
 import type { MetricMap } from './metrics.js'
-import type { ExperimentId, ImplementerSessionId, IsoTimestamp, ProgramId, ResearcherSessionId, TicketId } from './ids.js'
+import type {
+  BranchName,
+  CIRunId,
+  CommitSha,
+  DurationMs,
+  ExperimentId,
+  ImplementerSessionId,
+  IsoTimestamp,
+  MetricName,
+  NonEmptyArray,
+  NonEmptyString,
+  ProgramId,
+  ResearcherSessionId,
+  TicketId,
+} from './ids.js'
 import type { DomainError, Result } from './errors.js'
 import type { Sampler } from './sampling.js'
 
@@ -22,17 +36,17 @@ export interface EnvironmentBuilder {
 
 /** Copies a branch at a commit into a workspace the CI can run in. */
 export interface RepositoryService {
-  snapshot(branch: string, commit: string): Promise<Result<RepositorySnapshot, DomainError>>
+  snapshot(branch: BranchName, commit: CommitSha): Promise<Result<RepositorySnapshot, DomainError>>
 }
 
 export interface CIExecutionInput {
   readonly experimentId: ExperimentId
-  readonly commit: string
+  readonly commit: CommitSha
   readonly environment: BuiltEnvironment
   /** The Program's evaluation contract: entry, timeout, required metrics. */
-  readonly ciEntry: string
-  readonly timeoutMs: number
-  readonly requiredMetrics: readonly string[]
+  readonly ciEntry: NonEmptyString
+  readonly timeoutMs: DurationMs
+  readonly requiredMetrics: NonEmptyArray<MetricName>
 }
 
 export type CIExecutionResult =
@@ -54,9 +68,15 @@ export interface CIRunner {
   run(input: CIExecutionInput): Promise<Result<CIExecutionResult, DomainError>>
 }
 
+/** What the Host cancelled, so state transitions can follow. */
+export type CancellationRef =
+  | { readonly kind: 'experiment'; readonly id: ExperimentId }
+  | { readonly kind: 'ci-run'; readonly id: CIRunId }
+  | { readonly kind: 'ticket'; readonly id: TicketId }
+
 /** Pause/stop cancels in-flight Implementer work and pending CI. */
 export interface RunCanceller {
-  cancelProgram(programId: ProgramId, reason: string): Promise<readonly TicketId[]>
+  cancelProgram(programId: ProgramId, reason: NonEmptyString): Promise<readonly CancellationRef[]>
 }
 
 export interface SessionPool {

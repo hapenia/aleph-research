@@ -53,3 +53,9 @@ export type DomainFailure = {
     readonly error: Extract<DomainError, { readonly code: C }>
   }
 }[DomainErrorCode]
+
+
+/** Implementations switch on the code; the return type is the correlated failure union. */
+export interface DomainFailureMapper {
+  toFailure(error: DomainError): DomainFailure
+}

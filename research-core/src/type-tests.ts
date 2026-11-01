@@ -8,6 +8,7 @@ import type {
   CIPassedExperiment,
   CIRunningExperiment,
   CIFailedExperiment,
+  FailedCICompletion,
   CommandContext,
   CommandExecutor,
   UserCommand,
@@ -22,6 +23,12 @@ import type {
   IssueId,
   IssueRepository,
   OpenIssue,
+  ReadyExperiment,
+  AssignedIssue,
+  IssueAssignment,
+  CIPendingExperiment,
+  CompletedProgram,
+  ExperimentId,
   OperatorPrincipal,
   PausedProgram,
   ProgramId,
@@ -31,6 +38,7 @@ import type {
   ToolDefinition,
   NonEmptyString,
   IsoTimestamp,
+  RequestId,
   IssueComment,
 } from './types/index.js'
 
@@ -42,13 +50,14 @@ declare const operator: OperatorPrincipal
 declare const implementer: ImplementerPrincipal
 declare const host: HostPrincipal
 declare const runningCI: CIRunningExperiment
+declare const failedCompletion: FailedCICompletion
 declare const programId: ProgramId
 declare const issueId: IssueId
 declare const issues: IssueRepository
 declare const executor: CommandExecutor
 declare const pauseCommand: CommandOf<'program.pause'>
 declare const at: IsoTimestamp
-declare const requestId: string
+declare const requestId: RequestId
 
 // Structural width cannot forge a nominal Program variant.
 // @ts-expect-error a spread object lacks the private brand of RunningProgram
@@ -71,7 +80,7 @@ const wrongProgramState: RunningProgram = paused
 const wrongStop: StoppedProgram = { ...running, stoppedAt: at }
 
 // Transitions return exactly one target variant.
-const failedRun: CIFailedExperiment = runningCI.failCI(host, 'entry-failed', 'boom' as NonEmptyString, at)
+const failedRun: CIFailedExperiment = runningCI.failCI(host, failedCompletion, at)
 // @ts-expect-error a failed CI experiment is not a passed one
 const passedFromFailure: CIPassedExperiment = failedRun
 // @ts-expect-error a failed CI experiment is not an open one
@@ -124,7 +133,7 @@ const wrongAuditActor: AuditEntry = {
 const emptyDecision: Decision<RunningProgram> = { value: running, audit: [] }
 
 // Implementer tool input omits Host-injected fields.
-declare const fullSubmitTool: ToolDefinition<CommandOf<'ticket.submit'>, OpenIssue>
+declare const fullSubmitTool: ToolDefinition<CommandOf<'ticket.submit'>, ReadyExperiment>
 declare const implementerTools: ImplementerTools
 // @ts-expect-error the tool input must not include ticketId/experimentId
 const wrongSubmitTool: ImplementerTools['submitImplementation'] = fullSubmitTool
@@ -136,6 +145,26 @@ declare const derivedLineage: DerivedLineage
 const wrongLineage: DerivedLineage = freshLineage
 // @ts-expect-error a derived lineage is not a fresh lineage
 const wrongLineage2: FreshLineage = derivedLineage
+
+// Ownership tokens cannot be replaced by principals.
+declare const assignedIssue: AssignedIssue
+declare const issueAssignment: IssueAssignment
+declare const someResearcher: ResearcherPrincipal
+declare const someExperimentId: ExperimentId
+// @ts-expect-error a principal is not an ownership token
+assignedIssue.addExperiment(someResearcher, someExperimentId, at)
+assignedIssue.addExperiment(issueAssignment, someExperimentId, at)
+
+// Cancellation is Host-only.
+declare const pendingExperiment: CIPendingExperiment
+// @ts-expect-error a Researcher cannot cancel pending CI
+pendingExperiment.cancel(someResearcher, at)
+pendingExperiment.cancel(host, at)
+
+// A completed Program has no transitions left.
+declare const completedProgram: CompletedProgram
+// @ts-expect-error a completed Program cannot be paused
+completedProgram.pause(operator, at)
 
 export {
   forgedRunning,

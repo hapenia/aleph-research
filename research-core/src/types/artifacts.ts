@@ -1,5 +1,6 @@
 /** Persisted results: model weights, reports, figures and logs. */
 import type { ArtifactId, CIRunId, CommitSha, ExperimentId, IsoTimestamp, ProgramId } from './ids.js'
+import type { Result, StoreError } from './errors.js'
 
 export type ArtifactKind = 'model-weights' | 'report' | 'figure' | 'logs' | 'other'
 export type ArtifactRetention = 'keep' | 'temporary'
@@ -17,6 +18,8 @@ export declare class ArtifactRef {
   readonly ciRunId: CIRunId
   readonly retention: ArtifactRetention
   readonly createdAt: IsoTimestamp
+  static create(input: Omit<ArtifactRef, 'fromRow'>): ArtifactRef
+  static fromRow(row: unknown): Result<ArtifactRef, StoreError>
 }
 
 /** A result file the CI entry produced; the Host copies it into ArtifactStore. */
