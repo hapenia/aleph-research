@@ -23,6 +23,9 @@
   旧 operator skills 与旧驱动脚本已归档到 `archive/`，不再参与运行时与 CI。
 - **面板修复**：健康徽章优先显示 `health.runtime`，GitHub Source 关闭不再被误报为
   `已暂停`。
+- **旧设计缺口回补（按评审决定）**：case runtime 自带 uv、工单可声明资源并在
+  AGENTS.md 中可见、研究者方法论 skill 追加到每个工单；mission/批处理、多角色
+  cohort、Host report commit、GitHub 协同按评审决定不恢复。
 
 ## 验证证据
 

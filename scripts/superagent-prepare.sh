@@ -17,6 +17,20 @@ template="${ALEPH_TEMPLATE_BRANCH:-main}"
 data_dir="${ALEPH_DATA_DIR:-}"
 python="${ALEPH_PYTHON:-python3}"
 conventions="${ALEPH_CONVENTIONS:-}"
+uv=""
+if [ -n "${ALEPH_UV:-}" ] && [ -x "${ALEPH_UV}" ]; then uv="$ALEPH_UV"; fi
+resources="${ALEPH_RESOURCES:-null}"
+methodology="${ALEPH_METHODOLOGY_PATH:-}"
+if [ -n "$uv" ]; then
+  uv_help="The project runtime bundles uv at $uv. Use it for extra dependencies inside this ticket, for example: $uv venv .venv --python $python ; $uv pip install --python .venv/bin/python -r requirements.txt . Record the exact commands in the ticket. Never modify the shared runtime or install packages system-wide; the submission still has to run under $python."
+else
+  uv_help="No uv is bundled with this runtime; use only the packages the runtime provides."
+fi
+if [ "$resources" = "null" ]; then
+  resources_help="No compute budget was declared beyond the ticket default."
+else
+  resources_help="$resources"
+fi
 
 if [ ! -d "$repo/.git" ] && [ ! -f "$repo/.git" ]; then
   echo "research repository not found: $repo" >&2
@@ -57,8 +71,16 @@ report that the data is missing instead of reading around the restriction.
 
 ## Runtime
 
-Use \`$python\` as the interpreter. It already has the project runtime installed;
-do not create or install environments.
+Use \`$python\` as the interpreter; the submission has to run under it. Do not modify
+the shared runtime.
+
+## Dependencies
+
+$uv_help
+
+## Declared resources
+
+$resources_help
 
 ## Conventions
 
@@ -94,6 +116,11 @@ environment does not have, report that limitation instead of improvising around 
 
 Report what you changed, what you measured and anything that blocks a person.
 EOF
+
+if [ -n "$methodology" ] && [ -f "$methodology" ]; then
+  printf '\n\n' >> "$dir/AGENTS.md"
+  cat "$methodology" >> "$dir/AGENTS.md"
+fi
 
 cat > "$dir/.gitignore" <<'EOF'
 data/

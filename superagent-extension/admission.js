@@ -12,8 +12,24 @@ import { classifyRequest, decideAcceptance, parseBudget } from './budget.js'
  * @param {{ text: string, confirmed?: boolean, budget?: object, usage?: object, history?: object[] }} input
  * @returns {{ accepted: boolean, auto: boolean, tier: string, confirmationRequired: boolean, reason: string }}
  */
-export function admitRequest({ text, confirmed = false, budget = parseBudget(), usage = {}, history = [] } = {}) {
-  const { tier, reason } = classifyRequest({ text, history })
+/** A declared GPU or a large CPU/memory request needs a person, whatever the text says. */
+export function tierForResources(resources) {
+  if (!resources || typeof resources !== 'object') return null
+  if (resources.gpu === true) return 'training'
+  const cpus = Number(resources.cpu ?? 0)
+  const memory = Number(resources.memoryGb ?? 0)
+  if (Number.isFinite(cpus) && cpus >= 8) return 'training'
+  if (Number.isFinite(memory) && memory >= 64) return 'training'
+  return null
+}
+
+export function admitRequest({ text, confirmed = false, resources = null, budget = parseBudget(), usage = {}, history = [] } = {}) {
+  const classified = classifyRequest({ text, history })
+  const resourceTier = tierForResources(resources)
+  const tier = resourceTier ?? classified.tier
+  const reason = resourceTier
+    ? `declared resources ${JSON.stringify(resources)} need a person`
+    : classified.reason
   const decision = decideAcceptance({ tier, usage, budget })
   const auto = decision.decision === 'auto'
   const accepted = auto || confirmed === true

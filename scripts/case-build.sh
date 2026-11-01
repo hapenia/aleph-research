@@ -55,10 +55,14 @@ fi
 if [ ! -x "$dest/runtime/bin/python" ]; then
   uv venv "$dest/runtime" --python "$python_bin" >/dev/null
   uv pip install --python "$dest/runtime/bin/python" \
-    numpy pandas scipy scikit-learn lightgbm >/dev/null
+    numpy pandas scipy scikit-learn lightgbm uv >/dev/null
   echo "built runtime: $dest/runtime"
 else
   echo "runtime already present: $dest/runtime"
+  if [ ! -x "$dest/runtime/bin/uv" ]; then
+    uv pip install --python "$dest/runtime/bin/python" uv >/dev/null
+    echo "added uv to the runtime"
+  fi
 fi
 
 "$dest/runtime/bin/python" - <<'PY'
