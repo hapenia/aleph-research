@@ -111,10 +111,21 @@ Adopted:
 | issues #11, #12 | evaluation history and best-score tracking with a select route |
 | issue #14 | single Composer and InfraOptimizer activation per project |
 
-Deliberately left open: #3, #4, #5 describe concurrency and budget limits that
-belong to a multi-machine model, #8 asks for strategy text that the mission
-prompt already carries, #9 is covered by the persistent Composer, and #10
-(pause, resume, cancel, finish) an operation surface that is still missing.
+A second review covered issues #22, #23 and pull requests #24-#32:
+
+| Upstream | Behaviour now in the tree |
+| --- | --- |
+| issue #22 / PR #24 | the console reads agent records from the snapshot instead of the project object |
+| issue #23 / PR #25 | evaluation scores committed code only, refuses a dirty worktree, runs from a detached snapshot, and stops its whole process tree by environment marker before removing the input |
+| PR #27 | moving the best result refuses a branch that is checked out in a worktree |
+| PR #28 | researchers deliver their closing report to the Leader through native parent delivery |
+| PR #29 | a batch whose runner exited without reporting is settled by the watchdog and the machine is freed |
+| issue #10 / PR #26 | pause, resume and cancel for a project or one batch, as tools, operator routes and a console flag |
+| PR #31 | the Composer can dispatch InfraOptimizer (already in the tree) |
+
+Still open by design: #3, #4, #5 describe concurrency and budget limits that
+belong to a multi-machine model, and #8 asks for strategy text that the mission
+prompt already carries.
 
 ## Machine load
 
