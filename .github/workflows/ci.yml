@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  plugin:
-    name: plugin syntax and tests
+  extension:
+    name: extension syntax and tests
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -25,22 +25,19 @@ jobs:
           node-version: '26'
 
       - name: Install dependencies
-        working-directory: dsh-plugin
+        working-directory: superagent-extension
         run: npm install --no-audit --no-fund
 
       - name: Check syntax
         run: |
-          node --check dsh-plugin/index-v2.js
-          node --check dsh-plugin/client.js
           node --check superagent-extension/index.js
+          node --check superagent-extension/research-extension.js
           node --check superagent-extension/client.js
 
-      - name: Run plugin tests
-        working-directory: dsh-plugin
-        run: npm test
-
-      - name: Run superagent extension tests
-        working-directory: superagent-extension
+      - name: Check shell syntax
         run: |
-          npm install --no-audit --no-fund
-          npm test
+          for script in scripts/*.sh; do bash -n "$script"; done
+
+      - name: Run extension tests
+        working-directory: superagent-extension
+        run: npm test

@@ -59,24 +59,24 @@ check must pass before merge.
 
 `.github/workflows/ci.yml` runs on every pull request and on `main`:
 
-- `node --check` on the plugin sources;
-- the plugin test suite.
+- `node --check` on the extension sources;
+- the extension test suite under `superagent-extension`.
 
-The workflow uses Node 26 and installs only `dsh-plugin` dependencies. Keep CI under
-three minutes; a slow job stops being a gate.
+The workflow uses Node 26 and installs only the extension's dependencies. Keep CI
+under three minutes; a slow job stops being a gate.
 
 ## Releases
 
 Functionality and version bumps are separate events.
 
 1. When `main` is worth releasing, open `release/vX.Y.Z` and update
-   `dsh-plugin/package.json` and `CHANGELOG.md`.
+   `superagent-extension/package.json` and `CHANGELOG.md`.
 2. Merge that pull request, then tag the merge commit `vX.Y.Z` and publish release
    notes from the changelog section.
 3. `CHANGELOG.md` follows Keep a Changelog: `Added`, `Changed`, `Fixed`, `Removed`
    under an `Unreleased` heading, moved under the version at release time.
 
-The version in `dsh-plugin/package.json` must equal the tag without the `v`.
+The version in `superagent-extension/package.json` must equal the tag without the `v`.
 
 ## Issues
 

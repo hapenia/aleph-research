@@ -1,147 +1,82 @@
 # AlephResearch
 
-AlephResearch is a DSH-native research project plugin. A researcher works in a
-research repo; hardware-heavy work is packaged as an independent mission repo
-branch, queued on proposal, composed into a machine-bound batch by
-MissionComposer, optimized and run by InfraOptimizer, and returned to the
-researcher through the pre-batch mission branch.
+AlephResearch is an automated research system built on DeepSeek Harness and the
+Super-agent architecture (`dsh-superagent`). A research request becomes a Trigger,
+the Host evaluates and authorizes it, and a Worker Session researches in its own
+ticket repository while the Host scores the committed result.
 
-## Running a case iteration
+The migration from the earlier Leader / Composer / Researcher / Batch plugin is
+complete in code; `archive/legacy-plugin` keeps that implementation for history and
+`docs/superagent-migration.md` records what each phase proved.
 
-A case is prepared once and copied per iteration, so a plugin change is always
-exercised against the same inputs.
+## Quick start
 
 ```bash
-# once: build the template and its shared runtime
+# once: build the case template and its runtime
 ./scripts/case-build.sh kunlungpt
 
-# every iteration: copy the template into an isolated run
-./scripts/case-run.sh iter7
+# start a full case on the superagent composition
+./scripts/superagent-case.sh kunlungpt case-1
+
+# exercise the whole path on a tiny fixture (about 3 minutes)
+./scripts/superagent-smoke.sh smoke-1
+
+# sample an existing case lab unattended (24 h by default)
+ALEPH_SOAK_RUN=/tmp/aleph-runs/case-1 ./scripts/superagent-soak.sh case-1 24
+
+# stop and remove a case lab
+./scripts/superagent-case-stop.sh case-1
 ```
 
-`case-build.sh` copies the problem statement, the evaluator, the visible wells
-and the hidden testsets out of the read-only source project, and installs a
-shared Python with numpy, pandas, scipy, scikit-learn and lightgbm. `case-run.sh`
-copies that template into a new run root with its own `DSH_HOME`, leader
-workspace, port and credentials, then prints the panel URL and project id.
+`superagent-case.sh` prints the panel URL and token. Open the AlephResearch panel
+to watch results, open tickets and the orchestrator load; the same data is served
+by `GET /aleph/api/results`, `GET /aleph/api/state` and the prototype's
+`GET /orchestrator/api/state`.
 
-Once researchers have proposed missions, `scripts/case-drive.sh` replays the
-rest headlessly:
+## How it works
 
-```bash
-./scripts/case-drive.sh /tmp/aleph-runs/iter7 scaffold
-./scripts/case-drive.sh /tmp/aleph-runs/iter7 batch
-./scripts/case-drive.sh /tmp/aleph-runs/iter7 run
-./scripts/case-drive.sh /tmp/aleph-runs/iter7 evaluate
-```
+- **Source**: the `aleph` Source accepts local research requests as Triggers on
+  Threads `research:<project>:ticket:<ticket>`.
+- **Admission**: the Host classifies each request into budget tiers; cheap work
+  auto-accepts, `training`/`design` waits for an operator confirmation, and an
+  optional hourly cap bounds automation (`POST /aleph/api/budget`).
+- **Ticket**: accepted work becomes a Ticket with an explicit Mandate. The Executor
+  create a repository per ticket: the prepare script starts it from the research
+  repository's template branch, copies only the configured data directory and writes
+  `AGENTS.md` with the data policy, runtime and project conventions.
+- **Worker**: a Worker Session runs in that ticket repository. Shell reads are
+  confined by a bwrap runner that binds only system roots and the ticket workspace,
+  so the operator home, other projects and the source data stay invisible.
+- **Evaluation**: `aleph_submit_result` refuses uncommitted work, runs the project
+  evaluator with a marker that lets the Host kill the whole process tree, and feeds
+  the score back as a `result` Trigger; the results log keeps the history and best
+  score (`GET /aleph/api/results`).
+- **Watchdog**: an optional resident Session (`ALEPH_WATCHDOG_INTERVAL_MS`) receives
+  stall briefs and can stop or retry tickets.
+- **Configuration**: research settings are versioned and applied hot
+  (`/aleph/api/config`, rollback included); extension code reloads from the panel
+  through `POST /aleph/api/reload`.
 
-The template and runtime live under `.case-templates/` and are not committed.
+See `docs/architecture.md` for the full picture and `docs/superagent-migration.md`
+for the phase-by-phase evidence.
 
-## Repositories and state
+## Repository layout
 
-A DSH workspace/project contains:
+- `superagent-extension/`: the AlephResearch plugin (Source kind, tools, routes,
+  panel, tests). This is the only runtime plugin now.
+- `vendor/dsh-superagent`: pinned snapshot of the prototype, built locally with
+  `scripts/build-superagent-vendor.sh` and the patch series in `vendor/patches`.
+- `scripts/`: lab, case, smoke, soak and verification entry points.
+- `docs/`: architecture, migration record, status and git workflow.
+- `archive/`: the retired plugin, its operator skills and the scripts that drove it.
 
-- `skills/`: operator skills for the Leaders, researchers and the Composer,
-  installed into the lab's DSH home by the run scripts.
-- `research/`: the researcher's own git repo and branches.
-- `missions/`: a separate mission repo initialized from `template`.
-- MissionQueue, BatchQueue, Machine registry, agents and results in the
-  `aleph_project` DSH storage domain.
+## Verification
 
-Aleph itself carries no case-specific rules. Anything a researcher needs to
-know about a project, such as a submission format or a metric, arrives as that
-project's `conventions` and is written into the research scaffold and the
-researcher prompt. A mission is only a unit of compute someone asked for: its contents
-are the researcher's business.
+`scripts/verify.sh` is the local gate: extension syntax, shell syntax, and the
+extension test suite (108 tests). CI runs the same checks on every pull request,
+and `main` is protected: every change lands through a pull request with a squash
+merge.
 
-There is no campaign layer and no `~/.aleph` directory.
+## License
 
-## Mission lifecycle
-
-1. Researcher works in the research repo and commits research changes. The
-   researcher can inspect the complete git history of both research and mission
-   repositories with `git log --all`, `git branch -a` and `git show`.
-2. Before proposing a mission, the researcher checks mission history and
-   branches for an equivalent mission that already ran. Already-run missions
-   must not be rerun; their result commits and envelopes are read instead.
-3. For a hardware-heavy task, researcher creates a mission branch from
-   `template`, adds `missions/<mission-id>/mission.json`, code, uv project and
-   entrypoint, then calls `aleph_propose_mission`.
-4. The proposal enters the dispatch queue directly; no approval step exists.
-5. MissionComposer (`aleph_run_composer`) merges queued mission branches into
-   a machine-bound batch branch and resolves merge conflicts.
-6. InfraOptimizer (`aleph_run_infra`) optimizes the merged batch code for the
-   target machine, commits the optimization and runs the single batch
-   entrypoint.
-7. Each mission receives a result envelope and a result commit. The Host
-   cherry-picks that commit onto the mission's pre-batch branch.
-8. The researcher waits only for its own missions, calls `aleph_evaluate`, and
-   the Host evaluates the research branch and writes the report into the
-   research commit message.
-
-The project default researcher count is 4. Each researcher gets a separate
-research branch and worktree.
-
-## Tools
-
-- `aleph_init_project`
-- `aleph_status`
-- `aleph_propose_mission`
-- `aleph_run_composer`
-- `aleph_form_batch`
-- `aleph_run_infra`
-- `aleph_run_batch`
-- `aleph_evaluate`
-- `aleph_run_researcher`
-- `aleph_run_researchers` (default count 4)
-
-## Install
-
-```bash
-npm install --prefix dsh-plugin
-dsh plugin --profile web add "$PWD/dsh-plugin"
-```
-
-Reload the Web UI, open the project workspace, and choose `Aleph Research`.
-The `Aleph` sidebar entry shows the project, machines, agents, batches and
-mission queues.
-
-For an isolated test profile:
-
-```bash
-./scripts/dsh-lab.sh
-```
-
-## Result envelope
-
-Each mission result is a fixed envelope with free-form payload:
-
-```json
-{
-  "schema": 1,
-  "mission_id": "m-test",
-  "batch_id": "b-...",
-  "machine_id": "local",
-  "status": "done",
-  "metrics": {},
-  "artifacts": [],
-  "logs": [],
-  "resource": {},
-  "error": null
-}
-```
-
-Results are committed to `results/<mission-id>/result.json` on the mission
-branch and cherry-picked back to the pre-batch branch.
-
-## Status
-
-The project/mission/batch core, Composer agent, InfraOptimizer batch run,
-result cherry-pick and researcher evaluate path have been exercised in an
-isolated DSH. Run the core integration test with:
-
-```bash
-cd dsh-plugin && npm test
-```
-
-See `docs/STATUS.md` and `docs/architecture.md`.
+See `LICENSE`.

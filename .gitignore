@@ -3,7 +3,7 @@ __pycache__/
 .venv/
 .aleph/
 cases/
-dsh-plugin/node_modules/
+archive/legacy-plugin/node_modules/
 .case-templates/
 cookie.txt
 host.pid
