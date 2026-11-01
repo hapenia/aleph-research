@@ -828,7 +828,7 @@ class ProjectService {
     const target = this.explorationTarget(project);
     // Sessions waiting to be resumed are not dead; replacing them would duplicate their work.
     if (running + waiting >= target) return { dispatched: false, running, waiting, target, reason: 'interrupted researchers are waiting to resume' };
-    const parent = this.liveOrchestrator(project);
+    const parent = this.liveOrchestrator(project) ?? await this.reviveOrchestrator(project).catch(() => null);
     if (!parent) {
       // The Leader session can be cold while the cohort drains; retry from the watchdog.
       await this.mutate(projectId, (current) => ({ ...current, pendingDispatch: { at: now(), running, target } })).catch(() => undefined);
@@ -940,9 +940,50 @@ class ProjectService {
     return delivered;
   }
 
+  /**
+   * Bring the Leader session back to life when it is cold.
+   *
+   * A subagent can only be woken or cold-resumed through a live direct parent, so once
+   * the browser session that drives the project is gone, the queue owner and its
+   * researchers become unreachable. Resuming the recorded Leader session restores the
+   * whole tree without inventing a second owner.
+   */
+  async reviveOrchestrator(project) {
+    const sessionId = project?.orchestratorSessionId;
+    if (!sessionId) return null;
+    const live = this.ctx?.agents?.get?.(sessionId);
+    if (live) return live;
+    this.revives ??= new Map();
+    const last = this.revives.get(sessionId) ?? 0;
+    if (Date.now() - last < 60_000) return null;
+    this.revives.set(sessionId, Date.now());
+    const sessions = this.ctx?.get?.('sessionQuery');
+    const presets = this.ctx?.get?.('agentPresets');
+    try {
+      const observation = await sessions?.observeSession?.(sessionId);
+      if (!observation) return null;
+      const presetId = observation.projections?.values?.agentPreset ?? 'aleph';
+      const resolved = presets ? (await presets.resolve(presetId)).id : presetId;
+      const selection = this.ctx?.get?.('agentDefaultModel')?.currentSelection?.() ?? {};
+      const resumed = await this.ctx.agents.resume({
+        resumeSessionId: sessionId,
+        agentOptions: { ...(selection.provider ? { provider: selection.provider } : {}), ...(selection.model ? { model: selection.model } : {}) },
+        setup: async (agentCtx, agent) => {
+          if (presets && resolved) await presets.mount(agentCtx, resolved);
+        },
+      });
+      return resumed?.agent ?? null;
+    } catch (error) {
+      this.ctx?.logger?.warn?.(`aleph: could not revive session ${sessionId}: ${String(error?.message ?? error)}`);
+      return null;
+    }
+  }
+
   /** A live Agent that may parent subagents, or null when the owning session is gone. */
   liveOrchestrator(project) {
     if (!project?.orchestratorSessionId) return null;
+    const revived = this.ctx?.agents?.get?.(project.orchestratorSessionId);
+    if (revived && !(this.presetOfAgent && this.presetOfAgent(revived) !== 'aleph')) return revived;
     const agent = this.ctx?.agents?.get?.(project.orchestratorSessionId) ?? null;
     if (!agent) return null;
     // A session that is not the Leader must never parent the cohort.
@@ -1724,8 +1765,11 @@ class ProjectService {
     this.recovering = true;
     (async () => {
       for (const project of this.list()) {
-        const live = project.orchestratorSessionId ? this.ctx?.agents?.get?.(project.orchestratorSessionId) : null;
-        const interrupted = (project.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'interrupted');
+        const interruptedBefore = (project.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'interrupted');
+        const needsWake = interruptedBefore.length > 0 || (project.pendingNotices ?? []).length > 0;
+        if (needsWake) await this.reviveOrchestrator(project).catch(() => null);
+        const live = this.liveOrchestrator(project);
+        const interrupted = interruptedBefore;
         if (live && interrupted.length > 0) {
           await this.resumeResearchers({ projectId: project.id }).catch(() => undefined);
         }
@@ -2079,7 +2123,14 @@ class ProjectService {
       'Apply your dispatch policy: run approved work immediately when the machine is idle; only compose ahead and invoke InfraOptimizer while it is busy.',
     ].join(' ');
     if (!parent || !this.subagents) {
-      // Park the notice; a fork here would give the project two queue owners.
+      // Try to bring its parent back first; a fork here would give the project two owners.
+      const revived = await this.reviveOrchestrator(project).catch(() => null);
+      if (revived && this.subagents) {
+        try {
+          await this.subagents.sendMessage(revived, record.childId, [{ type: 'text', text }], { signal: new AbortController().signal });
+          return { delivered: true, childId: record.childId, queued, revived: true };
+        } catch { /* fall through to parking */ }
+      }
       await this.deliverOrQueue({ projectId, sessionId: record.childId, text }).catch(() => undefined);
       return { delivered: false, queued: true, childId: record.childId, reason: 'no live composer parent yet' };
     }
