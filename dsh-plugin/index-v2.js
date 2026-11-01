@@ -572,7 +572,6 @@ class ProjectService {
     await chmod(join(missionDir, 'run.sh'), 0o755).catch(() => undefined);
     await git(worktree, ['add', '-A']);
     await git(worktree, ['-c', 'user.name=AlephResearch', '-c', 'user.email=aleph@localhost', 'commit', '-m', `mission ${slug}: metadata, entrypoint and project`]);
-    await this.rememberOrchestrator(projectId, agent);
     return { projectId, branch, worktree, missionId: slug, missionDir, entrypoint, kind, title: title ?? slug, dependencies: dependencyList };
   }
 
@@ -832,12 +831,23 @@ class ProjectService {
     return { projectId, machineId, loads: clean, status: clean.length === 0 ? 'idle' : 'busy', telemetry: next.machines.find((item) => item.id === machineId)?.telemetry ?? null };
   }
 
-  /** Remember the session that drives this project so the Host can restart the Composer later. */
+  /**
+   * Remember the Leader session that drives this project. Only the Leader may own this
+   * role: a researcher creating a mission used to overwrite it, after which the Host
+   * tried to spawn replacements from a dead researcher session and the loop stopped.
+   */
   async rememberOrchestrator(projectId, agent) {
     if (!agent?.id) return;
+    if (this.presetOfAgent && this.presetOfAgent(agent) !== 'aleph') return;
     const project = this.get(projectId);
     if (!project || project.orchestratorSessionId === agent.id) return;
     await this.mutate(projectId, (current) => ({ ...current, orchestratorSessionId: agent.id })).catch(() => undefined);
+  }
+
+  /** A live Agent that may parent subagents, or null when the owning session is gone. */
+  liveOrchestrator(project) {
+    if (!project?.orchestratorSessionId) return null;
+    return this.ctx?.agents?.get?.(project.orchestratorSessionId) ?? null;
   }
 
   killUnder(rootPath) {
@@ -1007,7 +1017,13 @@ class ProjectService {
       });
       runnerError = null;
     } catch (error) {
-      runnerError = error instanceof Error ? error.message : String(error);
+      // Keep the runner's own words: "Command failed" alone explains nothing.
+      const stdoutTail = String(error?.stdout ?? '').trim().split('\n').slice(-12).join('\n');
+      const stderrTail = String(error?.stderr ?? '').trim().split('\n').slice(-12).join('\n');
+      const parts = [error instanceof Error ? error.message : String(error)];
+      if (stderrTail) parts.push(`stderr:\n${stderrTail}`);
+      if (stdoutTail) parts.push(`stdout:\n${stdoutTail}`);
+      runnerError = parts.join('\n').slice(0, 4000);
     }
 
     const outcomes = [];
@@ -1062,9 +1078,11 @@ class ProjectService {
             const metricsRaw = await readFile(join(batchWorktree, 'results', resultDir, 'metrics.json'), 'utf8');
             envelope.metrics = JSON.parse(metricsRaw);
           } catch { /* mission did not publish metrics */ }
-        } catch {
+        } catch (error) {
+          const listing = await readdir(join(batchWorktree, 'results', resultDir)).catch(() => []);
           envelope.status = 'failed';
-          envelope.error = runnerError || 'mission result missing';
+          envelope.error = runnerError
+            || `mission result missing (${resultDir}/result.json: ${String(error?.message ?? error).split('\n')[0]}; files: ${listing.slice(0, 12).join(', ') || 'none'})`;
         }
       } else {
         envelope.status = 'failed';
@@ -1618,6 +1636,24 @@ class ProjectService {
     };
     const projects = this.list();
     const nowMs = Date.now();
+    // A cohort that drained while the Leader session was cold resumes here.
+    for (const project of projects) {
+      if (!project.pendingDispatch || !this.liveOrchestrator(project)) continue;
+      this.maybeDispatchReplacement({ projectId: project.id })
+        .then((result) => {
+          if (result?.dispatched) this.mutate(project.id, (current) => ({ ...current, pendingDispatch: null })).catch(() => undefined);
+        })
+        .catch(() => undefined);
+    }
+    for (const project of projects) {
+      for (const batch of project.batches ?? []) {
+        if (batch.infra?.status !== 'requested') continue;
+        const requestedAt = Date.parse(batch.infra.requestedAt ?? '') || 0;
+        if (requestedAt && Date.now() - requestedAt > 15 * 60 * 1000) {
+          this.releaseStalledInfra({ projectId: project.id, batchId: batch.id }).catch(() => undefined);
+        }
+      }
+    }
     // InfraOptimizer edits files only. Anything it starts would compete with the running
     // batch, so such processes are killed as soon as they appear.
     for (const project of projects) {
@@ -1962,6 +1998,8 @@ class ProjectService {
       request: { parent: agent, cwd: project.workspace, agentPreset: 'aleph-infra', prompt: [{ type: 'text', text: prompt }] },
     });
     const childId = activation.childId ?? null;
+    this.parentAgents ??= new Map();
+    if (childId && agent) this.parentAgents.set(childId, agent);
     await this.mutate(projectId, (current) => ({
       ...current,
       agents: [...(current.agents ?? []), { role: 'infra', machineId, childId, status: 'running', summary: null, branch: null, updatedAt: now() }],
@@ -2011,14 +2049,35 @@ class ProjectService {
     const sent = infra.childId
       ? await this.notifySession({ sessionId: infra.childId, text: task }).catch(() => ({ delivered: false }))
       : { delivered: false };
+    // An unacknowledged message usually still lands once the session resumes, so the task
+    // stays requested; the watchdog fails it only if nothing happens for too long.
     if (!sent?.delivered) {
       await this.mutate(projectId, (current) => ({
         ...current,
-        batches: (current.batches ?? []).map((item) => (item.id === batchId ? { ...item, infra: { ...(item.infra ?? {}), status: 'failed' } } : item)),
+        batches: (current.batches ?? []).map((item) => (item.id === batchId
+          ? { ...item, infra: { ...(item.infra ?? {}), delivery: 'unconfirmed' } }
+          : item)),
       }));
-      throw new Error(`could not reach InfraOptimizer ${infra.childId ?? '(none)'}; the batch is still forming`);
     }
-    return { projectId, batchId, machineId: batch.machineId ?? 'local', childId: infra.childId, worktree, dispatched: true };
+    return { projectId, batchId, machineId: batch.machineId ?? 'local', childId: infra.childId, worktree, dispatched: true, delivery: sent?.delivered ? 'sent' : 'queued' };
+  }
+
+  /** Release a batch whose optimizer never reported back. */
+  async releaseStalledInfra({ projectId, batchId, reason = 'the optimizer never reported back' }) {
+    const project = this.get(projectId);
+    const batch = (project?.batches ?? []).find((item) => item.id === batchId);
+    if (!batch?.infra || batch.infra.status !== 'requested') return { released: false };
+    const worktree = batch.infra.worktree;
+    await git(project.missionRoot, ['worktree', 'remove', '--force', worktree]).catch(() => undefined);
+    await rm(worktree, { recursive: true, force: true }).catch(() => undefined);
+    await this.mutate(projectId, (current) => ({
+      ...current,
+      batches: (current.batches ?? []).map((item) => (item.id === batchId
+        ? { ...item, infra: { ...(item.infra ?? {}), status: 'failed', summary: reason, finishedAt: now() } }
+        : item)),
+    }));
+    await this.notifyComposer({ projectId, agent: null, event: 'infra released', detail: `batch ${batchId}: ${reason}` }).catch(() => undefined);
+    return { released: true };
   }
 
   /** Commit what InfraOptimizer changed and release the batch back to the queue. */
