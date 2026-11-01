@@ -19,6 +19,17 @@ if [ -e "$run_root" ]; then
   exit 1
 fi
 
+# The lab appends its phase times to the same log; the smoke's own phases follow.
+if [ -n "${ALEPH_PHASE_LOG:-}" ]; then
+  phase_log_owned=0
+else
+  ALEPH_PHASE_LOG="$run_root.phases.log"
+  phase_log_owned=1
+fi
+export ALEPH_PHASE_LOG
+# shellcheck source=phase-timing.sh
+source "$repo/scripts/phase-timing.sh"
+
 mkdir -p "$(dirname "$run_root")"
 if [ -n "$port" ]; then
   ALEPH_SUPERAGENT_SMOKE=1 "$repo/scripts/superagent-lab.sh" "$run_name" "$port" >"$run_root.lab.log" 2>&1 || true
@@ -30,6 +41,7 @@ if [ ! -f "$run_root/run.json" ]; then
   tail -20 "$run_root.lab.log" >&2 || true
   exit 1
 fi
+phase "lab startup"
 
 port="$(jq -r '.port' "$run_root/run.json")"
 api="http://127.0.0.1:$port/orchestrator/api"
@@ -51,9 +63,16 @@ open_tickets=0
 while [ "$SECONDS" -lt "$deadline" ]; do
   open_tickets="$(curl -sS -m 5 "http://127.0.0.1:$port/aleph/api/state" 2>/dev/null | jq -r '.openTickets // 0' 2>/dev/null || echo 0)"
   [ "${open_tickets:-0}" -ge 1 ] && break
-  sleep 10
+  sleep 4
 done
 check "ticket accepted" "$([ "${open_tickets:-0}" -ge 1 ] && echo 1 || echo 0)" "openTickets=$open_tickets"
+request_at="$(cat "$run_root/request-at.ms" 2>/dev/null || true)"
+if [ -n "$request_at" ]; then
+  now_ms="$(date +%s%3N)"
+  printf 'PHASE %-32s %6d.%01ds (since the request was sent)\n' "request to ticket" \
+    $(( (now_ms - request_at) / 1000 )) $(( ((now_ms - request_at) / 100) % 10 ))
+fi
+phase "wait ticket"
 
 worker_timeout="${ALEPH_SMOKE_WORKER_TIMEOUT:-900}"
 deadline=$((SECONDS + worker_timeout))
@@ -66,12 +85,13 @@ while [ "$SECONDS" -lt "$deadline" ]; do
     *'"running":0'*|*'"running": 0'*) break ;;
   esac
   [ "${open_now:-1}" = "0" ] && break
-  sleep 10
+  sleep 4
 done
 finished=0
 case "$load" in *'"running":0'*|*'"running": 0'*) finished=1 ;; esac
 [ "${open_now:-1}" = "0" ] && finished=1
 check "worker finished" "$finished" "$load openTickets=${open_now:-?}"
+phase "worker turn"
 
 warnings="$(grep -c 'did not activate' "$run_root/host.log" 2>/dev/null || true)"
 warnings="${warnings:-0}"
@@ -113,6 +133,7 @@ check "evaluation recorded" "$recorded" "$([ -f "$results_log" ] && wc -l <"$res
 
 channel="$run_root/state/aleph-channel"
 check "channel directory" "$([ -d "$channel" ] && echo 1 || echo 0)" "$channel"
+phase "checks"
 
 # Clean up unless the caller wants the run for inspection.
 if [ "${ALEPH_SMOKE_KEEP:-0}" != "1" ]; then
@@ -125,12 +146,19 @@ if [ "${ALEPH_SMOKE_KEEP:-0}" != "1" ]; then
   done
   sleep 1
   rm -rf "$run_root" "$run_root.lab.log"
+  if [ "$phase_log_owned" = 1 ]; then
+    rm -f "$ALEPH_PHASE_LOG"
+    # The final "total" phase must not recreate the log after cleanup.
+    ALEPH_PHASE_LOG=""
+  fi
 else
   echo "kept run at $run_root"
 fi
 
 if [ "$failures" -ne 0 ]; then
   echo "smoke FAILED ($failures checks); rerun with ALEPH_SMOKE_KEEP=1 to inspect the run" >&2
+  phase "total"
   exit 1
 fi
 echo "smoke PASSED"
+phase "total"
