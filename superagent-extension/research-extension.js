@@ -27,6 +27,43 @@ import { findTicketForDirectory, resultTrigger } from './submit-result.js'
 /** Reported through /aleph/api/version so a hot reload can be observed. */
 export const VERSION = 'research-extension/1'
 
+/**
+ * The main Session is a router. The prototype gives it full work tools, so in a real
+ * case it started exploring the host (other projects, GPU environments) and planning
+ * research of its own. This section keeps it at routing, replies and ticket reads.
+ */
+const ROUTER_GUARD = [
+  'You are the routing Session of AlephResearch, not a researcher.',
+  'Read triggers, tickets and their inputs; answer a person or send one ticket down the route.',
+  'Do not explore the host, do not inspect projects other than this deployment, and do not',
+  'run experiments yourself: a Worker owns the research inside its ticket repository and',
+  'reports a score. When a person asks in chat for research or an experiment, ask them to',
+  'submit it through the research panel or the aleph request route; those become candidates',
+  'you route. If the request needs a capability this deployment lacks, say so. Keep replies short.',
+].join(' ')
+
+let routerGuardAt = null
+const guardedAgents = new WeakSet()
+
+/** Attach the router section to the prototype main Session, once per Agent. */
+const attachRouterGuard = (agent) => {
+  if (!agent || guardedAgents.has(agent)) return
+  const preset = agent.session?.header?.agentPreset
+  if (preset !== 'dsh-superagent-router') return
+  try {
+    agent.ctx.systemPrompt.section({
+      name: 'aleph-router-guard',
+      order: 9000,
+      interpolate: false,
+      text: () => ROUTER_GUARD,
+    })
+    guardedAgents.add(agent)
+    routerGuardAt = new Date().toISOString()
+  } catch (error) {
+    ctx.logger.warn('dsh-aleph-superagent router guard failed: %s', String(error?.message ?? error))
+  }
+}
+
 const disposers = []
 
 /** Keep a registration disposable so a fiber restart can release it before re-registering. */
@@ -203,6 +240,17 @@ const sendJson = (res, status, value) => {
 
 export function apply(ctx) {
   ctx.effect(() => ctx.orchestrator.sources.register(alephKind), 'aleph: source kind')
+
+  ctx.on('agent/created', ({ agent }) => attachRouterGuard(agent))
+  setTimeout(async () => {
+    try {
+      const base = managementBase()
+      if (!base) return
+      const state = await (await fetch(`${base}/state`, { headers: { 'x-orchestrator-request': '1' } })).json()
+      const agent = state?.masterId ? ctx.agents?.get?.(state.masterId) : undefined
+      if (agent) attachRouterGuard(agent)
+    } catch { /* the deployment may not be reachable yet */ }
+  }, 2500)
   const source = ctx.orchestrator.context(alephKind)
   source.report('aleph', { state: 'ready', detail: 'Local research requests are accepted', at: new Date().toISOString() })
 
@@ -219,6 +267,7 @@ export function apply(ctx) {
           version: VERSION,
           applied: globalThis.__alephExtensionApplied ?? null,
           reload: globalThis.__alephLastReload ?? null,
+          routerGuardAt,
         })
       },
     }))

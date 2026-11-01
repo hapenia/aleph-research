@@ -29,7 +29,8 @@ composition smoke test.
 | Patch | Why |
 | --- | --- |
 | `0001-configurable-session-permission.patch` | The prototype pins every session to `danger-full-access`; the patch lets a deployment choose the permission preset through `ALEPH_SESSION_PERMISSION` while keeping the default. |
-| `0002-worker-extra-tools.patch` | The Worker's `restrict({ allow })` mask only admits the prototype's work tools; the patch adds the names in `ALEPH_WORKER_TOOLS` so an extension tool such as `aleph_submit_result` is visible to the Worker. Empty by default.
+| `0002-worker-extra-tools.patch` | The Worker's `restrict({ allow })` mask only admits the prototype's work tools; the patch adds the names in `ALEPH_WORKER_TOOLS` so an extension tool such as `aleph_submit_result` is visible to the Worker. Empty by default. |
+| `0003-router-extra-tools.patch` | The routing Session's tool mask is fixed too; the patch adds the names in `ALEPH_ROUTER_TOOLS`, but only those the loader already knows, so a late-registered tool cannot break Session startup (it rejects unknown names and deactivates the prototype). Empty by default. |
 - Do not commit `node_modules`, `lib` or `.artifacts`; they are build output.
 - Build with `pnpm install && pnpm build` from this directory.
 

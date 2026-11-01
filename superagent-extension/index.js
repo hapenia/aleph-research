@@ -8,7 +8,7 @@
  */
 
 export const name = 'dsh-aleph-superagent'
-export const inject = ['orchestrator', 'tools', 'sessionController', 'workspaceRegistry']
+export const inject = ['orchestrator', 'tools', 'sessionController', 'workspaceRegistry', 'agents']
 
 /** The active implementation module, so a disposed fiber can stop its timers. */
 let active = null

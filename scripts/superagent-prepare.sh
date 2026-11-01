@@ -69,6 +69,20 @@ ${conventions:-No project conventions were provided.}
 Implement what the ticket asks, verify it with the commands the ticket names, and
 commit your work on this branch with a clear message.
 
+## Long computations
+
+Start a long command in the background and then end your turn: the job's completion
+wakes you with its result. Do not poll a running job with repeated `job_output`
+waits, and do not re-run a training job that is already running.
+
+## Environment limits
+
+This machine may have no GPU and the configured runtime is the only trusted Python
+environment. Do not install system-wide packages, do not use virtual environments
+from other projects, and do not plan GPU training unless the ticket or the project
+conventions name a supported GPU runtime. If a request needs a capability this
+environment does not have, report that limitation instead of improvising around it.
+
 ## Finishing the ticket (required order)
 
 1. Commit every change on this branch.

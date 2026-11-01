@@ -2,6 +2,10 @@
 - insert:
     - id: aleph-superagent
       name: '@local/dsh-aleph-superagent'
+    # Registered before the routing Session starts, so its tool restriction can name
+    # aleph_request_work (a later registration would be rejected as unknown).
+    - id: aleph-request-tool
+      name: '@local/dsh-aleph-superagent/request-tool'
     # The Watchdog Session is its own agent preset: it receives periodic briefs and
     # may stop or retry a stuck ticket. Not offered for manual selection.
     - id: aleph-watchdog-preset
