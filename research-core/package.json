@@ -11,7 +11,8 @@
     "lint:ast-grep": "ast-grep scan --config ast-grep/sgconfig.yml",
     "test:mutation": "bash scripts/type-mutation-check.sh",
     "test": "node --import tsx --test \"test/*.test.ts\"",
-    "test:one": "node --import tsx --test"
+    "test:one": "node --import tsx --test",
+    "lint:fixtures": "bash scripts/lint-fixtures.sh"
   },
   "devDependencies": {
     "@ast-grep/cli": "^0.51.0",

@@ -232,3 +232,109 @@ export {
   wrongLineage,
   wrongLineage2,
 }
+
+// ---------------------------------------------------------------------------------------
+// Appended coverage for the mutation harness's known survivors. Keep new tests below the
+// existing ones: mutation expectations are anchored to line numbers above this block.
+// ---------------------------------------------------------------------------------------
+
+type AuditActionName = import('./types/audit.js').AuditAction
+type TriggerKindTable = import('./types/triggers.js').TriggerKindForAction
+type AllCommandTypes = import('./types/commands.js').CommandType
+type CapabilityTable = import('./types/commands.js').CapabilityForCommand
+type CommandAuditTable = import('./types/commands.js').CommandAuditMap
+
+// Host-injected ownership proofs are required command fields.
+declare const proposeWithoutAssignment: Omit<CommandOf<'experiment.propose'>, 'assignment'>
+// @ts-expect-error a propose command must carry the Host-minted IssueAssignment
+const invalidProposeCommand: CommandOf<'experiment.propose'> = proposeWithoutAssignment
+declare const reviewWithoutAssignment: Omit<CommandOf<'experiment.review'>, 'assignment'>
+// @ts-expect-error a review command must carry the Host-minted IssueAssignment
+const invalidReviewCommand: CommandOf<'experiment.review'> = reviewWithoutAssignment
+declare const closeWithoutAssignment: Omit<CommandOf<'experiment.close'>, 'assignment'>
+// @ts-expect-error a close command must carry the Host-minted IssueAssignment
+const invalidCloseCommand: CommandOf<'experiment.close'> = closeWithoutAssignment
+declare const submitWithoutBinding: Omit<CommandOf<'ticket.submit'>, 'binding'>
+// @ts-expect-error a submit command must carry the Host-minted TicketBinding
+const invalidSubmitCommand: CommandOf<'ticket.submit'> = submitWithoutBinding
+
+// Every trigger action pins its own literal kind.
+const expectedTriggerKinds: { readonly [A in AuditActionName]: TriggerKindTable[A] } = {
+  'program.created': 'program-created',
+  'program.paused': 'program-paused',
+  'program.resumed': 'program-resumed',
+  'program.stopped': 'program-stopped',
+  'program.budget-paused': 'program-budget-paused',
+  'program.goal-changed': 'program-goal-changed',
+  'program.methodology-changed': 'program-methodology-changed',
+  'program.exploration-changed': 'program-exploration-changed',
+  'program.completed': 'program-completed',
+  'usage.recorded': 'usage-recorded',
+  'issue.created': 'issue-created',
+  'issue.claimed': 'issue-claimed',
+  'issue.commented': 'issue-commented',
+  'issue.closed': 'issue-closed',
+  'experiment.proposed': 'experiment-proposed',
+  'experiment.opened': 'experiment-opened',
+  'experiment.revised': 'experiment-revised',
+  'experiment.ready': 'experiment-ready',
+  'experiment.reviewed': 'experiment-reviewed',
+  'experiment.closed': 'experiment-closed',
+  'experiment.cancelled': 'experiment-cancelled',
+  'ci.requested': 'ci-requested',
+  'ci.started': 'ci-started',
+  'ci.passed': 'ci-passed',
+  'ci.failed': 'ci-failed',
+  'artifact.stored': 'artifact-stored',
+  'attention.raised': 'attention-raised',
+  'command.refused': null,
+}
+
+// Every command pins its own capability and audit action.
+const expectedCapabilities: { readonly [K in AllCommandTypes]: CapabilityTable[K] } = {
+  'program.create': 'program:create',
+  'program.pause': 'program:pause',
+  'program.resume': 'program:pause',
+  'program.stop': 'program:stop',
+  'program.set-goal': 'program:goal',
+  'program.set-methodology': 'program:goal',
+  'program.set-exploration': 'program:exploration',
+  'issue.create': 'issue:create',
+  'issue.claim': 'issue:claim',
+  'issue.comment': 'issue:comment',
+  'issue.close': 'issue:close',
+  'experiment.propose': 'experiment:propose',
+  'experiment.review': 'experiment:review',
+  'experiment.close': 'issue:close',
+  'ci.request': 'ci:request',
+  'ticket.submit': 'ticket:submit',
+}
+
+const expectedAuditActions: { readonly [K in AllCommandTypes]: CommandAuditTable[K] } = {
+  'program.create': 'program.created',
+  'program.pause': 'program.paused',
+  'program.resume': 'program.resumed',
+  'program.stop': 'program.stopped',
+  'program.set-goal': 'program.goal-changed',
+  'program.set-methodology': 'program.methodology-changed',
+  'program.set-exploration': 'program.exploration-changed',
+  'issue.create': 'issue.created',
+  'issue.claim': 'issue.claimed',
+  'issue.comment': 'issue.commented',
+  'issue.close': 'issue.closed',
+  'experiment.propose': 'experiment.proposed',
+  'experiment.review': 'experiment.reviewed',
+  'experiment.close': 'experiment.closed',
+  'ci.request': 'ci.requested',
+  'ticket.submit': 'experiment.ready',
+}
+
+export {
+  invalidProposeCommand,
+  invalidReviewCommand,
+  invalidCloseCommand,
+  invalidSubmitCommand,
+  expectedTriggerKinds,
+  expectedCapabilities,
+  expectedAuditActions,
+}

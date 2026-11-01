@@ -33,9 +33,18 @@ if [ -f research-core/package.json ]; then
   (cd research-core && npm run -s test:mutation)
 fi
 
+if [ -f research-core/package.json ]; then
+  echo "== tests: research core runtime"
+  (cd research-core && npm test --silent)
+  echo "== fixtures: research core boundary"
+  (cd research-core && bash scripts/lint-fixtures.sh)
+fi
+
 if [ -f superagent-extension/package.json ]; then
   echo "== tests: superagent extension"
   (cd superagent-extension && npm install --no-audit --no-fund --silent && npm test --silent)
+  echo "== lint: superagent extension adapter"
+  (cd superagent-extension && npm run -s lint)
 fi
 
 if [ "$docs" = "1" ]; then
