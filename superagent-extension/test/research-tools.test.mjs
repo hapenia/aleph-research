@@ -17,6 +17,7 @@ import { TOOL_REGISTRY } from '../../research-core/dist/runtime/tools.js'
 
 import {
   DEFAULT_PREFIX,
+  HOST_SERVICE_NAME,
   PRESET_ROLES,
   TOOL_ROLES,
   VERSION,
@@ -59,9 +60,10 @@ function* schemaNodes(node) {
 }
 
 /** A fake Cordis context: registrations are collected and effects are tracked. */
-function fakeContext({ failOn } = {}) {
+function fakeContext({ failOn, services = new Map() } = {}) {
   const registrations = new Map()
   const effects = []
+  const listeners = new Map()
   const ctx = {
     tools: {
       register(definition, options = {}) {
@@ -75,6 +77,17 @@ function fakeContext({ failOn } = {}) {
           registrations.delete(definition.name)
         }
       },
+    },
+    get(serviceName) {
+      return services.get(serviceName)
+    },
+    on(event, callback) {
+      const set = listeners.get(event) ?? new Set()
+      set.add(callback)
+      listeners.set(event, set)
+      return () => {
+        set.delete(callback)
+      }
     },
     effect(setup, label) {
       const cleanup = setup()
@@ -91,11 +104,16 @@ function fakeContext({ failOn } = {}) {
     ctx,
     registrations,
     effects,
+    listeners,
+    services,
     registration(toolName) {
       return registrations.get(toolName)
     },
     definition(toolName) {
       return registrations.get(toolName)?.definition
+    },
+    emit(event, ...args) {
+      for (const callback of listeners.get(event) ?? []) callback(...args)
     },
     dispose() {
       while (effects.length > 0) {
@@ -514,4 +532,110 @@ test('the Cordis wrapper registers the same catalog', () => {
   assert.equal(adapter.tools.length, 23)
   assert.equal(harness.registrations.size, 23)
   for (const toolName of EXPECTED_NAMES) assert.ok(harness.registration(toolName), toolName)
+})
+
+// ---------------------------------------------------------------------------
+// Host service binding in the Cordis wrapper.
+// ---------------------------------------------------------------------------
+
+/** A service double exposing the one method the wrapper uses. */
+function hostServiceDouble(calls) {
+  return {
+    async executeTool(toolName, input, context) {
+      calls.push({ toolName, input, context })
+      return { ok: true, value: { tool: toolName, input } }
+    },
+  }
+}
+
+test('the wrapper binds alephResearchHost to every registered tool after registration', async () => {
+  assert.equal(HOST_SERVICE_NAME, 'alephResearchHost')
+  const calls = []
+  const harness = fakeContext({ services: new Map([[HOST_SERVICE_NAME, hostServiceDouble(calls)]]) })
+  const adapter = apply(harness.ctx)
+
+  assert.equal(adapter.hostBound, true)
+  assert.equal(harness.registrations.size, 23)
+
+  const result = await harness.definition('aleph_research_read_program').execute(
+    { programId: 'program-1' },
+    { agent: agentFor('aleph-researcher') },
+  )
+  assert.deepEqual(result, {
+    ok: true,
+    value: { tool: 'researcher_read_program', input: { programId: 'program-1' } },
+  })
+  assert.equal(calls.length, 1)
+  // The runtime name, not the DSH-facing name, reaches the host service.
+  assert.equal(calls[0].toolName, 'researcher_read_program')
+  assert.deepEqual(calls[0].input, { programId: 'program-1' })
+  assert.equal(calls[0].context.tool.id, 'researcher.readProgram')
+  adapter.dispose()
+})
+
+test('a missing host service keeps the no-handler error until the service is provided', async () => {
+  const harness = fakeContext()
+  const adapter = apply(harness.ctx)
+  assert.equal(adapter.hostBound, false)
+  const definition = harness.definition('aleph_research_read_program')
+
+  await assert.rejects(
+    definition.execute(
+      { programId: 'program-1' },
+      { agent: agentFor('aleph-researcher') },
+    ),
+    /has no injected handler/,
+  )
+
+  // Cordis provides the host after this fiber started: the wrapper binds on the event.
+  const calls = []
+  const service = hostServiceDouble(calls)
+  harness.services.set(HOST_SERVICE_NAME, service)
+  harness.emit('internal/service', HOST_SERVICE_NAME, service)
+  assert.equal(adapter.hostBound, true)
+
+  const result = await definition.execute(
+    { programId: 'program-1' },
+    { agent: agentFor('aleph-researcher') },
+  )
+  assert.equal(result.ok, true)
+  assert.equal(calls.length, 1)
+  harness.dispose()
+})
+
+test('explicit handlers keep precedence over the host service', async () => {
+  const calls = []
+  const harness = fakeContext({ services: new Map([[HOST_SERVICE_NAME, hostServiceDouble(calls)]]) })
+  const adapter = apply(harness.ctx, {
+    handlers: { 'researcher.readProgram': () => ({ ok: true, value: 'explicit' }) },
+  })
+
+  assert.equal(adapter.hostBound, false)
+  const result = await harness.definition('aleph_research_read_program').execute(
+    { programId: 'program-1' },
+    { agent: agentFor('aleph-researcher') },
+  )
+  assert.deepEqual(result, { ok: true, value: 'explicit' })
+  assert.equal(calls.length, 0)
+  adapter.dispose()
+})
+
+test('a throwing service lookup does not fail activation', () => {
+  const harness = fakeContext()
+  harness.ctx.get = () => {
+    throw new Error('the service registry is unavailable')
+  }
+  const adapter = apply(harness.ctx)
+  assert.equal(adapter.hostBound, false)
+  assert.equal(harness.registrations.size, 23)
+})
+
+test('cleanup releases the host service listener', () => {
+  const harness = fakeContext()
+  const adapter = apply(harness.ctx)
+  assert.equal(harness.listeners.get('internal/service').size, 1)
+
+  adapter.dispose()
+  assert.equal(harness.listeners.get('internal/service').size, 0)
+  assert.equal(harness.registrations.size, 0)
 })

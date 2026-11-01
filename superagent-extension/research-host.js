@@ -38,6 +38,42 @@
  * composed host exposes that repository, and otherwise answers 404. A host injected as
  * `config.host` may therefore be read-only for the list route.
  *
+ * ## The `alephResearchHost` service
+ *
+ * After the host exists the plugin provides the `alephResearchHost` service. That service
+ * is the DSH-side execution seam: `research-tools` passes the service into a handler map
+ * for every registered tool, and `research-trigger-bridge` registers a trigger sink on it.
+ *
+ * - `executeTool(toolName, input, context?)` resolves the runtime tool from the compiled
+ *   `TOOL_REGISTRY`, parses the input through that tool's own `Schema`, mints the actor
+ *   from the tool's role (`context.actorKind` may override it), and then:
+ *   - for command tools, fills the compiled `ROUTE_TABLE` path with the parsed path
+ *     parameters and calls `host.handleHttp`; the runtime still owns route admission,
+ *     actor gates, ownership proofs, parsing and status mapping. A non-2xx response is
+ *     returned as `{ ok: false, status, error }`; it is never thrown.
+ *   - for the read tools (which have no HTTP route in the frozen command surface), it
+ *     reads the corresponding host surface: `snapshot` for `readProgram`, the store's
+ *     `ciRecords.query` for `readMetrics`, `experiments.get` for `readExperiment`,
+ *     `issues.listByProgram` for `listStalled`, and the attention repository for
+ *     `raiseAttention`. `listStalled` needs the Host context's `programId` because the
+ *     tool carries no parameters.
+ *   - `implementer_submit_implementation` carries no ticket binding by design. The
+ *     transport only mints an implementer principal when trusted Host context supplies
+ *     one (`context.actor`, or `context.ticketId` / `config.ticketBinding`); without a
+ *     binding resolver the call is refused with a clear `forbidden` error.
+ * - `triggerPort` is a runtime `TriggerPort`. It forwards a report's draft to the
+ *   registered sink, or records the report when no sink is attached. The service also
+ *   exports `onTrigger` / `setTriggerSink`; a sink failure is logged and never fails the
+ *   tool call. After every command response (success or refusal) the audit entries in
+ *   the response are mapped with `createTriggerFactory` and delivered to the same sink,
+ *   so a DSH bridge sees the same trigger stream the runtime's `deliverTriggers` uses.
+ * - `dispose()` clears the sink. It is called by the plugin fiber's effect.
+ *
+ * The service needs the compiled `runtime/tools.js`, `runtime/triggers.js` and
+ * `runtime/api.js`. They are loaded with `composition.js`; when `config.host` is injected
+ * but `dist/` is missing, the host still starts and only the service is omitted (a
+ * warning is logged), preserving the injected-host escape hatch.
+ *
  * Configuration (all optional):
  *
  * - `actorKinds` — kinds the request route may mint. Default `['operator']`. Supported:
@@ -52,7 +88,13 @@
  *   A host bypasses composition, so neither `domainStore` nor the service is consulted.
  * - `store`, `clock`, `requestIds`, `hostContexts`, `sampler`, `triggerPort`, `random` —
  *   passed through to `createResearchHost`. An absent `store` gets the in-memory one,
- *   and a resolved `domainStore` replaces it with the persistent UnitOfWork.
+ *   and a resolved `domainStore` replaces it with the persistent UnitOfWork. The service
+ *   always installs its own trigger port so the bridge sees deliveries; a configured
+ *   `triggerPort` remains the fallback receiver when no bridge sink is registered.
+ * - `ticketBinding` — optional trusted resolver for `implementer_submit_implementation`:
+ *   `(context) => ticketId | { ticketId, sessionId }`. Without it (and without a
+ *   `context.ticketId` from the embedding Host) that tool is refused as forbidden,
+ *   because the model must never supply the ticket binding.
  *
  * The dynamic import is the build boundary: `research-core` returns TypeScript, so this
  * adapter consumes `dist/`. A missing `dist/` does not fail the plugin: the fiber then
@@ -115,6 +157,40 @@ const DOMAIN_STORE_METHODS = ['list', 'get', 'put', 'delete']
 
 const COMPOSITION_URL = new URL('../research-core/dist/adapter/composition.js', import.meta.url)
 const STORAGE_DOMAIN_URL = new URL('../research-core/dist/adapter/storage-domain.js', import.meta.url)
+const TOOLS_URL = new URL('../research-core/dist/runtime/tools.js', import.meta.url)
+const TRIGGERS_URL = new URL('../research-core/dist/runtime/triggers.js', import.meta.url)
+const API_URL = new URL('../research-core/dist/runtime/api.js', import.meta.url)
+
+/**
+ * The service name `research-tools` and `research-trigger-bridge` resolve with `ctx.get`.
+ *
+ * The literal is repeated in those modules so they do not import this transport module
+ * (and its web-server/compiled-runtime dependencies) just to learn one string.
+ */
+export const RESEARCH_HOST_SERVICE = 'alephResearchHost'
+
+/** The runtime roles, in the tool registry's own order. */
+const TOOL_ROLES = ['operator', 'researcher', 'implementer', 'watchdog']
+
+/**
+ * Actor kinds `executeTool` may mint from trusted Host context. `implementer` is here
+ * only because the binding resolver below mints it from a Host-supplied ticket; the HTTP
+ * body route still refuses it (see `SUPPORTED_ACTOR_KINDS`).
+ */
+const TOOL_ACTOR_KINDS = ['operator', 'researcher', 'implementer', 'watchdog', 'host']
+
+/** Runtime command tools whose role is not their actor kind (the Implementer family). */
+const IMPLEMENTER_ROLE = 'implementer'
+
+/** The default read handlers, keyed by the registry's stable `<role>.<key>` id. */
+const READ_TOOL_IDS = new Set([
+  'researcher.readProgram',
+  'researcher.readMetrics',
+  'implementer.readExperiment',
+  'watchdog.listStalled',
+  'watchdog.raiseAttention',
+  'watchdog.readMetrics',
+])
 
 /** A refusal this transport understands; anything else becomes a generic 500. */
 class HttpError extends Error {
@@ -266,12 +342,34 @@ const isBuildMissing = (error) => {
  * Load the compiled modules this fiber needs.
  *
  * The storage-domain adapter is imported only when a persistent store was resolved, so a
- * host that runs in memory depends on `composition.js` alone.
+ * host that runs in memory depends on `composition.js` alone. The tool, trigger and route
+ * tables are loaded with it because the `alephResearchHost` service needs all three; a
+ * missing `dist/` still degrades to the 503 health route.
  */
 const loadRuntime = async (withStorageDomain) => {
-  const composition = await importCompiled(COMPOSITION_URL)
+  const [composition, tools, triggers, api] = await Promise.all([
+    importCompiled(COMPOSITION_URL),
+    importCompiled(TOOLS_URL),
+    importCompiled(TRIGGERS_URL),
+    importCompiled(API_URL),
+  ])
   const storageDomain = withStorageDomain ? await importCompiled(STORAGE_DOMAIN_URL) : undefined
-  return { composition, storageDomain }
+  return { composition, storageDomain, tools, triggers, api }
+}
+
+/**
+ * Load only the tables the `alephResearchHost` service needs.
+ *
+ * This is the `config.host` path: the caller already owns a ResearchHost, so a missing
+ * `dist/` must not fail startup. The caller warns and omits the service instead.
+ */
+const loadServiceRuntime = async () => {
+  const [tools, triggers, api] = await Promise.all([
+    importCompiled(TOOLS_URL),
+    importCompiled(TRIGGERS_URL),
+    importCompiled(API_URL),
+  ])
+  return { tools, triggers, api }
 }
 
 /** True when `value` exposes the four methods the storage-domain adapter calls. */
@@ -373,6 +471,557 @@ const hostOptionsOf = (settings) => {
     if (hasOwn(settings, key)) options[key] = settings[key]
   }
   return options
+}
+
+// ---------------------------------------------------------------------------
+// The `alephResearchHost` service: tool execution and trigger delivery.
+// ---------------------------------------------------------------------------
+
+const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+
+/** A service-level refusal: `{ ok: false, error }`, never thrown. */
+const serviceFailure = (code, message) => ({ ok: false, error: { code, message } })
+
+/** Extract a draft from either a `TriggerReport` (`{ action, kind, draft }`) or a draft. */
+const triggerDraftOf = (value) => {
+  if (!isRecord(value)) return null
+  if (hasOwn(value, 'draft')) return isRecord(value.draft) ? value.draft : null
+  return Array.isArray(value.threads) && typeof value.kind === 'string' ? value : null
+}
+
+/**
+ * Build the trigger port the ResearchHost delivers through.
+ *
+ * `receive` forwards a report's draft to the registered sink, or records the report when
+ * no sink is attached. A sink failure is logged and returned as a failed `Result`; it is
+ * never thrown, so a bridge cannot break the tool path. `config.triggerPort` is honoured
+ * as a fallback receiver when no sink is registered, which keeps the documented
+ * pass-through behavior without hiding the bridge.
+ */
+export function createTriggerPort(logger, fallbackPort) {
+  const recorded = []
+  let sink = null
+
+  return {
+    get recorded() {
+      return recorded.slice()
+    },
+    async receive(report) {
+      const draft = triggerDraftOf(report)
+      if (draft === null) return { ok: true, value: undefined }
+      if (sink !== null) {
+        try {
+          await sink(draft, report)
+          return { ok: true, value: undefined }
+        } catch (error) {
+          logger?.warn?.(
+            'aleph-research-host: the trigger sink failed for %s: %s',
+            String(draft.kind),
+            String(error?.message ?? error),
+          )
+          return serviceFailure('internal', 'the trigger sink failed')
+        }
+      }
+      if (fallbackPort !== null && typeof fallbackPort === 'object' && typeof fallbackPort.receive === 'function') {
+        try {
+          return await fallbackPort.receive(report)
+        } catch (error) {
+          logger?.warn?.(
+            'aleph-research-host: the fallback trigger port failed: %s',
+            String(error?.message ?? error),
+          )
+          return serviceFailure('internal', 'the fallback trigger port failed')
+        }
+      }
+      recorded.push(report)
+      return { ok: true, value: undefined }
+    },
+    onTrigger(callback) {
+      if (callback !== null && callback !== undefined && typeof callback !== 'function') {
+        throw new TypeError('onTrigger requires a function or null')
+      }
+      sink = callback ?? null
+      return () => {
+        if (sink === callback) sink = null
+      }
+    },
+    setTriggerSink(callback) {
+      sink = typeof callback === 'function' ? callback : null
+    },
+    dispose() {
+      sink = null
+    },
+  }
+}
+
+/**
+ * Index the compiled tool registry under the names a caller may use.
+ *
+ * The DSH adapter passes the runtime name (`researcher_read_program`); tests and other
+ * embeddings may pass the `<role>.<key>` catalog id, the default-prefixed DSH name, the
+ * operation name, or a descriptor object. Aliases resolve without importing the
+ * `research-tools` adapter, so this transport does not depend on the tool-registration
+ * plugin (and its DSH schema conversion).
+ */
+const indexTools = (registry) => {
+  const byId = new Map()
+  const byRuntimeName = new Map()
+  const byOperation = new Map()
+  for (const role of TOOL_ROLES) {
+    const tools = registry[role]
+    if (!isRecord(tools)) continue
+    for (const [key, definition] of Object.entries(tools)) {
+      if (!isRecord(definition) || typeof definition.name !== 'string') continue
+      const entry = {
+        id: `${role}.${key}`,
+        role,
+        key,
+        runtimeName: definition.name,
+        command: typeof definition.command === 'string' ? definition.command : undefined,
+        schema: definition.parameters,
+      }
+      byId.set(entry.id, entry)
+      byRuntimeName.set(entry.runtimeName, entry)
+      const operation = entry.runtimeName.startsWith(`${role}_`)
+        ? entry.runtimeName.slice(role.length + 1)
+        : entry.runtimeName
+      // A collision (the same operation in two roles) has no unique alias; a third
+      // occurrence must not resurrect one, so track it through `has` rather than a value.
+      if (byOperation.has(operation)) byOperation.set(operation, null)
+      else byOperation.set(operation, entry)
+    }
+  }
+  return { byId, byRuntimeName, byOperation }
+}
+
+/** The default DSH prefix; kept local so this module does not import `research-tools.js`. */
+const DEFAULT_SERVICE_PREFIX = 'aleph_research_'
+
+/** Resolve a tool name (or a descriptor from the DSH adapter) into one registry entry. */
+const resolveToolEntry = (index, toolName) => {
+  if (isRecord(toolName)) {
+    for (const key of [toolName.id, toolName.runtimeName, toolName.name]) {
+      if (typeof key !== 'string') continue
+      const entry = index.byId.get(key) ?? index.byRuntimeName.get(key)
+      if (entry !== undefined) return entry
+    }
+    return undefined
+  }
+  if (typeof toolName !== 'string') return undefined
+  const exact = index.byId.get(toolName) ?? index.byRuntimeName.get(toolName)
+  if (exact !== undefined) return exact
+  if (toolName.startsWith(DEFAULT_SERVICE_PREFIX)) {
+    const rest = toolName.slice(DEFAULT_SERVICE_PREFIX.length)
+    const stripped = index.byRuntimeName.get(rest)
+      ?? index.byId.get(rest)
+      ?? index.byOperation.get(rest)
+    if (stripped !== undefined) return stripped
+  }
+  for (const role of TOOL_ROLES) {
+    if (!toolName.startsWith(`${role}_`)) continue
+    const entry = index.byRuntimeName.get(toolName)
+    if (entry !== undefined) return entry
+  }
+  return index.byOperation.get(toolName) ?? undefined
+}
+
+/** Fill one compiled `ROUTE_TABLE` path with the parsed command's path parameters. */
+const pathForRoute = (template, input) => {
+  let missing = false
+  const path = template.replace(/:([A-Za-z][A-Za-z0-9]*)/g, (_match, name) => {
+    const value = isRecord(input) ? input[name] : undefined
+    if (typeof value !== 'string' && typeof value !== 'number') {
+      missing = true
+      return ''
+    }
+    return encodeURIComponent(String(value))
+  })
+  return missing ? undefined : path
+}
+
+/** Mint the Principal for a non-Implementer tool role. */
+const actorForToolRole = (kind, context) => {
+  const session = typeof context.sessionId === 'string' && context.sessionId.length > 0
+    ? context.sessionId
+    : undefined
+  switch (kind) {
+    case 'operator':
+      return { kind, sessionId: session ?? `${SESSION_PREFIX}:operator` }
+    case 'researcher':
+      return { kind, sessionId: session ?? `${SESSION_PREFIX}:researcher` }
+    case 'watchdog':
+      return { kind, sessionId: session ?? `${SESSION_PREFIX}:watchdog` }
+    case 'host':
+      return { kind }
+    default:
+      return undefined
+  }
+}
+
+/**
+ * Read the Host-minted ticket id for an Implementer tool call.
+ *
+ * The tool schema deliberately omits `ticketId`/`binding`, so the only accepted sources
+ * are trusted Host context (`context.actor`, `context.ticketId`) and the optional
+ * `config.ticketBinding` resolver. A model-supplied value never reaches this function.
+ */
+const resolveTicketId = async (settings, context) => {
+  if (isRecord(context.actor) && context.actor.kind === IMPLEMENTER_ROLE
+    && typeof context.actor.ticketId === 'string' && context.actor.ticketId.length > 0) {
+    return { ticketId: context.actor.ticketId, sessionId: context.actor.sessionId }
+  }
+  if (typeof context.ticketId === 'string' && context.ticketId.length > 0) {
+    return { ticketId: context.ticketId }
+  }
+  if (typeof settings.ticketBinding !== 'function') return undefined
+  const resolved = await settings.ticketBinding(context)
+  if (typeof resolved === 'string' && resolved.length > 0) return { ticketId: resolved }
+  if (isRecord(resolved) && typeof resolved.ticketId === 'string' && resolved.ticketId.length > 0) {
+    return { ticketId: resolved.ticketId, sessionId: resolved.sessionId }
+  }
+  return undefined
+}
+
+/**
+ * Create the `alephResearchHost` service over one composed ResearchHost.
+ *
+ * @param {{
+ *   host: object,
+ *   tools: object,
+ *   triggers: object,
+ *   api: object,
+ *   triggerPort?: object,
+ *   ticketBinding?: Function,
+ *   logger?: object,
+ * }} options
+ * @returns the service (`executeTool`, `triggerPort`, `onTrigger`, `setTriggerSink`, `dispose`).
+ */
+export function createResearchHostService(options) {
+  const settings = options ?? {}
+  const host = settings.host
+  if (!isRecord(host)) throw new TypeError('createResearchHostService requires a ResearchHost')
+  const registry = settings.tools?.TOOL_REGISTRY
+  if (!isRecord(registry)) {
+    throw new Error(
+      'aleph-research-host: the compiled research runtime does not export TOOL_REGISTRY. ' + BUILD_COMMAND,
+    )
+  }
+  const routeTable = settings.api?.ROUTE_TABLE
+  if (!isRecord(routeTable)) {
+    throw new Error(
+      'aleph-research-host: the compiled research runtime does not export ROUTE_TABLE. ' + BUILD_COMMAND,
+    )
+  }
+  const triggerFactory = typeof settings.triggers?.createTriggerFactory === 'function'
+    ? settings.triggers.createTriggerFactory()
+    : null
+  const index = indexTools(registry)
+  const triggerPort = settings.triggerPort ?? createTriggerPort(settings.logger)
+  const logger = settings.logger
+  const seenAuditIds = new Set()
+  let closed = false
+  let attentionSequence = 0
+
+  const repositoryOf = (name) => {
+    const repository = host.store?.[name]
+    return isRecord(repository) ? repository : undefined
+  }
+
+  const readProgram = async (input) => {
+    if (typeof host.snapshot !== 'function') {
+      return serviceFailure('not-implemented', 'this research host cannot read a Program snapshot')
+    }
+    const snapshot = await host.snapshot(input.programId)
+    if (!isRecord(snapshot)) return serviceFailure('internal', 'the research host returned no snapshot')
+    if (snapshot.ok !== true) {
+      return {
+        ok: false,
+        status: Number.isInteger(snapshot.status) ? snapshot.status : 404,
+        error: snapshot.error ?? { code: 'not-found', message: `program ${input.programId} does not exist` },
+      }
+    }
+    return snapshot
+  }
+
+  const readMetrics = async (input) => {
+    const repository = repositoryOf('ciRecords')
+    if (typeof repository?.query !== 'function') {
+      return serviceFailure('not-implemented', 'this research host cannot query metric records')
+    }
+    return { ok: true, value: await repository.query(input) }
+  }
+
+  const readExperiment = async (input) => {
+    const repository = repositoryOf('experiments')
+    if (typeof repository?.get !== 'function') {
+      return serviceFailure('not-implemented', 'this research host cannot read an Experiment')
+    }
+    const found = await repository.get(input.experimentId)
+    if (found === undefined) {
+      return {
+        ok: false,
+        status: 404,
+        error: { code: 'not-found', message: `experiment ${input.experimentId} does not exist` },
+      }
+    }
+    return { ok: true, value: found.value }
+  }
+
+  /** The runtime has no stalled projection yet: non-closed Issues are the honest answer. */
+  const listStalled = async (_input, context) => {
+    const programId = typeof context.programId === 'string' && context.programId.length > 0
+      ? context.programId
+      : undefined
+    if (programId === undefined) {
+      return serviceFailure(
+        'invalid-input',
+        'listStalled carries no parameters, so the Host context must name the programId to inspect',
+      )
+    }
+    const repository = repositoryOf('issues')
+    if (typeof repository?.listByProgram !== 'function') {
+      return serviceFailure('not-implemented', 'this research host cannot list Issues')
+    }
+    const stalled = []
+    for (const issue of await repository.listByProgram(programId)) {
+      if (issue?.status !== 'closed') stalled.push(issue)
+    }
+    return { ok: true, value: stalled }
+  }
+
+  /** Resolve the Program an Attention subject belongs to through the store. */
+  const programOfSubject = async (subject) => {
+    if (subject.kind === 'program') return subject.id
+    if (subject.kind === 'issue') {
+      const found = await repositoryOf('issues')?.get(subject.id)
+      return found?.value?.programId
+    }
+    if (subject.kind === 'experiment') {
+      const found = await repositoryOf('experiments')?.get(subject.id)
+      return found?.value?.programId
+    }
+    if (subject.kind === 'ci-run') {
+      const found = await repositoryOf('ciRecords')?.get(subject.id)
+      return found?.programId
+    }
+    return undefined
+  }
+
+  /**
+   * Append one Attention for the Watchdog tool.
+   *
+   * The frozen command surface has no `attention.raise` route, so this is a direct
+   * repository write, not a command: it mints the record the tool output contract needs
+   * (`severity` defaults to `warning`, since no severity is modelled in the tool input)
+   * and does not fabricate a `attention.raised` audit entry.
+   */
+  const raiseAttention = async (input) => {
+    const programId = await programOfSubject(input.subject)
+    if (typeof programId !== 'string' || programId.length === 0) {
+      return {
+        ok: false,
+        status: 404,
+        error: { code: 'not-found', message: `attention subject ${String(input.subject?.id)} does not exist` },
+      }
+    }
+    const repository = repositoryOf('attention')
+    if (typeof repository?.append !== 'function') {
+      return serviceFailure('not-implemented', 'this research host cannot store attention entries')
+    }
+    attentionSequence += 1
+    const at = typeof host.clock?.now === 'function' ? host.clock.now() : new Date().toISOString()
+    const attention = {
+      id: `attention-${at}-${attentionSequence}`,
+      subject: input.subject,
+      severity: 'warning',
+      reason: input.reason,
+      detail: input.reason,
+      at,
+    }
+    const stored = await repository.append(attention)
+    if (isRecord(stored) && stored.ok === false) {
+      const kind = typeof stored.error?.kind === 'string' ? stored.error.kind : 'store-error'
+      return serviceFailure(kind, stored.error?.message ?? 'the attention entry could not be stored')
+    }
+    return { ok: true, value: attention }
+  }
+
+  const readTools = {
+    'researcher.readProgram': readProgram,
+    'researcher.readMetrics': readMetrics,
+    'implementer.readExperiment': readExperiment,
+    'watchdog.listStalled': listStalled,
+    'watchdog.raiseAttention': raiseAttention,
+    'watchdog.readMetrics': readMetrics,
+  }
+
+  /** Map the audit entries a command response carries and deliver their drafts. */
+  const emitResponseTriggers = async (response) => {
+    if (closed || triggerFactory === null) return
+    const entries = response?.body?.audit
+    if (!Array.isArray(entries) || entries.length === 0) return
+    if (typeof host.snapshot !== 'function') return
+    const snapshots = new Map()
+    for (const entry of entries) {
+      if (!isRecord(entry)) continue
+      if (typeof entry.id === 'string') {
+        if (seenAuditIds.has(entry.id)) continue
+        seenAuditIds.add(entry.id)
+      }
+      const programId = entry.programId
+      if (typeof programId !== 'string') continue
+      let snapshot = snapshots.get(programId)
+      if (snapshot === undefined) {
+        try {
+          const stored = await host.snapshot(programId)
+          snapshot = isRecord(stored) && stored.ok === true ? stored.value : null
+        } catch {
+          snapshot = null
+        }
+        snapshots.set(programId, snapshot)
+      }
+      if (snapshot === null) continue
+      const report = triggerFactory.make(entry, snapshot)
+      if (!isRecord(report) || !isRecord(report.draft)) continue
+      await triggerPort.receive(report)
+    }
+  }
+
+  /** Run one command tool through the compiled route table and the host boundary. */
+  const runCommand = async (entry, parsed, context) => {
+    const requested = context.actorKind
+    const actorKind = requested === undefined ? entry.role : requested
+    if (!TOOL_ACTOR_KINDS.includes(actorKind)) {
+      return serviceFailure(
+        'forbidden',
+        `this host cannot mint actorKind ${String(actorKind)} for ${entry.runtimeName}`,
+      )
+    }
+
+    let actor
+    if (actorKind === IMPLEMENTER_ROLE) {
+      const ticket = await resolveTicketId(settings, context)
+      if (ticket === undefined) {
+        return serviceFailure(
+          'forbidden',
+          `${entry.runtimeName} requires a Host-minted ticket binding; `
+          + 'no ticket resolver is available (pass context.ticketId or config.ticketBinding)',
+        )
+      }
+      const stored = await repositoryOf('tickets')?.get(ticket.ticketId)
+      const storedSession = stored?.value?.sessionId
+      const contextSession = typeof context.sessionId === 'string' && context.sessionId.length > 0
+        ? context.sessionId
+        : undefined
+      const sessionId = typeof ticket.sessionId === 'string' && ticket.sessionId.length > 0
+        ? ticket.sessionId
+        : typeof storedSession === 'string' && storedSession.length > 0
+          ? storedSession
+          : contextSession ?? `${SESSION_PREFIX}:implementer`
+      actor = { kind: IMPLEMENTER_ROLE, ticketId: ticket.ticketId, sessionId }
+    } else {
+      actor = actorForToolRole(actorKind, context)
+      if (actor === undefined) {
+        return serviceFailure('forbidden', `this host cannot mint actorKind ${String(actorKind)}`)
+      }
+    }
+
+    const route = routeTable[entry.command]
+    if (!isRecord(route) || typeof route.path !== 'string') {
+      return serviceFailure('not-implemented', `the compiled runtime has no route for ${String(entry.command)}`)
+    }
+    const path = pathForRoute(route.path, parsed)
+    if (path === undefined) {
+      return serviceFailure(
+        'invalid-input',
+        `${entry.runtimeName} input does not name every path parameter of ${route.path}`,
+      )
+    }
+
+    const response = await host.handleHttp({ method: 'POST', path, body: parsed, actor })
+    // Trigger delivery is an effect beside the command, not part of it: a bridge or port
+    // failure must not change the tool result the model sees.
+    try {
+      await emitResponseTriggers(response)
+    } catch (error) {
+      logger?.warn?.(
+        'aleph-research-host: trigger delivery after %s failed: %s',
+        String(entry.runtimeName),
+        String(error?.message ?? error),
+      )
+    }
+    if (!isRecord(response)) {
+      return serviceFailure('internal', 'the research host returned no HTTP response')
+    }
+    const status = response.status
+    const body = response.body
+    if (!Number.isInteger(status) || status < 200 || status >= 300 || body?.ok === false) {
+      const error = isRecord(body?.error)
+        ? body.error
+        : { code: 'http-error', message: `the research host answered ${String(status)}` }
+      return { ok: false, status, error }
+    }
+    if (isRecord(body) && body.ok === true) return body
+    return { ok: true, value: body }
+  }
+
+  /** Serve one read-family tool from the host's read surfaces. */
+  const runRead = async (entry, parsed, context) => {
+    if (!READ_TOOL_IDS.has(entry.id)) {
+      return serviceFailure('not-implemented', `${entry.runtimeName} has no Host read implementation`)
+    }
+    return readTools[entry.id](parsed, context)
+  }
+
+  return {
+    /**
+     * Execute one runtime tool by name or descriptor.
+     *
+     * Input is parsed by the tool's own boundary `Schema` before any host call, and every
+     * failure (unknown tool, invalid input, refusal, transport exception) is returned as
+     * `{ ok: false, error }`; this method never throws.
+     */
+    async executeTool(toolName, input, context) {
+      if (closed) return serviceFailure('conflict', 'the research host service is disposed')
+      const call = isRecord(context) ? context : {}
+      try {
+        const entry = resolveToolEntry(index, toolName)
+        if (entry === undefined) {
+          return serviceFailure('not-found', `unknown research tool ${String(toolName)}`)
+        }
+        const parsed = entry.schema.parse(input)
+        if (!isRecord(parsed) || parsed.ok !== true) {
+          const error = parsed?.error
+          return serviceFailure(
+            typeof error?.code === 'string' ? error.code : 'invalid-input',
+            typeof error?.message === 'string' && error.message.length > 0
+              ? error.message
+              : `${entry.runtimeName} input is invalid`,
+          )
+        }
+        if (entry.command !== undefined) return await runCommand(entry, parsed.value, call)
+        return await runRead(entry, parsed.value, call)
+      } catch (error) {
+        logger?.warn?.(
+          'aleph-research-host: executeTool(%s) failed: %s',
+          String(toolName),
+          String(error?.message ?? error),
+        )
+        return serviceFailure('internal', `the research host failed to execute ${String(toolName)}`)
+      }
+    },
+    triggerPort,
+    onTrigger(callback) {
+      return triggerPort.onTrigger(callback)
+    },
+    setTriggerSink(callback) {
+      triggerPort.setTriggerSink(callback)
+    },
+    dispose() {
+      closed = true
+      triggerPort.dispose()
+    },
+  }
 }
 
 /** Format the Program list from the read model; null means the host cannot list. */
@@ -580,8 +1229,13 @@ export const apply = async (ctx, config) => {
   const domainStore = settings.host === undefined ? resolveDomainStore(ctx, settings) : undefined
 
   let host = null
+  let service = null
   let persistent = false
   let disposed = false
+  // The port the composed host delivers its own `deliverTriggers()` reports through. It
+  // is created before composition so `createResearchHost` receives the same object the
+  // service exposes; `config.triggerPort`, when present, stays the fallback receiver.
+  const triggerPort = createTriggerPort(ctx.logger, settings.triggerPort)
   const routeDisposers = []
   const releaseRoutes = () => {
     while (routeDisposers.length > 0) {
@@ -602,16 +1256,18 @@ export const apply = async (ctx, config) => {
   ctx.effect(() => async () => {
     disposed = true
     releaseRoutes()
+    service?.dispose()
+    service = null
     const owned = host
     host = null
     await disposeHost(owned)
   })
 
   let composed
+  let runtime
   if (settings.host !== undefined) {
     composed = assertHost(settings.host, 'config.host')
   } else {
-    let runtime
     try {
       runtime = await loadRuntime(domainStore !== undefined)
     } catch (error) {
@@ -628,6 +1284,8 @@ export const apply = async (ctx, config) => {
       )
     }
     const options = hostOptionsOf(settings)
+    // The service exposes this port, so the runtime's own deliveries must use it too.
+    options.triggerPort = triggerPort
     if (domainStore !== undefined) {
       const store = composePersistentStore(ctx, runtime.storageDomain, domainStore)
       if (store !== undefined) {
@@ -646,10 +1304,40 @@ export const apply = async (ctx, config) => {
   }
   host = composed
 
+  // The service is the DSH execution seam. An injected host still gets one when the
+  // compiled tables are available; a missing `dist/` only omits the service, because the
+  // injected-host escape hatch must not start depending on the build it bypasses.
+  try {
+    if (runtime === undefined) runtime = await loadServiceRuntime()
+    const candidate = createResearchHostService({
+      host: composed,
+      tools: runtime.tools,
+      triggers: runtime.triggers,
+      api: runtime.api,
+      triggerPort,
+      ticketBinding: settings.ticketBinding,
+      logger: ctx.logger,
+    })
+    if (disposed) {
+      candidate.dispose()
+      return
+    }
+    service = candidate
+    if (typeof ctx.provide === 'function') ctx.provide(RESEARCH_HOST_SERVICE, candidate)
+  } catch (error) {
+    if (settings.host === undefined) throw error
+    ctx.logger?.warn?.(
+      'aleph-research-host: the %s service is unavailable for the injected host (%s)',
+      RESEARCH_HOST_SERVICE,
+      String(error?.message ?? error),
+    )
+  }
+
   registerRoutes(ctx, composed, actorKinds, maxBodyBytes, persistent, routeDisposers)
   ctx.logger?.info?.(
-    'aleph-research-host ready: %d research routes (persistent: %s)',
+    'aleph-research-host ready: %d research routes (persistent: %s, service: %s)',
     5,
     String(persistent),
+    String(service !== null),
   )
 }

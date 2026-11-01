@@ -71,6 +71,17 @@
  * the tools it had already registered and rethrows DSH's error, leaving the first
  * adapter's registrations intact.
  *
+ * ## Host service binding
+ *
+ * The Cordis wrapper (`apply`) reads the optional `alephResearchHost` service with
+ * `ctx.get` after registration and installs one handler per catalog entry:
+ * `host.executeTool(entry.runtimeName, input, context)`. The lookup is optional and
+ * non-fatal: a profile that mounts only this plugin keeps the documented no-handler
+ * error, and a host that is provided later is picked up through Cordis's
+ * `internal/service` event (so plugin load order does not matter). An explicit
+ * `config.handlers` or `config.host` still wins, because those are deliberate
+ * deployment choices.
+ *
  * `JSON.parse` is deliberately absent; the adapter only builds and serializes JSON.
  */
 import { ToolArgsError, assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
@@ -100,6 +111,9 @@ export const PRESET_ROLES = Object.freeze({
 
 /** Schema types DSH accepts as a single scalar/container `type`. */
 const SCHEMA_TYPES = new Set(['object', 'array', 'string', 'number', 'integer', 'boolean', 'null'])
+
+/** The service `research-host` provides; the literal is repeated there for the same reason. */
+export const HOST_SERVICE_NAME = 'alephResearchHost'
 
 /** Annotation keywords DSH copies through to the model-facing schema. */
 const ANNOTATION_KEYS = ['description', 'title', 'default', 'examples']
@@ -648,16 +662,100 @@ export function registerResearchTools(ctx, options = {}) {
 }
 
 /**
+ * Build one handler per catalog entry, all backed by the host service.
+ *
+ * The runtime name (rather than the DSH-facing name) is passed so a deployment that
+ * renames the prefix still resolves the same runtime tool.
+ */
+const handlersForHostService = (catalog, host) => {
+  const handlers = {}
+  for (const entry of catalog) {
+    setOwn(handlers, entry.id, (input, context) => host.executeTool(entry.runtimeName, input, context))
+  }
+  return handlers
+}
+
+/**
+ * Read the optional `alephResearchHost` service.
+ *
+ * A missing service and a service registry that throws are the same state for this
+ * adapter (`undefined`): the tools stay registered and keep the no-handler error.
+ */
+const hostServiceOf = (ctx) => {
+  if (typeof ctx?.get !== 'function') return undefined
+  let service
+  try {
+    service = ctx.get(HOST_SERVICE_NAME)
+  } catch {
+    return undefined
+  }
+  return service !== null && typeof service === 'object' ? service : undefined
+}
+
+/**
  * Cordis plugin wrapper.
  *
  * The deployment that mounts this module passes the same options as
  * `registerResearchTools`; a YAML-only composition registers the tools but cannot inject
  * handlers, so every call fails with the no-handler error until code supplies them.
  *
+ * After registration the wrapper binds the optional `alephResearchHost` service (when it
+ * exposes `executeTool`) to every tool. The lookup never fails activation: a missing or
+ * not-yet-provided service leaves the no-handler error in place, and a service provided
+ * later is bound through the `internal/service` event. Explicit `config.handlers` or
+ * `config.host` keep precedence over the service.
+ *
  * @param {object} ctx the plugin context.
  * @param {object} [config] registration options.
- * @returns the adapter result from `registerResearchTools`.
+ * @returns the adapter result from `registerResearchTools`, with a `dispose()` that also
+ *   releases the optional service listener.
  */
 export function apply(ctx, config) {
-  return registerResearchTools(ctx, config ?? {})
+  const options = { ...(config ?? {}) }
+  const adapter = registerResearchTools(ctx, options)
+
+  // An explicit handler source is a deliberate deployment choice; do not shadow it.
+  const explicitHandlers = options.handlers !== undefined || options.host !== undefined
+  let attached = false
+  const attach = () => {
+    if (explicitHandlers || attached) return false
+    const host = hostServiceOf(ctx)
+    if (host === undefined || typeof host.executeTool !== 'function') return false
+    // `resolveHandler` reads the settings object at execute time, so installing the map
+    // after registration is exactly the deferred binding this wrapper needs.
+    options.handlers = handlersForHostService(adapter.catalog, host)
+    attached = true
+    return true
+  }
+
+  attach()
+  let offService
+  if (!explicitHandlers && !attached && typeof ctx.on === 'function') {
+    offService = ctx.on('internal/service', (serviceName) => {
+      if (serviceName === HOST_SERVICE_NAME) attach()
+    })
+    if (typeof ctx.effect === 'function') {
+      ctx.effect(() => () => {
+        try {
+          offService?.()
+        } catch { /* the event bus is going away */ }
+        offService = undefined
+      }, 'aleph: research tools host service')
+    }
+  }
+
+  return {
+    ...adapter,
+    /** True once the host service supplied the handlers; tests use it as evidence. */
+    get hostBound() {
+      return attached
+    },
+    dispose() {
+      try {
+        offService?.()
+      } catch { /* the event bus is going away */ }
+      offService = undefined
+      adapter.dispose()
+    },
+  }
 }

@@ -11,7 +11,14 @@ import test from 'node:test'
 import { Readable } from 'node:stream'
 import { format } from 'node:util'
 
-import { apply, inject, name, VERSION } from '../research-host.js'
+import {
+  RESEARCH_HOST_SERVICE,
+  apply,
+  createResearchHostService,
+  inject,
+  name,
+  VERSION,
+} from '../research-host.js'
 
 const HEALTH_PATH = '/aleph/api/research/health'
 const REQUESTS_PATH = '/aleph/api/research/requests'
@@ -29,14 +36,17 @@ const PROGRAM_BODY = {
 }
 
 /**
- * A fake Cordis context: routes are collected, effects are tracked and disposable, and
- * `get(name)` resolves the optional services a test provides. `getError` simulates a
- * context whose lookup throws instead of returning `undefined`.
+ * A fake Cordis context: routes are collected, effects are tracked and disposable,
+ * `provide(name, value)` records the services the fiber publishes (with the same
+ * disposable contract as Cordis), and `get(name)` resolves the optional services a test
+ * provides. `getError` simulates a context whose lookup throws instead of returning
+ * `undefined`.
  */
 function fakeContext({ services = new Map(), getError } = {}) {
   const routes = []
   const cleanups = []
   const warnings = []
+  const provided = new Map()
   const ctx = {
     webServer: {
       register(route, handler) {
@@ -51,6 +61,16 @@ function fakeContext({ services = new Map(), getError } = {}) {
     get(serviceName) {
       if (getError !== undefined) throw getError
       return services.get(serviceName)
+    },
+    provide(serviceName, value) {
+      provided.set(serviceName, value)
+      const dispose = () => {
+        if (provided.get(serviceName) === value) provided.delete(serviceName)
+      }
+      // Cordis owns `provide` through the fiber effect; mirror that here so a harness
+      // disposal releases the service exactly like the real loader does.
+      cleanups.push(dispose)
+      return dispose
     },
     logger: {
       info() {},
@@ -71,6 +91,7 @@ function fakeContext({ services = new Map(), getError } = {}) {
     ctx,
     routes,
     warnings,
+    provided,
     find(kind, path) {
       return routes.find((route) => route.kind === kind && route.path === path)
     },
@@ -480,4 +501,507 @@ test('config.domainStore composes the persistent store without the service', asy
   assert.equal((await invoke(harness.find('exact', PROGRAMS_PATH))).body.count, 1)
 
   await harness.dispose()
+})
+
+// ---------------------------------------------------------------------------
+// The alephResearchHost service.
+// ---------------------------------------------------------------------------
+
+/** The runtime tool input for `operator_create_program`: the command literal plus body. */
+const PROGRAM_TOOL_INPUT = { type: 'program.create', ...PROGRAM_BODY }
+
+/** A valid ExperimentPlan for the researcher propose tool. */
+const PLAN = {
+  hypothesis: 'the probe helps',
+  steps: ['measure the baseline', 'measure the probe'],
+  expected: { direction: 'higher', rationale: 'the probe targets the gap' },
+  environment: { kind: 'requirements', requirementsFile: 'requirements.txt', pythonVersion: '3.12' },
+  inputs: [],
+}
+
+/** A host double that records every handleHttp call; reads answer conventions. */
+function recordingHost() {
+  const calls = []
+  const host = {
+    async handleHttp(request) {
+      calls.push(request)
+      return { status: 200, body: { ok: true, value: { path: request.path }, audit: [] } }
+    },
+    async snapshot(programId) {
+      return { ok: false, status: 404, error: { code: 'not-found', message: `${programId} missing` }, audit: [] }
+    },
+    async attention() {
+      return []
+    },
+  }
+  return { host, calls }
+}
+
+/** Read the service `apply` provided. */
+const serviceOf = (harness) => harness.provided.get(RESEARCH_HOST_SERVICE)
+
+test('the plugin provides alephResearchHost with executeTool and a trigger port', async () => {
+  const harness = fakeContext()
+  await apply(harness.ctx, {})
+
+  assert.ok(RESEARCH_HOST_SERVICE === 'alephResearchHost')
+  const service = serviceOf(harness)
+  assert.ok(service, `expected the ${RESEARCH_HOST_SERVICE} service`)
+  assert.equal(typeof service.executeTool, 'function')
+  assert.equal(typeof service.onTrigger, 'function')
+  assert.equal(typeof service.setTriggerSink, 'function')
+  assert.equal(typeof service.dispose, 'function')
+  assert.equal(typeof service.triggerPort.receive, 'function')
+  assert.deepEqual(service.triggerPort.recorded, [])
+
+  await harness.dispose()
+  assert.equal(harness.provided.size, 0, 'the provided service is released with the fiber')
+  const disposed = await service.executeTool('researcher_read_program', { programId: 'program-1' })
+  assert.equal(disposed.ok, false)
+  assert.equal(disposed.error.code, 'conflict')
+})
+
+test('executeTool creates a Program through the compiled route table and records its trigger', async () => {
+  const harness = fakeContext()
+  await apply(harness.ctx, {})
+  const service = serviceOf(harness)
+
+  const created = await service.executeTool('operator_create_program', PROGRAM_TOOL_INPUT)
+  assert.equal(created.ok, true)
+  assert.equal(created.value.status, 'running')
+  assert.equal(created.value.name, PROGRAM_BODY.name)
+  assert.deepEqual(created.audit.map((entry) => entry.action), ['program.created'])
+  assert.equal(created.audit[0].actor.kind, 'operator')
+
+  // No sink registered: the port records the mapped report.
+  const recorded = service.triggerPort.recorded
+  assert.equal(recorded.length, 1)
+  assert.equal(recorded[0].action, 'program.created')
+  assert.equal(recorded[0].kind, 'program-created')
+  assert.equal(recorded[0].draft.kind, 'program-created')
+  assert.deepEqual(recorded[0].draft.threads[0], { kind: 'program', id: `research:${created.value.id}` })
+  assert.equal(recorded[0].draft.actor.kind, 'operator')
+  assert.equal(recorded[0].draft.meta.action, 'program.created')
+
+  // The read tool returns the same read model the HTTP snapshot route serves.
+  const snapshot = await service.executeTool('researcher_read_program', { programId: created.value.id })
+  assert.equal(snapshot.ok, true)
+  assert.equal(snapshot.value.program.id, created.value.id)
+  assert.equal(snapshot.value.audit[0].action, 'program.created')
+
+  // A descriptor from the DSH adapter (or a catalog id) resolves to the same runtime tool.
+  const byDescriptor = await service.executeTool(
+    { id: 'researcher.readProgram', runtimeName: 'researcher_read_program' },
+    { programId: created.value.id },
+  )
+  assert.equal(byDescriptor.value.program.id, created.value.id)
+  const byId = await service.executeTool('researcher.readProgram', { programId: created.value.id })
+  assert.equal(byId.value.program.id, created.value.id)
+
+  const missing = await service.executeTool('researcher_read_program', { programId: 'no-such-program' })
+  assert.equal(missing.ok, false)
+  assert.equal(missing.status, 404)
+  assert.equal(missing.error.code, 'not-found')
+
+  await harness.dispose()
+})
+
+test('executeTool maps the researcher command family and rejects invalid input before HTTP', async () => {
+  const harness = fakeContext()
+  await apply(harness.ctx, {})
+  const service = serviceOf(harness)
+  const received = []
+  service.onTrigger((draft) => received.push(draft))
+
+  const program = await service.executeTool('operator_create_program', PROGRAM_TOOL_INPUT)
+  const programId = program.value.id
+
+  const issue = await service.executeTool('aleph_research_operator_create_issue', {
+    type: 'issue.create',
+    programId,
+    title: 'a question',
+    body: 'what is the best probe?',
+    labels: ['research'],
+  })
+  assert.equal(issue.ok, true)
+  const issueId = issue.value.id
+
+  const claim = await service.executeTool('researcher_claim_issue', {
+    type: 'issue.claim', programId, issueId,
+  })
+  assert.equal(claim.ok, true)
+  assert.equal(claim.value.status, 'assigned')
+  assert.equal(claim.audit[0].actor.kind, 'researcher')
+
+  const comment = await service.executeTool('researcher_comment_on_issue', {
+    type: 'issue.comment', programId, issueId, body: 'a finding', kind: 'comment',
+  })
+  assert.equal(comment.ok, true)
+
+  const proposed = await service.executeTool('researcher_propose_experiment', {
+    type: 'experiment.propose', programId, issueId, plan: PLAN,
+  })
+  assert.equal(proposed.ok, true)
+  assert.equal(proposed.value.status, 'open')
+  const experimentId = proposed.value.id
+
+  const review = await service.executeTool('researcher_review_experiment', {
+    type: 'experiment.review', programId, experimentId, body: 'looks sound', verdict: 'approve',
+  })
+  assert.equal(review.ok, true)
+
+  // Every accepted command above produced one draft, in order.
+  assert.deepEqual(received.map((draft) => draft.kind), [
+    'program-created', 'issue-created', 'issue-claimed', 'issue-commented', 'experiment-proposed', 'experiment-reviewed',
+  ])
+  assert.equal(received.at(-1).programId, programId)
+  assert.equal(received.at(-1).meta.subjectId, experimentId)
+
+  // The runtime Schema rejects a malformed id before the host boundary is reached; the
+  // accepted calls above already proved the transport works, so a bad command cannot
+  // have appended another draft.
+  const before = received.length
+  const invalid = await service.executeTool('researcher_claim_issue', {
+    type: 'issue.claim', programId, issueId: '-not-an-id',
+  })
+  assert.equal(invalid.ok, false)
+  assert.equal(invalid.error.code, 'invalid-input')
+  assert.match(invalid.error.message, /issueId must be an entity id string/)
+
+  const extra = await service.executeTool('researcher_read_program', {
+    programId, extra: true,
+  })
+  assert.equal(extra.ok, false)
+  assert.equal(extra.error.code, 'invalid-input')
+
+  const unknown = await service.executeTool('no_such_tool', {})
+  assert.equal(unknown.ok, false)
+  assert.equal(unknown.error.code, 'not-found')
+  assert.equal(received.length, before)
+
+  await harness.dispose()
+})
+
+test('executeTool fills the compiled ROUTE_TABLE path for every command family', async () => {
+  const { host, calls } = recordingHost()
+  const harness = fakeContext()
+  await apply(harness.ctx, { host, ticketBinding: () => 'ticket-1' })
+  const service = serviceOf(harness)
+
+  const cases = [
+    ['operator_pause_program', { type: 'program.pause', programId: 'program-1' }, '/aleph/api/programs/program-1/pause', 'operator'],
+    ['operator_create_issue', { type: 'issue.create', programId: 'program-1', title: 't', body: 'b', labels: ['research'] }, '/aleph/api/programs/program-1/issues', 'operator'],
+    ['researcher_claim_issue', { type: 'issue.claim', programId: 'program-1', issueId: 'issue-1' }, '/aleph/api/programs/program-1/issues/issue-1/claim', 'researcher'],
+    ['researcher_comment_on_issue', { type: 'issue.comment', programId: 'program-1', issueId: 'issue-1', body: 'b', kind: 'comment' }, '/aleph/api/programs/program-1/issues/issue-1/comments', 'researcher'],
+    ['researcher_close_issue', { type: 'issue.close', programId: 'program-1', issueId: 'issue-1', resolution: 'accepted', summary: 's' }, '/aleph/api/programs/program-1/issues/issue-1/close', 'researcher'],
+    ['researcher_propose_experiment', { type: 'experiment.propose', programId: 'program-1', issueId: 'issue-1', plan: PLAN }, '/aleph/api/programs/program-1/issues/issue-1/experiments', 'researcher'],
+    ['researcher_review_experiment', { type: 'experiment.review', programId: 'program-1', experimentId: 'experiment-1', body: 'b', verdict: 'approve' }, '/aleph/api/programs/program-1/experiments/experiment-1/reviews', 'researcher'],
+    ['researcher_close_experiment', { type: 'experiment.close', programId: 'program-1', experimentId: 'experiment-1', reason: 'done' }, '/aleph/api/programs/program-1/experiments/experiment-1/close', 'researcher'],
+    ['researcher_request_ci', { type: 'ci.request', programId: 'program-1', experimentId: 'experiment-1' }, '/aleph/api/programs/program-1/experiments/experiment-1/ci', 'researcher'],
+  ]
+
+  for (const [toolName, input, path, actorKind] of cases) {
+    const result = await service.executeTool(toolName, input)
+    assert.equal(result.ok, true, toolName)
+    const call = calls.at(-1)
+    assert.equal(call.method, 'POST', toolName)
+    assert.equal(call.path, path, toolName)
+    assert.equal(call.actor.kind, actorKind, toolName)
+    assert.equal(call.body.type, input.type, toolName)
+  }
+  assert.equal(calls.length, cases.length)
+  assert.equal(calls[0].actor.sessionId, 'aleph-host:operator')
+  assert.equal(calls[2].actor.sessionId, 'aleph-host:researcher')
+
+  // context.actorKind overrides the role-derived actor (the runtime gate still decides).
+  const overridden = await service.executeTool('operator_pause_program', cases[0][1], { actorKind: 'watchdog' })
+  assert.equal(overridden.ok, true)
+  assert.equal(calls.at(-1).actor.kind, 'watchdog')
+
+  const invalidActor = await service.executeTool('operator_pause_program', cases[0][1], { actorKind: 'nobody' })
+  assert.equal(invalidActor.ok, false)
+  assert.equal(invalidActor.error.code, 'forbidden')
+  assert.equal(calls.length, cases.length + 1)
+
+  await harness.dispose()
+})
+
+test('implementer submit needs a trusted ticket binding resolver', async () => {
+  const submit = {
+    type: 'ticket.submit',
+    head: 'a'.repeat(40),
+    environment: { kind: 'requirements', requirementsFile: 'requirements.txt', pythonVersion: '3.12' },
+  }
+
+  const deniedHost = recordingHost()
+  const deniedHarness = fakeContext()
+  await apply(deniedHarness.ctx, { host: deniedHost.host })
+  const denied = await serviceOf(deniedHarness).executeTool('aleph_research_submit_implementation', submit)
+  assert.equal(denied.ok, false)
+  assert.equal(denied.error.code, 'forbidden')
+  assert.match(denied.error.message, /ticket binding/)
+  assert.equal(deniedHost.calls.length, 0, 'no HTTP request is sent without a binding')
+  await deniedHarness.dispose()
+
+  const allowedHost = recordingHost()
+  const allowedHarness = fakeContext()
+  await apply(allowedHarness.ctx, { host: allowedHost.host, ticketBinding: () => 'ticket-1' })
+  const allowed = await serviceOf(allowedHarness).executeTool('implementer_submit_implementation', submit)
+  assert.equal(allowed.ok, true)
+  assert.equal(allowedHost.calls.length, 1)
+  assert.equal(allowedHost.calls[0].path, '/aleph/api/tickets/submit')
+  assert.deepEqual(allowedHost.calls[0].actor, {
+    kind: 'implementer', ticketId: 'ticket-1', sessionId: 'aleph-host:implementer',
+  })
+
+  // A trusted context ticketId resolves the same way without a configured resolver.
+  const contextHost = recordingHost()
+  const contextHarness = fakeContext()
+  await apply(contextHarness.ctx, { host: contextHost.host })
+  const fromContext = await serviceOf(contextHarness).executeTool('implementer_submit_implementation', submit, {
+    ticketId: 'ticket-2', sessionId: 'session-impl-2',
+  })
+  assert.equal(fromContext.ok, true)
+  assert.deepEqual(contextHost.calls[0].actor, {
+    kind: 'implementer', ticketId: 'ticket-2', sessionId: 'session-impl-2',
+  })
+  await contextHarness.dispose()
+  await allowedHarness.dispose()
+})
+
+test('non-2xx responses and thrown host errors map to { ok: false, error } without throwing', async () => {
+  const refusedHost = {
+    async handleHttp() {
+      return {
+        status: 403,
+        body: {
+          ok: false,
+          status: 403,
+          error: { code: 'forbidden', message: 'the actor is not allowed' },
+          audit: [],
+        },
+      }
+    },
+    async snapshot() {
+      return { ok: false, status: 404, error: { code: 'not-found', message: 'missing' }, audit: [] }
+    },
+    async attention() {
+      return []
+    },
+  }
+  const refusedHarness = fakeContext()
+  await apply(refusedHarness.ctx, { host: refusedHost })
+  const refused = await serviceOf(refusedHarness).executeTool('operator_pause_program', {
+    type: 'program.pause', programId: 'program-1',
+  })
+  assert.deepEqual(refused, {
+    ok: false,
+    status: 403,
+    error: { code: 'forbidden', message: 'the actor is not allowed' },
+  })
+  await refusedHarness.dispose()
+
+  const throwingHost = {
+    async handleHttp() {
+      throw new Error('the transport exploded')
+    },
+    async snapshot() {
+      return { ok: false, status: 404, error: { code: 'not-found', message: 'missing' }, audit: [] }
+    },
+    async attention() {
+      return []
+    },
+  }
+  const throwingHarness = fakeContext()
+  await apply(throwingHarness.ctx, { host: throwingHost })
+  const thrown = await serviceOf(throwingHarness).executeTool('operator_pause_program', {
+    type: 'program.pause', programId: 'program-1',
+  })
+  assert.equal(thrown.ok, false)
+  assert.equal(thrown.error.code, 'internal')
+  assert.ok(throwingHarness.warnings.some((warning) => warning.includes('executeTool')))
+  await throwingHarness.dispose()
+})
+
+test('read tools serve metrics, experiments, stalled issues and attention from the host', async () => {
+  const harness = fakeContext()
+  await apply(harness.ctx, {})
+  const service = serviceOf(harness)
+
+  const program = await service.executeTool('operator_create_program', PROGRAM_TOOL_INPUT)
+  const programId = program.value.id
+  const issue = await service.executeTool('operator_create_issue', {
+    type: 'issue.create', programId, title: 't', body: 'b', labels: ['blocked'],
+  })
+  const issueId = issue.value.id
+
+  const metrics = await service.executeTool('researcher_read_metrics', { programId })
+  assert.equal(metrics.ok, true)
+  assert.deepEqual(metrics.value, { rows: [], summaries: [] })
+
+  const watchdogMetrics = await service.executeTool('watchdog_read_metrics', { programId })
+  assert.equal(watchdogMetrics.ok, true)
+  assert.deepEqual(watchdogMetrics.value.rows, [])
+
+  const missingExperiment = await service.executeTool('implementer_read_experiment', {
+    experimentId: 'experiment-missing',
+  })
+  assert.equal(missingExperiment.ok, false)
+  assert.equal(missingExperiment.status, 404)
+
+  const noProgram = await service.executeTool('watchdog_list_stalled', {})
+  assert.equal(noProgram.ok, false)
+  assert.equal(noProgram.error.code, 'invalid-input')
+  const stalled = await service.executeTool('watchdog_list_stalled', {}, { programId })
+  assert.equal(stalled.ok, true)
+  assert.deepEqual(stalled.value.map((entry) => entry.id), [issueId])
+
+  const attention = await service.executeTool('watchdog_raise_attention', {
+    reason: 'needs a look', subject: { kind: 'issue', id: issueId },
+  })
+  assert.equal(attention.ok, true)
+  assert.equal(attention.value.subject.id, issueId)
+  assert.equal(attention.value.severity, 'warning')
+  const snapshot = await service.executeTool('researcher_read_program', { programId })
+  assert.deepEqual(snapshot.value.attention.map((entry) => entry.id), [attention.value.id])
+
+  const unknownSubject = await service.executeTool('watchdog_raise_attention', {
+    reason: 'nowhere', subject: { kind: 'issue', id: 'issue-missing' },
+  })
+  assert.equal(unknownSubject.ok, false)
+  assert.equal(unknownSubject.status, 404)
+
+  await harness.dispose()
+})
+
+test('the trigger port records without a sink, forwards drafts to a sink, and skips refused reports', async () => {
+  const harness = fakeContext()
+  await apply(harness.ctx, {})
+  const service = serviceOf(harness)
+
+  const draft = {
+    kind: 'issue-created',
+    programId: 'program-1',
+    threads: [{ kind: 'program', id: 'research:program-1' }],
+    actor: { kind: 'operator', sessionId: 'aleph-host:operator' },
+    human: true,
+    at: '2026-01-01T00:00:00.000Z',
+    text: 'issue created',
+    meta: { action: 'issue.created', subjectKind: 'issue', subjectId: 'issue-1' },
+  }
+  const report = { action: 'issue.created', kind: 'issue-created', draft }
+
+  const first = await service.triggerPort.receive(report)
+  assert.deepEqual(first, { ok: true, value: undefined })
+  assert.equal(service.triggerPort.recorded.length, 1)
+  assert.equal(service.triggerPort.recorded[0], report)
+
+  const seen = []
+  const detach = service.onTrigger(async (receivedDraft, receivedReport) => {
+    seen.push({ draft: receivedDraft, report: receivedReport })
+  })
+  assert.equal(typeof detach, 'function')
+  await service.triggerPort.receive(report)
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].draft, draft)
+  assert.equal(seen[0].report, report)
+
+  // A `command.refused` report carries no draft: it must not wake the bridge.
+  await service.triggerPort.receive({ action: 'command.refused', kind: null, draft: null })
+  assert.equal(seen.length, 1)
+
+  // A throwing sink is a failed Result, not a thrown exception.
+  service.setTriggerSink(() => {
+    throw new Error('sink exploded')
+  })
+  const failed = await service.triggerPort.receive(report)
+  assert.equal(failed.ok, false)
+  assert.equal(failed.error.code, 'internal')
+  assert.ok(harness.warnings.some((warning) => warning.includes('trigger sink')))
+
+  detach()
+  service.setTriggerSink(null)
+  await service.triggerPort.receive(report)
+  assert.equal(seen.length, 1)
+  assert.equal(service.triggerPort.recorded.length, 2)
+
+  await harness.dispose()
+})
+
+test('a refused command produces no wake-up even after a successful request', async () => {
+  const harness = fakeContext()
+  await apply(harness.ctx, {})
+  const service = serviceOf(harness)
+  const received = []
+  service.onTrigger((draft) => received.push(draft))
+
+  const program = await service.executeTool('operator_create_program', PROGRAM_TOOL_INPUT)
+  const programId = program.value.id
+  const issue = await service.executeTool('operator_create_issue', {
+    type: 'issue.create', programId, title: 't', body: 'b', labels: ['research'],
+  })
+  received.length = 0
+
+  // The Issue is unassigned, so the composition refuses the proposal as forbidden and
+  // audits it as `command.refused`; the mapper returns `kind: null` and no draft.
+  const refused = await service.executeTool('researcher_propose_experiment', {
+    type: 'experiment.propose', programId, issueId: issue.value.id, plan: PLAN,
+  })
+  assert.equal(refused.ok, false)
+  assert.equal(refused.status, 403)
+  assert.equal(refused.error.code, 'forbidden')
+  assert.equal(received.length, 0, 'a refusal must not wake the bridge')
+
+  await harness.dispose()
+})
+
+test('dispose clears the trigger sink and stops tool execution', async () => {
+  const harness = fakeContext()
+  await apply(harness.ctx, {})
+  const service = serviceOf(harness)
+  const seen = []
+  service.onTrigger((draft) => seen.push(draft))
+
+  await service.executeTool('operator_create_program', PROGRAM_TOOL_INPUT)
+  assert.equal(seen.length, 1)
+
+  service.dispose()
+  await service.triggerPort.receive({
+    action: 'program.created',
+    kind: 'program-created',
+    draft: {
+      kind: 'program-created',
+      programId: 'program-1',
+      threads: [{ kind: 'program', id: 'research:program-1' }],
+      actor: { kind: 'operator', sessionId: 's' },
+      human: true,
+      at: '2026-01-01T00:00:00.000Z',
+      text: 'program created',
+      meta: {},
+    },
+  })
+  assert.equal(seen.length, 1, 'a disposed service has no sink')
+
+  const after = await service.executeTool('researcher_read_program', { programId: 'program-1' })
+  assert.equal(after.ok, false)
+  assert.equal(after.error.code, 'conflict')
+
+  await harness.dispose()
+})
+
+test('createResearchHostService rejects a registry or route table it cannot read', () => {
+  const { host } = recordingHost()
+  assert.throws(
+    () => createResearchHostService({ host, tools: {}, triggers: {}, api: {} }),
+    /TOOL_REGISTRY/,
+  )
+  assert.throws(
+    () => createResearchHostService({
+      host,
+      tools: { TOOL_REGISTRY: { operator: {}, researcher: {}, implementer: {}, watchdog: {} } },
+      triggers: {},
+      api: {},
+    }),
+    /ROUTE_TABLE/,
+  )
 })

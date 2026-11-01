@@ -14,8 +14,10 @@
     "./package.json": "./package.json",
     "./request-tool": "./request-tool.js",
     "./research-host": "./research-host.js",
+    "./research-sessions": "./research-sessions.js",
     "./research-storage": "./research-storage.js",
-    "./research-tools": "./research-tools.js"
+    "./research-tools": "./research-tools.js",
+    "./research-trigger-bridge": "./research-trigger-bridge.js"
   },
   "files": [
     "index.js",
@@ -24,8 +26,10 @@
     "research-extension.js",
     "request-tool.js",
     "research-host.js",
+    "research-sessions.js",
     "research-storage.js",
-    "research-tools.js"
+    "research-tools.js",
+    "research-trigger-bridge.js"
   ],
   "dsh": {
     "bundle": {
