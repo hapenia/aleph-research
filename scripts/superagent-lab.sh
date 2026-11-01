@@ -225,7 +225,7 @@ gh_config_dir="${GH_CONFIG_DIR:-$real_home/.config/gh}"
 
 # Only these roots are readable by sandboxed commands; the case runtime is added by
 # the case lab when it points at one.
-aleph_read_roots="${ALEPH_READ_ROOTS:-/usr:/bin:/sbin:/lib:/lib64:/etc:/opt:/run}"
+aleph_read_roots="${ALEPH_READ_ROOTS:-/usr:/bin:/sbin:/lib:/lib64:/etc:/opt:/run:/sys}"
 
 # Sessions keep the prototype's danger-full-access unless the deployment asks for
 # confinement; the lab wants the sandbox runner to be the enforcement point.
