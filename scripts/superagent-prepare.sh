@@ -97,13 +97,19 @@ Start a long command in the background and then end your turn: the job's complet
 wakes you with its result. Do not poll a running job with repeated `job_output`
 waits, and do not re-run a training job that is already running.
 
+The sandbox uses its own PID namespace. `ps` inside the workspace may therefore show
+no process for a background job that is still running. Trust the `job_output` status
+instead of `ps`; a running job is not a dead job.
+
 ## Environment limits
 
-This machine may have no GPU and the configured runtime is the only trusted Python
-environment. Do not install system-wide packages, do not use virtual environments
-from other projects, and do not plan GPU training unless the ticket or the project
-conventions name a supported GPU runtime. If a request needs a capability this
-environment does not have, report that limitation instead of improvising around it.
+The configured runtime is the only trusted Python environment. Do not install
+system-wide packages, do not use virtual environments from other projects, and do not
+plan GPU training unless the ticket or the project conventions name a supported GPU
+runtime. GPU device nodes may be visible in the sandbox even when the runtime has no
+CUDA-enabled framework; visibility alone is not a promise that training will work. If
+a request needs a capability this environment does not have, report that limitation
+instead of improvising around it.
 
 ## Finishing the ticket (required order)
 
