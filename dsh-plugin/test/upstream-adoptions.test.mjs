@@ -1074,3 +1074,43 @@ test('a paused project starts nothing and a cancelled batch releases the machine
     await cleanup(root);
   }
 });
+
+test('the watchdog announces a queue state once instead of polling the Composer', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-notice-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    await service.scaffoldResearch({ projectId: project.id });
+    // One queued mission and no live orchestrator: the state must be announced, then left alone.
+    const repo = project.missionRoot;
+    const branch = 'missions/queued';
+    git(repo, ['switch', '-c', branch, 'template']);
+    await mkdir(join(repo, 'missions', 'queued'), { recursive: true });
+    await writeFile(join(repo, 'missions', 'queued', 'mission.json'), JSON.stringify({ id: 'queued', entrypoint: 'run.sh', kind: 'training', title: 'queued', summary: 'test' }));
+    await writeFile(join(repo, 'missions', 'queued', 'run.sh'), '#!/usr/bin/env bash\nset -e\nprintf \'{}\' > "$ALEPH_OUTPUT_DIR/result.json"\n');
+    git(repo, ['add', '-A']);
+    git(repo, [...identity(repo), 'commit', '-m', 'queued mission']);
+    git(repo, ['switch', 'template']);
+    await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
+
+    let notices = 0;
+    service.notifyComposer = async () => { notices += 1; return { delivered: true }; };
+    service.ctx = { agents: { get: (id) => (id === 'session-leader' ? { id } : undefined) } };
+    service.presetOfAgent = () => 'aleph';
+    await service.mutate(project.id, (state) => ({ ...state, orchestratorSessionId: 'session-leader' }));
+
+    for (let tick = 0; tick < 6; tick += 1) service.checkProcesses();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(notices, 1, 'one announcement for one queue state, not one per tick');
+
+    // A changed queue is announced again.
+    await service.mutate(project.id, (state) => ({ ...state, dispatchSignature: 'stale' }));
+    for (let tick = 0; tick < 3; tick += 1) service.checkProcesses();
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assert.equal(notices, 2, 'a changed state produces one new notice');
+  } finally {
+    await cleanup(root);
+  }
+});
