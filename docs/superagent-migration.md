@@ -117,8 +117,22 @@ git status --short --branch             -> ## ticket/confinement-report-…
 The same run's analysis Worker wrote `findings.md` and committed it inside the sandbox
 (`Add porosity summary: rows per well and clipped floor`).
 
-Not yet done in Phase 1: the evaluation tool, the reply Channel, and retirement of the
-old plugin's roles.
+### Phase 1/2 building blocks
+
+Three standalone modules landed so the remaining wiring is small:
+
+- `superagent-extension/evaluation.js`: runs the project evaluator through
+  `bash -lc` with a unique `ALEPH_EVALUATION_ID`, parses the last JSON line carrying a
+  finite `score`, and on timeout kills every process that carries the marker before
+  resolving with `timedOut: true`.
+- `superagent-extension/config-store.js`: versioned configuration with atomic writes,
+  a 50-entry history, `restore`/`rollbackLast`, and a validator hook; the basis for hot
+  modification with versions and rollback.
+- `superagent-extension/research-channel.js`: the local research Channel, an
+  append-only JSONL log with idempotent sends and a link back to the research panel.
+
+Not yet done in Phase 1: wiring these into the Source kind and the Worker toolset, and
+retirement of the old plugin's roles.
 
 ## Next phases
 
