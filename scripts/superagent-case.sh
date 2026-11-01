@@ -105,6 +105,9 @@ case "$real_runtime_python" in
     ;;
 esac
 
+ALEPH_PYTHON="${ALEPH_PYTHON:-$runtime/bin/python}" \
+ALEPH_SUBMISSION_PYTHON="${ALEPH_SUBMISSION_PYTHON:-$runtime/bin/python}" \
+ALEPH_UV="${ALEPH_UV:-$runtime/bin/uv}" \
 ALEPH_SUPERAGENT_PROJECT="$run_root/project.json" \
 ALEPH_SUPERAGENT_REUSE=1 \
 ALEPH_SUPERAGENT_SMOKE=1 \
