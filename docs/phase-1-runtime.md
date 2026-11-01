@@ -55,17 +55,40 @@ before storage finished `open`, silently falling back to memory. The lab profile
 declares `inject: ['alephResearchStore']` for the host row, which makes ordering
 deterministic and turns a storage failure into a loud activation/health failure.
 
-## Deliberately not done in Phase 1
+## Phase 1b: presets, sessions, tool and trigger bridges
 
-- Research presets (`aleph-operator`, `aleph-researcher`, `aleph-implementer`) and the
-  session pool that creates/wakes them; the tools are registered but invisible.
-- Tool handlers: a YAML mount injects no handler, so calls fail with the documented
-  "no injected handler" error. A bridge from DSH tool execution to the research host is
-  Phase 1b.
-- A panel view of Programs/Issues/Experiments; the existing client still shows the old
-  research loop.
-- The prototype Eval/Ticket loop is not yet driven by the new runtime (TriggerPort is
-  implemented and lab-mounted, but the main Session still uses the old extension path).
-- A 24-hour run and case migration.
+Implemented after the first runtime milestone:
 
-These are tracked in `docs/runtime-safety-contract.md` and the mechanism document.
+- **Presets and session pool** (`research-sessions.js`): `aleph-operator` and
+  `aleph-researcher` presets, deterministic operator/researcher Session ids,
+  resolve-or-create with preset/workspace checks, bounded and deduplicated
+  `followup` wake-ups, pool sizing and failure tolerance; provided as
+  `alephResearchSessions` and disposed with the fiber. 22 tests.
+- **Tool execution bridge**: `research-host.js` provides `alephResearchHost` with
+  `executeTool`, mapping the 23 runtime tools to HTTP writes/reads with role-derived
+  actors; `research-tools.js` consumes it and no longer fails with "no injected
+  handler" when the host is present.
+- **Trigger bridge** (`research-trigger-bridge.js`): converts `ResearchTriggerDraft` to
+  the prototype Trigger shape and delivers it to `ctx.orchestrator.context('aleph')`,
+  with failures logged and isolated. Unit-tested; the live prototype Eval path remains
+  for the case run.
+- **Research panel**: the client defaults to a Research runtime tab with health,
+  programs, snapshot details, audit and attention; the legacy loop stays under a second
+  tab. 7 static tests.
+- **Case migration dry run** (`research-case-migrate.sh`): validates build/config/legacy
+  markers, prints the exact Program/Issue envelopes, and with `--apply` creates them and
+  verifies the snapshot. It intentionally refuses `--apply` while the archived legacy
+  `.aleph` marker exists; no Experiment, worker or evaluation starts.
+
+Extension tests are **206**; the focused host/tool/trigger/session suites are 52.
+The latest lab smoke (`team-presets-0639`, port 40360) passed **11/11** with
+`persistent:true`, zero activation warnings, evaluation score 80 and clean teardown.
+
+## What remains (excluded from this completion)
+
+- The actual 24-hour case run and its evidence; the legacy case is frozen and the
+  migration script is dry-run-only until the marker is retired by a person.
+- Live prototype Eval/Ticket-driven research loop: the trigger bridge is unit-tested and
+  mounted, but no real case has exercised the new Program/Issue/Experiment loop yet.
+- Production packaging of `research-core/dist` inside the installed extension is handled
+  by the lab build step; a published package layout is still a deployment concern.
