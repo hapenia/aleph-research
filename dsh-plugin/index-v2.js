@@ -525,7 +525,7 @@ class ProjectService {
     return { projectId, pythonPath: resolved };
   }
 
-  async scaffoldResearch({ projectId, title = 'Research project', dataSources = [], pythonPath = null, conventions = null, agent = null }) {
+  async scaffoldResearch({ projectId, title = 'Research project', dataSources = [], pythonPath = null, conventions = null, agent = null, instruction = null }) {
     const project = this.get(projectId);
     await this.rememberOrchestrator(projectId, agent);
     if (!project) throw new Error(`project not found: ${projectId}`);
@@ -561,7 +561,7 @@ class ProjectService {
     let cohort = null;
     const running = (next.agents ?? []).filter((item) => item.role === 'researcher' && item.status === 'running').length;
     if (agent && running === 0) {
-      cohort = await this.startBootstrap({ projectId, agent }).catch((error) => ({ error: String(error?.message ?? error) }));
+      cohort = await this.startBootstrap({ projectId, agent, instruction }).catch((error) => ({ error: String(error?.message ?? error) }));
     }
     return { projectId, commit, prepared: next.prepared, visibleData: next.visibleData, cohort };
   }
@@ -1408,7 +1408,7 @@ class ProjectService {
     };
   }
 
-  async startResearcher({ projectId, agent, bootstrap = false }) {
+  async startResearcher({ projectId, agent, bootstrap = false, instruction = null }) {
     if (!agent) throw new Error('a calling Agent is required to start a researcher');
     await this.rememberOrchestrator(projectId, agent);
     if (!this.subagents) throw new Error('subagent service is unavailable');
@@ -1420,32 +1420,22 @@ class ProjectService {
     const worktree = join(project.workspace, '.aleph', 'researchers', newId('r'));
     await mkdir(join(project.workspace, '.aleph', 'researchers'), { recursive: true });
     await git(project.researchRoot, ['worktree', 'add', '-b', branch, worktree, 'HEAD']);
+    // The static contract lives in the persona and the skill; the Host sends only this
+    // session's coordinates plus the assignment the Leader wrote for it.
+    const assignment = typeof instruction === 'string' && instruction.trim()
+      ? instruction.trim()
+      : 'No specific assignment was given. Read the project README, then choose the most valuable direction you can justify and start there.';
     const prompt = [
-      'You are an AlephResearch researcher.',
-      `Project: ${project.id}. Research brief: ${project.brief || '(no extra brief)'}.`,
-      `Research worktree: ${worktree}. Research branch: ${branch}. Mission repo: ${project.missionRoot}. Template branch: ${project.templateBranch}.`,
-      ...(project.conventions ? [`Project conventions:\n${project.conventions}`] : []),
-      `The Leader created your initial research scaffold. Provided data is already copied under data/ in ${worktree}; use it directly. Do not read data.zip, testsets, the original project or DSH state.`,
-      `The runtime is prepared for you: your shared interpreter is ${project.pythonPath ?? 'python3'} and mission code receives ALEPH_PYTHON with the same runtime, so numpy, pandas, scipy, scikit-learn and lightgbm are already importable. Do not inspect or install anything.`,
-      'Mission code reads the provided data through ALEPH_VISIBLE_DATA, which the runner also exposes as ./data inside the mission directory. Do not copy the data into a mission and do not guess its path. A mission writes results to ALEPH_OUTPUT_DIR.',
-      'Evaluation runs your predict.py with the same interpreter and the same provided data, so anything importable in your shell is importable there, and ALEPH_VISIBLE_DATA points at the same directory.',
-      'Declare extra dependencies in the mission pyproject; the Host checks them against the runtime before running.',
-      'Small bounded analysis can use the shared interpreter; full training must still be a mission.',
-      'Do not read problem/data.zip, any testsets directory, /home/hapenia/Projects/kunlungpt-comp, /home/hapenia/Projects/aleph-research, /home/hapenia/.dsh or any DSH profile/state. Run commands from your worktree, not from the project root; use canonical visible data only.' ,
-      'Work only in the assigned research worktree and commit research changes to its branch when appropriate.',
-      'You may inspect the complete git history of both repositories with git: use git log --all, git branch -a, git show and git diff in the research worktree and mission repo. Mission results are cherry-picked onto mission branches, so previous work is visible there.',
-      'Before creating or proposing a mission, inspect the mission repo history and branches for an equivalent mission that already ran or is queued. Do not re-run a mission that already has a result; read its existing result commit or result envelope instead.',
-      'All missions are visible to every researcher. Before doing data analysis, call aleph_list_missions; if an equivalent mission already has a result, inspect it with git show in the mission repo and reuse it instead of repeating the analysis.',
-      'Budget the exploration: keep schema and data sanity checks compact, then create a mission or commit a code increment instead of running exploratory scripts indefinitely.',
-      'A local script that fits a model, runs cross-validation, or needs a timeout above 120 seconds is mission-worthy even if named quick or prototype. Create the mission before running it locally.',
-      'If a local command is killed for exceeding the compute limit, do not retry it locally; create a mission for that work and let other researchers reuse the result.',
-      'If a task would help other researchers and has non-trivial cost, create a mission for it instead of running it only locally. Shared analysis, feature engineering, data cleaning, baselines, training and sweeps are typical examples; other researchers must be able to read the mission result.',
-      'Data analysis is mission work too. Profiling the data, measuring label distributions, checking clipping, missingness, per-well spread, correlations or feature relations is reusable knowledge: if you need such a fact, call aleph_list_missions first and read the mission that already answered it. Only run that analysis locally when no mission covers it, and prefer answering it once as an analysis mission instead of redoing it in every session.',
-      'A mission is cheap to file and cheap to read back. If a question will be asked by anyone else, or by you again, file it as a mission with kind=analysis, a short title and a summary of the question, instead of leaving the answer in your scratch files.',
-      'Rule of thumb: when the information or analysis you need has not been produced by any mission yet, create the mission that produces it and read the result back. That is how the next researcher avoids repeating your work, and how you avoid repeating theirs.',
-      'Small work can be done directly. For work with significant hardware cost, call aleph_start_mission to create a mission branch and worktree, work there, add missions/<id>/mission.json plus code and an uv project, commit the branch, then call aleph_propose_mission.',
-      'After proposing, wait only for missions owned by you: call aleph_evaluate; if it returns status waiting, wait briefly and retry. Do not wait for other researchers missions.',
-      'When all your missions are done, call aleph_evaluate once more so the Host evaluates your research branch and writes the report into its commit, then finish. Do not modify project queue, batch or machine state.',
+      'Host context for this session:',
+      `- Project: ${project.id}. Research brief: ${project.brief || '(none)'}.`,
+      `- Worktree: ${worktree}`,
+      `- Branch: ${branch}`,
+      `- Mission repo: ${project.missionRoot}. Template branch: ${project.templateBranch}.`,
+      `- Provided data: data/ inside the worktree${project.visibleData ? `; the visible data directory is ${project.visibleData}` : ''}.`,
+      ...(project.conventions ? [`- Project conventions:\n${project.conventions}`] : []),
+      '',
+      'Assignment from the Leader:',
+      assignment,
     ].join('\n');
     const abort = new AbortController();
     let activation;
@@ -1495,7 +1485,7 @@ class ProjectService {
     return { projectId, role: 'researcher', childId, branch, worktree };
   }
 
-  async startResearchers({ projectId, count = null, agent }) {
+  async startResearchers({ projectId, count = null, agent, instruction = null, instructions = null }) {
     await this.rememberOrchestrator(projectId, agent);
     const project = this.get(projectId);
     if (!project) throw new Error(`project not found: ${projectId}`);
@@ -1517,7 +1507,10 @@ class ProjectService {
     }));
     const started = [];
     for (let index = 0; index < requested; index += 1) {
-      started.push(await this.startResearcher({ projectId, agent }));
+      // One shared assignment, or one per researcher so the cohort covers different work.
+      const own = Array.isArray(instructions) ? instructions[index] : null;
+      const assignment = typeof own === 'string' && own.trim() ? own : instruction;
+      started.push(await this.startResearcher({ projectId, agent, instruction: assignment }));
     }
     const checkpoint = setTimeout(() => {
       for (const researcher of this.get(projectId)?.agents ?? []) {
@@ -1540,7 +1533,7 @@ class ProjectService {
    * The project opens with a single researcher. Its experiments and its first evaluated
    * method settle the project's defaults, and only then does the full cohort start.
    */
-  async startBootstrap({ projectId, agent }) {
+  async startBootstrap({ projectId, agent, instruction = null }) {
     const project = this.get(projectId);
     if (!project) throw new Error(`project not found: ${projectId}`);
     const current = project.bootstrap;
@@ -1549,7 +1542,7 @@ class ProjectService {
       const cohort = await this.startResearchers({ projectId, agent });
       return { started: false, reason: 'bootstrap already done', cohort };
     }
-    const started = await this.startResearcher({ projectId, agent, bootstrap: true });
+    const started = await this.startResearcher({ projectId, agent, bootstrap: true, instruction });
     return { started: true, ...started };
   }
 
@@ -2539,8 +2532,8 @@ export async function apply(ctx) {
     ), { when: ({ agent }) => isLeader(agent) }),
     ctx.tools.register(tool(
       'aleph_start_project',
-      'Start the research loop: prepare the scaffold from the data the project offers and dispatch the researcher cohort. Call this first when a project is not prepared.',
-      { ...projectIdParam },
+      'Start the research loop: prepare the scaffold from the data the project offers and start the opening researcher with your assignment.',
+      { ...projectIdParam, instruction: { type: 'string', description: 'Opening assignment for the first researcher' } },
       async (args, exec) => {
         const project = service.get(args.project_id);
         if (!project) throw new Error(`project not found: ${args.project_id}`);
@@ -2550,6 +2543,7 @@ export async function apply(ctx) {
           dataSources: [],
           pythonPath: project.pythonPath ?? null,
           conventions: project.conventions ?? null,
+          instruction: args.instruction ?? null,
           agent: exec.agent,
         });
       },
@@ -2646,9 +2640,20 @@ export async function apply(ctx) {
     ), { when: ({ agent }) => isLeader(agent) }),
     ctx.tools.register(tool(
       'aleph_run_researchers',
-      'Start the project default number of researcher subagents, each with its own research worktree and branch.',
-      { ...projectIdParam, count: { type: 'integer', description: 'Optional count; defaults to the project researcher count' } },
-      async (args, exec) => service.startResearchers({ projectId: args.project_id, count: args.count, agent: exec.agent }),
+      'Start researcher subagents, each with its own worktree and branch. Write their opening assignment: what to investigate and why.',
+      {
+        ...projectIdParam,
+        count: { type: 'integer', description: 'Optional count; defaults to the project researcher count' },
+        instruction: { type: 'string', description: 'Opening assignment shared by the cohort' },
+        instructions: { type: 'array', items: { type: 'string' }, description: 'One opening assignment per researcher, aligned with cohort order' },
+      },
+      async (args, exec) => service.startResearchers({
+        projectId: args.project_id,
+        count: args.count,
+        instruction: args.instruction ?? null,
+        instructions: args.instructions ?? null,
+        agent: exec.agent,
+      }),
     ), { when: ({ agent }) => isLeader(agent) }),
     ctx.tools.register(tool(
       'aleph_run_composer',

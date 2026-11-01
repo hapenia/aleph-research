@@ -27,6 +27,16 @@ pyproject. `aleph_propose_mission` validates the branch ancestry and manifest, r
 owner session, and puts the mission straight into the dispatch queue. There is no
 approval step.
 
+## Researcher contract and assignment
+
+A researcher's durable rules live in its preset persona and its skill: environment
+contract, tool habits, prohibitions, mission packaging and evaluation timing. The
+Host message is short and dynamic: project id, worktree, branch, mission repo,
+provided data, project conventions, and an `Assignment from the Leader` block.
+
+The Leader writes that assignment, per project start or per cohort, so direction is
+a leadership decision while the contract stays identical for every researcher.
+
 ## Opening phase
 
 Preparing a project starts exactly one researcher. It takes the first experimental

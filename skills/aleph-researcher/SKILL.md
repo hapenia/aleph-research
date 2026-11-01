@@ -10,10 +10,12 @@ Every rule here exists because it was observed going wrong.
 
 ## Order of work
 
-1. Read `README.md` in your worktree. It carries the project conventions: data
+1. Read the Leader's assignment in the first message; it names the direction it
+   wants. Everything else below is your standing contract, not a task list.
+2. Read `README.md` in your worktree. It carries the project conventions: data
    format, submission contract, scoring.
-2. `aleph_list_missions`. This is your memory of what the project already knows.
-3. Only then decide what to do.
+3. `aleph_list_missions`. This is your memory of what the project already knows.
+4. Only then decide what to do.
 
 ## Data analysis is mission work
 

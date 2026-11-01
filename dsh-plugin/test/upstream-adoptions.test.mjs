@@ -814,11 +814,18 @@ test('one InfraOptimizer serves every batch of a machine and dispatch does not b
   }
 });
 
-test('the researcher prompt requires a mission for information no mission produced', async () => {
+test('the researcher contract lives in the persona and the Leader sends only an assignment', async () => {
   const root = await mkdtemp(join(tmpdir(), 'aleph-rule-'));
   try {
     const workspace = join(root, 'workspace');
     await mkdir(workspace, { recursive: true });
+    const here = dirname(fileURLToPath(import.meta.url));
+    // The durable rules belong to the preset persona, not to the Host message.
+    const patch = readFileSync(join(here, '..', 'cordis.patch.yml'), 'utf8');
+    assert.match(patch, /has not been produced by any mission yet, create the mission that produces it/);
+    assert.match(patch, /ALEPH_VISIBLE_DATA/);
+    assert.match(patch, /The Leader writes your opening assignment/);
+
     const service = new ProjectService({}, { table: () => table() }, {});
     const project = await service.init({ workspace });
     await service.scaffoldResearch({ projectId: project.id });
@@ -827,10 +834,41 @@ test('the researcher prompt requires a mission for information no mission produc
       async startActivation(options) { prompts.push(options.request.prompt?.[0]?.text ?? ''); return { childId: `child-${prompts.length}`, result: new Promise(() => {}) }; },
       async sendMessage() { return { id: 'm' }; },
     };
-    await service.startBootstrap({ projectId: project.id, agent: { id: 'leader' } });
-    assert.equal(prompts.length, 1);
-    assert.match(prompts[0], /has not been produced by any mission yet, create the mission that produces it/);
-    assert.match(prompts[0], /aleph_list_missions/);
+    const assignment = 'Focus on the PERM targets and explain the clipped floor before modelling anything.';
+    await service.startBootstrap({ projectId: project.id, agent: { id: 'leader' }, instruction: assignment });
+    assert.match(prompts[0], /Assignment from the Leader:/, 'the Host labels the assignment');
+    assert.ok(prompts[0].includes(assignment), 'the Leader assignment is delivered verbatim');
+    assert.doesNotMatch(prompts[0], /has not been produced by any mission yet/, 'the contract is not repeated in the message');
+    assert.match(prompts[0], /Host context for this session/, 'the Host still supplies coordinates');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a cohort accepts one shared assignment or one per researcher', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-cohort-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace, researchers: 3 });
+    await service.scaffoldResearch({ projectId: project.id });
+    const prompts = [];
+    service.subagents = {
+      async startActivation(options) { prompts.push(options.request.prompt?.[0]?.text ?? ''); return { childId: `child-${prompts.length}`, result: new Promise(() => {}) }; },
+      async sendMessage() { return { id: 'm' }; },
+    };
+    await service.startResearchers({
+      projectId: project.id,
+      count: 3,
+      instructions: ['Explore feature interactions.', 'Explore calibration.', ''],
+      instruction: 'Fallback assignment',
+      agent: { id: 'leader' },
+    });
+    assert.equal(prompts.length, 3);
+    assert.match(prompts[0], /Explore feature interactions\./);
+    assert.match(prompts[1], /Explore calibration\./);
+    assert.match(prompts[2], /Fallback assignment/, 'an empty per-researcher entry falls back to the shared assignment');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

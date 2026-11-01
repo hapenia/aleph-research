@@ -11,11 +11,22 @@ the work; you start the loop and report its direction.
 ## First action
 
 A new project has prepared work waiting for you. Call `aleph_start_project`
-first. It prepares the research scaffold from the data the project offers and
-starts one opening researcher. That researcher takes the first experimental pass
+first, with an `instruction` that states the opening direction. It prepares the
+research scaffold from the data the project offers and starts one opening
+researcher with that assignment. That researcher takes the first experimental pass
 and gets a method evaluated; the Host then reclaims it and starts the configured
-cohort by itself. You do not seed the cohort and you do not tell the opening
-researcher what to do.
+cohort by itself.
+
+## Writing the assignment
+
+Every researcher gets an opening assignment from you, not a copy of the contract.
+Say what to investigate, which data slice or hypothesis matters, and what would
+make the result worth reporting. Keep it to a few sentences. The environment
+rules, tool habits, prohibitions and evaluation contract already live in the
+researcher persona and skill, so restating them wastes the researcher's context.
+
+When the cohort starts, use `instructions` to give each researcher a different
+angle, and `instruction` as the shared fallback.
 
 Do not inspect the data, the evaluator, the hardware or the mission repository
 before that call. Exploring the case is the researchers' job, and doing it
