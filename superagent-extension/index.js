@@ -12,9 +12,19 @@ import { z } from 'zod'
 export const name = 'dsh-aleph-superagent'
 export const inject = ['orchestrator']
 
-/** Source configuration: one Aleph project per Source instance. */
+/** Source configuration: one research project per Source instance. */
 const AlephConfigSchema = z.object({
   project: z.string().trim().min(1).default('default'),
+  /** Git repository that holds the research branches and worktrees. */
+  repository: z.string().trim().default(''),
+  /** Branch every ticket worktree starts from. */
+  templateBranch: z.string().trim().min(1).default('main'),
+  /** Directory whose contents are the data a Worker may read. */
+  dataDir: z.string().trim().default(''),
+  /** Interpreter with the project runtime installed. */
+  python: z.string().trim().default(''),
+  /** Submission contract and data notes, written into each ticket. */
+  conventions: z.string().trim().default(''),
 }).strict()
 
 /** The `aleph` Source kind: local research threads and triggers. */
@@ -27,13 +37,33 @@ export const alephKind = {
   },
   schema: AlephConfigSchema,
   fields: [
-    {
-      key: 'project',
-      type: 'text',
-      label: { zh: '项目标识', en: 'Project id' },
-      hint: { zh: '同一个项目里的线程共享此前缀。', en: 'Threads of one project share this prefix.' },
-    },
+    { key: 'project', type: 'text', label: { zh: '项目标识', en: 'Project id' },
+      hint: { zh: '同一个项目里的线程共享此前缀。', en: 'Threads of one project share this prefix.' } },
+    { key: 'repository', type: 'text', label: { zh: '研究仓库路径', en: 'Research repository path' },
+      hint: { zh: '每个工单从这里的一个模板分支创建 worktree。', en: 'Each ticket creates a worktree from the template branch of this repository.' } },
+    { key: 'templateBranch', type: 'text', label: { zh: '模板分支', en: 'Template branch' } },
+    { key: 'dataDir', type: 'text', label: { zh: '可提供的数据目录', en: 'Data directory to provide' },
+      hint: { zh: '只把这一目录放进工单；其他路径不提供。', en: 'Only this directory is placed in a ticket; no other path is provided.' } },
+    { key: 'python', type: 'text', label: { zh: '运行时解释器', en: 'Runtime interpreter' } },
+    { key: 'conventions', type: 'text', label: { zh: '项目约定', en: 'Project conventions' },
+      hint: { zh: '提交契约、数据格式与评测口径。', en: 'Submission contract, data format and scoring notes.' } },
   ],
+  environment: {
+    variables: [
+      { key: 'ALEPH_RESEARCH_REPO', description: { zh: '研究仓库；工单 worktree 从模板分支创建。', en: 'Research repository; the ticket worktree starts from its template branch.' } },
+      { key: 'ALEPH_TEMPLATE_BRANCH', description: { zh: 'worktree 的起始分支。', en: 'Branch the ticket worktree starts from.' } },
+      { key: 'ALEPH_DATA_DIR', description: { zh: '只应提供给工单的数据目录。', en: 'The only data directory a ticket should receive.' } },
+      { key: 'ALEPH_PYTHON', description: { zh: '项目运行时解释器。', en: 'Project runtime interpreter.' } },
+      { key: 'ALEPH_CONVENTIONS', description: { zh: '项目约定文件的内容。', en: 'Project conventions text.' } },
+    ],
+    values: ({ config }) => ({
+      ALEPH_RESEARCH_REPO: config.repository ?? '',
+      ALEPH_TEMPLATE_BRANCH: config.templateBranch ?? 'main',
+      ALEPH_DATA_DIR: config.dataDir ?? '',
+      ALEPH_PYTHON: config.python ?? '',
+      ALEPH_CONVENTIONS: config.conventions ?? '',
+    }),
+  },
   health: ['aleph'],
   policy: {
     schema: z.object({
