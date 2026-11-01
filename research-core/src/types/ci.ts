@@ -3,7 +3,7 @@ import type { ArtifactRef } from './artifacts.js'
 import type { FailedCIRecord, PassedCIRecord } from './metrics.js'
 import type { DomainError } from './errors.js'
 import type { Result, StoreError } from './errors.js'
-import type { CommitSha, ExperimentId, IsoTimestamp } from './ids.js'
+import type { CIRunId, CommitSha, ExperimentId, IsoTimestamp } from './ids.js'
 
 export type CIFailureReason =
   | 'environment-build-failed'
@@ -19,6 +19,7 @@ export declare class PassedCICompletion {
   private constructor()
   private readonly __passedCompletion: true
   readonly record: PassedCIRecord
+  readonly ciRunId: CIRunId
   readonly experimentId: ExperimentId
   readonly commit: CommitSha
   readonly metrics: PassedCIRecord['metrics']
@@ -35,6 +36,7 @@ export declare class FailedCICompletion {
   private constructor()
   private readonly __failedCompletion: true
   readonly record: FailedCIRecord
+  readonly ciRunId: CIRunId
   readonly experimentId: ExperimentId
   readonly commit: CommitSha
   readonly reason: CIFailureReason

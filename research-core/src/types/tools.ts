@@ -17,11 +17,11 @@ import type { StoreError } from './errors.js'
 
 /** A boundary schema: it parses untrusted input and emits JSON Schema for DSH tools. */
 export declare class Schema<T> {
-  private constructor()
   private readonly __schema: (value: T) => T
+  /** The adapter supplies the validator and the JSON Schema emitter. */
+  constructor(parse: (input: unknown) => Result<T, DomainError>, toJsonSchema: () => unknown)
   parse(input: unknown): Result<T, DomainError>
   toJsonSchema(): unknown
-  static create<T>(): Schema<T>
   static fromRow<T>(row: unknown): Result<Schema<T>, StoreError>
 }
 

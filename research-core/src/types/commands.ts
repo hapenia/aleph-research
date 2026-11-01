@@ -25,7 +25,7 @@ import type {
   OpenExperiment,
   ReadyExperiment,
 } from './experiment.js'
-import type { AuditEntry } from './audit.js'
+import type { AuditAction, AuditEntry, AuditEntryOf } from './audit.js'
 import type { DomainError } from './errors.js'
 import type { Capability } from './actors.js'
 import type { AssignedIssue, ClosedIssue, OpenIssue } from './issue.js'
@@ -102,6 +102,7 @@ export interface ReviewExperimentCommand {
   readonly experimentId: ExperimentId
   readonly body: NonEmptyString
   readonly kind: 'review' | 'ci-request'
+  readonly verdict: 'approve' | 'request-changes' | 'comment'
 }
 export interface CloseExperimentCommand {
   readonly type: 'experiment.close'
@@ -146,6 +147,28 @@ export type ImplementerCommand = SubmitImplementationCommand
 export type UserCommand = OperatorCommand | ResearcherCommand | ImplementerCommand
 export type CommandType = UserCommand['type']
 export type CommandOf<T extends CommandType> = Extract<UserCommand, { readonly type: T }>
+
+/** Compile-time relation between a user command and its audit action. */
+export type CommandAuditMap = {
+  readonly 'program.create': 'program.created'
+  readonly 'program.pause': 'program.paused'
+  readonly 'program.resume': 'program.resumed'
+  readonly 'program.stop': 'program.stopped'
+  readonly 'program.set-goal': 'program.goal-changed'
+  readonly 'program.set-methodology': 'program.methodology-changed'
+  readonly 'program.set-exploration': 'program.exploration-changed'
+  readonly 'issue.create': 'issue.created'
+  readonly 'issue.claim': 'issue.claimed'
+  readonly 'issue.comment': 'issue.commented'
+  readonly 'issue.close': 'issue.closed'
+  readonly 'experiment.propose': 'experiment.proposed'
+  readonly 'experiment.review': 'experiment.reviewed'
+  readonly 'experiment.close': 'experiment.closed'
+  readonly 'ci.request': 'ci.requested'
+  readonly 'ticket.submit': 'experiment.ready'
+}
+
+export type AuditActionOf<T extends CommandType> = CommandAuditMap[T]
 
 /** Compile-time capability per command. */
 export type CapabilityForCommand = {
@@ -229,11 +252,12 @@ export type CommandOutcome<K extends CommandType> =
   | {
       readonly ok: true
       readonly value: CommandResult<K>
-      readonly audit: NonEmptyArray<AuditEntry>
+      readonly audit: NonEmptyArray<AuditEntryOf<AuditActionOf<K>>>
     }
   | {
       readonly ok: false
       readonly error: DomainError
+      /** Refusals are audited too; they may carry entries for the attempted action. */
       readonly audit: NonEmptyArray<AuditEntry>
     }
 

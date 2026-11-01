@@ -27,6 +27,8 @@ done
 if [ -f research-core/package.json ]; then
   echo "== typecheck: research core blueprint"
   (cd research-core && npm install --no-audit --no-fund --silent && npm run -s typecheck)
+  echo "== lint: research core blueprint"
+  (cd research-core && npm run -s lint)
 fi
 
 if [ -f superagent-extension/package.json ]; then

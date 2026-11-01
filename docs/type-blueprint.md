@@ -126,6 +126,31 @@ stays a prototype Ticket/Worker with the existing sandbox. The submit tool deleg
 the Host CI runner and records raw metrics and artifacts; the Main Session keeps routing
 attention.
 
+## Static analysis beyond TypeScript
+
+The third review showed that TypeScript alone cannot keep a construction boundary honest:
+`static create` is public, so any module can call it. The blueprint therefore adds a
+second static layer, wired into `verify.sh` and CI:
+
+- **ESLint** (`research-core/eslint.config.js`): type-aware recommended rules; bans `as`,
+  `any`, non-null assertions, unsafe `any` flows, floating promises and non-exhaustive
+  switches; `no-restricted-syntax` bans calls to `.create(` / `.fromRow(` and
+  `JSON.parse` outside the boundary modules, and bans global clocks (`Date.now`), dynamic
+  imports and process/fetch/timeout globals.
+- **ast-grep** (`research-core/ast-grep/`): the same boundary rules at AST level for
+  files the ESLint parser does not cover: type assertions, `any`, `create(...)` and
+  `JSON.parse` outside `src/factories.ts`, `src/hydration.ts` and `src/type-tests.ts`.
+- Factory/hydration modules are the only allowlisted places for assertions, casts and
+  row parsing. The type tests are allowlisted because they deliberately probe the
+  boundary.
+- The checks are part of `npm run lint`, `scripts/verify.sh` and the CI job, so a new
+  bypass fails the build even when `tsc` accepts it.
+
+The runtime trust anchor remains a single `HostAuthority` value created by the adapter at
+startup; every state factory receives it. Static analysis can prove that only boundary
+modules call factories, but it cannot prove that the process has no rogue module that
+fabricated an authority with `as`; this limit is stated rather than hidden.
+
 ## Compile-time guarantees and tests
 
 `research-core/src/type-tests.ts` covers: widened command rejection, per-command actor
@@ -134,6 +159,19 @@ assignment rejection, failed-CI to passed assignment rejection, DomainFailure co
 and status correlation, nomial id mixing, ownership-token substitution, Host-only
 cancellation, completed-Program transitions, empty audit rejection, tool input narrowing,
 and lineage separation.
+
+Third-review fixes already applied: `HostPrincipal.create/fromRow`; corrected
+`ReadyExperiment.create` omission; `ciRunId` on completion tokens; CI failure duration;
+command audit entries parameterized by the action map and moved into `commands.ts`; audit
+on API responses; `RouteSpec`; public `Schema` constructor taking a validator; a
+`program.budget-paused` action; and negative tests for success/refusal audit
+non-emptiness and wrong audit action.
+
+Still open from the third review: transitions re-check token association
+(`assignment.issueId`, `binding.experimentId`, `completion.ciRunId`) and return
+`Result`; a real Ticket aggregate; sampler candidate validity/deduplication; trigger map
+consumption; budget writer; route/executor single-path enforcement; mutation tests that
+remove a guarantee and require the suite to fail.
 
 Known limits, stated instead of hidden:
 

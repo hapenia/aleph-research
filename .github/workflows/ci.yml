@@ -42,8 +42,9 @@ jobs:
         working-directory: superagent-extension
         run: npm test
 
-      - name: Typecheck research core blueprint
+      - name: Typecheck and lint research core blueprint
         working-directory: research-core
         run: |
           npm install --no-audit --no-fund
           npm run typecheck
+          npm run lint

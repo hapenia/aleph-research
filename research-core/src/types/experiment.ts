@@ -103,7 +103,7 @@ export declare class ReadyExperiment implements ExperimentCommon {
   readonly createdBy: ResearcherPrincipal
   readonly createdAt: IsoTimestamp
   readonly readyAt: IsoTimestamp
-  static create(input: Omit<ReadyExperiment, 'status' | 'callRequestCI' | 'revise' | 'cancel'>): ReadyExperiment
+  static create(input: Omit<ReadyExperiment, 'status' | 'requestCI' | 'revise' | 'cancel'>): ReadyExperiment
   static fromRow(row: unknown): Result<ReadyExperiment, StoreError>
   /** Only the Issue assignee may request CI; the Host mints the CI run id. */
   requestCI(assignment: IssueAssignment, ciRunId: CIRunId, at: IsoTimestamp): CIPendingExperiment

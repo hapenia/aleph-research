@@ -49,6 +49,9 @@ export declare class HostPrincipal {
   private constructor()
   private readonly __host: true
   readonly kind: 'host'
+  /** The one root authority the adapter creates at startup; see the trust-boundary note. */
+  static create(): HostPrincipal
+  static fromRow(row: unknown): Result<HostPrincipal, StoreError>
 }
 export declare class RouterPrincipal {
   private constructor()

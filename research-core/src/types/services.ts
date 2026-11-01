@@ -61,6 +61,7 @@ export type CIExecutionResult =
       readonly status: 'failed'
       readonly reason: CIFailureReason
       readonly detail: string
+      readonly durationMs: DurationMs
       readonly logPath: string
     }
 

@@ -2,12 +2,19 @@
   "name": "@local/aleph-research-core",
   "version": "0.0.0",
   "private": true,
-  "description": "Type blueprint for the AlephResearch rewrite: Program, Issue, Pull request and CI domain.",
+  "description": "Type blueprint for the AlephResearch rewrite: Program, Issue, Experiment and CI domain.",
   "type": "module",
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json"
+    "typecheck": "tsc -p tsconfig.json",
+    "lint": "npm run lint:eslint && npm run lint:ast-grep",
+    "lint:eslint": "eslint src",
+    "lint:ast-grep": "ast-grep scan --config ast-grep/sgconfig.yml"
   },
   "devDependencies": {
-    "typescript": "6.0.3"
+    "@ast-grep/cli": "^0.51.0",
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.4",
+    "typescript": "6.0.3",
+    "typescript-eslint": "^8.72.1"
   }
 }

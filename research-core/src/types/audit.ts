@@ -13,11 +13,11 @@ import type {
   ProgramId,
 } from './ids.js'
 import type { Principal } from './actors.js'
-import type { CommandType } from './commands.js'
 
 export type AuditAction =
   | 'program.created'
   | 'program.paused'
+  | 'program.budget-paused'
   | 'program.resumed'
   | 'program.stopped'
   | 'program.goal-changed'
@@ -46,6 +46,7 @@ export type AuditAction =
 export type ActorKindForAction = {
   readonly 'program.created': 'operator'
   readonly 'program.paused': 'operator'
+  readonly 'program.budget-paused': 'host'
   readonly 'program.resumed': 'operator'
   readonly 'program.stopped': 'operator'
   readonly 'program.goal-changed': 'operator'
@@ -75,6 +76,7 @@ export type ActorKindForAction = {
 export type SubjectKindForAction = {
   readonly 'program.created': 'program'
   readonly 'program.paused': 'program'
+  readonly 'program.budget-paused': 'program'
   readonly 'program.resumed': 'program'
   readonly 'program.stopped': 'program'
   readonly 'program.goal-changed': 'program'
@@ -103,6 +105,7 @@ export type SubjectKindForAction = {
 export type SubjectForAction = {
   readonly 'program.created': { readonly kind: 'program'; readonly id: ProgramId }
   readonly 'program.paused': { readonly kind: 'program'; readonly id: ProgramId }
+  readonly 'program.budget-paused': { readonly kind: 'program'; readonly id: ProgramId }
   readonly 'program.resumed': { readonly kind: 'program'; readonly id: ProgramId }
   readonly 'program.stopped': { readonly kind: 'program'; readonly id: ProgramId }
   readonly 'program.goal-changed': { readonly kind: 'program'; readonly id: ProgramId }
@@ -145,27 +148,8 @@ export type AuditEntry = {
   }
 }[AuditAction]
 
-/** Compile-time relation between a user command and its audit action. */
-export type CommandAuditMap = {
-  readonly 'program.create': 'program.created'
-  readonly 'program.pause': 'program.paused'
-  readonly 'program.resume': 'program.resumed'
-  readonly 'program.stop': 'program.stopped'
-  readonly 'program.set-goal': 'program.goal-changed'
-  readonly 'program.set-methodology': 'program.methodology-changed'
-  readonly 'program.set-exploration': 'program.exploration-changed'
-  readonly 'issue.create': 'issue.created'
-  readonly 'issue.claim': 'issue.claimed'
-  readonly 'issue.comment': 'issue.commented'
-  readonly 'issue.close': 'issue.closed'
-  readonly 'experiment.propose': 'experiment.proposed'
-  readonly 'experiment.review': 'experiment.reviewed'
-  readonly 'experiment.close': 'experiment.closed'
-  readonly 'ci.request': 'ci.requested'
-  readonly 'ticket.submit': 'experiment.ready'
-}
-
-export type AuditActionOf<T extends CommandType> = T extends keyof CommandAuditMap ? CommandAuditMap[T] : never
+/** The audit entry type for one action, used to parameterize command outcomes. */
+export type AuditEntryOf<A extends AuditAction> = Extract<AuditEntry, { readonly action: A }>
 
 export interface AuditLog {
   append(entries: NonEmptyArray<AuditEntry>): Promise<void>

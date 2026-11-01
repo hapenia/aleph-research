@@ -17,11 +17,13 @@ import type {
 } from './experiment.js'
 import type { AssignedIssue, ClosedIssue, Issue, IssueComment, OpenIssue } from './issue.js'
 import type { ExplorationLevel, PausedProgram, Program, RunningProgram, StoppedProgram } from './program.js'
-import type { CommandOf } from './commands.js'
+import type { ActorOfCommand, CommandOf, CommandOutcome, CommandType } from './commands.js'
 import type { DomainError, DomainFailure, Result } from './errors.js'
-import type { ExperimentId, IssueId, NonEmptyString, ProgramId } from './ids.js'
+import type { ExperimentId, IssueId, NonEmptyString, NonEmptyArray, ProgramId } from './ids.js'
 
-export type ApiResponse<T> = { readonly ok: true; readonly value: T } | DomainFailure
+export type ApiResponse<T> =
+  | { readonly ok: true; readonly value: T; readonly audit: readonly AuditEntry[] }
+  | (DomainFailure & { readonly audit: readonly AuditEntry[] })
 
 /** The panel's single read model; raw CI records only, views derived at query time. */
 export interface ProgramSnapshot {
@@ -85,6 +87,13 @@ export interface RequestParsers {
   reviewExperiment(input: unknown): Result<CommandOf<'experiment.review'>, DomainError>
   closeExperiment(input: unknown): Result<CommandOf<'experiment.close'>, DomainError>
   requestCI(input: unknown): Result<CommandOf<'ci.request'>, DomainError>
+}
+
+/** A route is a parser plus the command literal and actor it is allowed to produce. */
+export interface RouteSpec<K extends CommandType> {
+  readonly command: K
+  readonly actor: ActorOfCommand<K>
+  parse(input: unknown): Result<CommandOf<K>, DomainError>
 }
 
 /** Route surface; the actor parameter is the compile-time authorization. */

@@ -11,9 +11,10 @@ import type {
   FailedCICompletion,
   CommandContext,
   CommandExecutor,
+  CommandOutcome,
+  AuditEntryOf,
   UserCommand,
   CommandOf,
-  Decision,
   DerivedLineage,
   DomainFailure,
   FreshLineage,
@@ -128,9 +129,16 @@ const wrongAuditActor: AuditEntry = {
   detail: {},
 }
 
-// A decision always carries audit entries.
-// @ts-expect-error audit is a non-empty array
-const emptyDecision: Decision<RunningProgram> = { value: running, audit: [] }
+// A command outcome always carries audit entries, on both branches.
+// @ts-expect-error success audit is a non-empty array
+const emptySuccess: CommandOutcome<'program.pause'> = { ok: true, value: paused, audit: [] }
+// @ts-expect-error a refusal must be audited too
+const emptyFailure: CommandOutcome<'program.pause'> = { ok: false, error: { code: 'invalid-state', message: 'x' as NonEmptyString }, audit: [] }
+declare const issueCreatedAudit: AuditEntryOf<'issue.created'>
+// @ts-expect-error a program.pause outcome must carry program.paused audit entries
+const wrongOutcomeAudit: CommandOutcome<'program.pause'> = { ok: true, value: paused, audit: [issueCreatedAudit] }
+declare const pauseAudit: AuditEntryOf<'program.paused'>
+const correctOutcome: CommandOutcome<'program.pause'> = { ok: true, value: paused, audit: [pauseAudit] }
 
 // Implementer tool input omits Host-injected fields.
 declare const fullSubmitTool: ToolDefinition<CommandOf<'ticket.submit'>, ReadyExperiment>
@@ -178,7 +186,10 @@ export {
   validFailure,
   wrongFailureStatus,
   wrongAuditActor,
-  emptyDecision,
+  emptySuccess,
+  emptyFailure,
+  wrongOutcomeAudit,
+  correctOutcome,
   wrongSubmitTool,
   wrongLineage,
   wrongLineage2,
