@@ -1,54 +1,40 @@
-/**
- * Artifacts: results that must outlive a CI run.
- *
- * Model weights, reports, figures and datasets are stored, not discarded after
- * evaluation. The Host owns an artifact store on its filesystem; the domain keeps
- * typed references, sizes and retention class so best results stay reproducible.
- */
-import type { CIRunId, CommitSha, IsoTimestamp, ProgramId, ExperimentId, Score } from './ids.js'
+/** Persisted results: model weights, reports, figures and logs. */
+import type { ArtifactId, CIRunId, CommitSha, ExperimentId, IsoTimestamp, ProgramId } from './ids.js'
 
-export type ArtifactKind = 'model-weights' | 'report' | 'figure' | 'dataset' | 'log' | 'other'
+export type ArtifactKind = 'model-weights' | 'report' | 'figure' | 'logs' | 'other'
+export type ArtifactRetention = 'keep' | 'temporary'
 
-export type ArtifactRetention = 'keep-best' | 'keep-forever' | 'discard-after-merge' | 'temporary'
-
-/** A content-addressed reference; the bytes live in the Host artifact store. */
-export interface ArtifactRef {
-  readonly id: string
+export declare class ArtifactRef {
+  private constructor()
+  private readonly __artifact: true
+  readonly id: ArtifactId
   readonly kind: ArtifactKind
-  /** SHA-256 of the content, so identical results deduplicate. */
   readonly digest: string
   readonly bytes: number
   readonly programId: ProgramId
   readonly experimentId: ExperimentId
   readonly commit: CommitSha
   readonly ciRunId: CIRunId
-  /** The score this artifact was produced with; absent for logs and figures. */
-  readonly score?: Score
   readonly retention: ArtifactRetention
   readonly createdAt: IsoTimestamp
 }
 
-export interface ArtifactMetadata {
-  readonly ref: ArtifactRef
-  readonly programId: ProgramId
-  readonly createdAt: IsoTimestamp
-  readonly deletedAt?: IsoTimestamp
+/** A result file the CI entry produced; the Host copies it into ArtifactStore. */
+export interface ArtifactCandidate {
+  readonly kind: ArtifactKind
+  readonly path: string
+  readonly retention: ArtifactRetention
 }
 
-/** Port to the Host artifact store; failures are infrastructure errors, not domain refusals. */
 export interface ArtifactStore {
   put(input: {
-    readonly kind: ArtifactKind
-    readonly sourcePath: string
+    readonly candidate: ArtifactCandidate
     readonly programId: ProgramId
     readonly experimentId: ExperimentId
     readonly commit: CommitSha
     readonly ciRunId: CIRunId
-    readonly score?: Score
-    readonly retention: ArtifactRetention
   }): Promise<ArtifactRef>
-  get(id: string): Promise<ArtifactMetadata | undefined>
-  listByProgram(programId: ProgramId): Promise<readonly ArtifactMetadata[]>
-  /** Deletes only artifacts whose retention allows it. */
-  prune(now: IsoTimestamp): Promise<number>
+  get(id: ArtifactId): Promise<ArtifactRef | undefined>
+  listByExperiment(experimentId: ExperimentId): Promise<readonly ArtifactRef[]>
+  pruneTemporary(now: IsoTimestamp): Promise<number>
 }

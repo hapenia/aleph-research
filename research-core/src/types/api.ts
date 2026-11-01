@@ -1,92 +1,102 @@
 /**
- * Management API and read-only panel DTOs.
- *
- * The Host is the authority; every mutating route parses an untrusted body into a
- * command and returns a Result. The panel in version 1 consumes the read models only.
+ * Management API and the read-only panel DTOs. Routes are actor-typed, every failure is
+ * a DomainFailure whose status follows from the refusal code, and every body passes a
+ * parser before it becomes a command.
  */
-import type { CIRun } from './ci.js'
-import type { ArtifactMetadata } from './artifacts.js'
-import type { Issue, IssueComment } from './issue.js'
-import type { Program, Paginated } from './program.js'
-import type { Experiment, ExperimentReview } from './experiment.js'
+import type { OperatorPrincipal, Principal, ResearcherPrincipal } from './actors.js'
+import type { ArtifactRef } from './artifacts.js'
 import type { Attention } from './attention.js'
 import type { AuditEntry } from './audit.js'
-import type { DomainError } from './errors.js'
-import type { ProgramId } from './ids.js'
+import type { CIRecord } from './metrics.js'
+import type { Experiment } from './experiment.js'
+import type { Issue, IssueComment } from './issue.js'
+import type { PausedProgram, Program, RunningProgram, StoppedProgram } from './program.js'
+import type { CommandOf } from './commands.js'
+import type { DomainError, DomainFailure, Result } from './errors.js'
+import type { ExperimentId, IssueId, ProgramId, Untrusted } from './ids.js'
 
-export type ApiResponse<T> =
-  | { readonly ok: true; readonly data: T }
-  | { readonly ok: false; readonly error: DomainError }
+export type ApiResponse<T> = { readonly ok: true; readonly value: T } | DomainFailure
 
-export interface ProgramSummary {
-  readonly id: ProgramId
-  readonly name: string
-  readonly status: Program['status']
-  readonly bestScore: number | null
-  readonly openIssues: number
-  readonly openExperiments: number
-}
-
-/** The one snapshot the panel polls; the panel never asks the prototype directly. */
+/** The panel's single read model; raw CI records only, views derived at query time. */
 export interface ProgramSnapshot {
   readonly program: Program
-  readonly issues: Paginated<Issue>
-  readonly issueComments: Readonly<Record<string, readonly IssueComment[]>>
-  readonly experiments: Paginated<Experiment>
-  readonly reviews: Readonly<Record<string, readonly ExperimentReview[]>>
-  readonly ciRuns: Paginated<CIRun>
+  readonly issues: readonly Issue[]
+  readonly comments: readonly IssueComment[]
+  readonly experiments: readonly Experiment[]
+  readonly ciRecords: readonly CIRecord[]
+  readonly artifacts: readonly ArtifactRef[]
   readonly attention: readonly Attention[]
-  readonly artifacts: Paginated<ArtifactMetadata>
   readonly audit: readonly AuditEntry[]
 }
 
-/** Operator routes; the panel stays read-only until the mechanism is proven. */
-export interface CreateProgramRequest {
+/** Raw HTTP bodies; only parsers turn these into commands. */
+export interface CreateProgramDto {
+  readonly name: string
   readonly goal: string
+  readonly methodology: string
   readonly contract: {
     readonly ciEntry: string
     readonly timeoutMs: number
-    readonly scoreField: string
+    readonly requiredMetrics: readonly string[]
   }
-  readonly budget: { readonly maxExperiments: number; readonly maxComputeMinutes: number; readonly maxTokens: number }
-  readonly methodology: string
+  readonly utility: {
+    readonly metrics: readonly {
+      readonly name: string
+      readonly direction: string
+      readonly weight: number
+      readonly required: boolean
+    }[]
+  }
+  readonly exploration: string
+  readonly budget: {
+    readonly maxExperiments: number
+    readonly maxComputeMinutes: number
+    readonly maxTokens: number
+  }
 }
 
-export interface CreateIssueRequest {
-  readonly programId: ProgramId
+export interface CreateIssueDto {
+  readonly programId: string
   readonly title: string
   readonly body: string
   readonly labels: readonly string[]
 }
 
-export interface ClaimIssueRequest {
-  readonly programId: ProgramId
-  readonly issueId: string
+/** Parsers refine untrusted bodies into commands; validation errors are domain refusals. */
+export interface RequestParsers {
+  createProgram(input: Untrusted<unknown>): Result<CommandOf<'program.create'>, DomainError>
+  pauseProgram(input: Untrusted<unknown>): Result<CommandOf<'program.pause'>, DomainError>
+  resumeProgram(input: Untrusted<unknown>): Result<CommandOf<'program.resume'>, DomainError>
+  stopProgram(input: Untrusted<unknown>): Result<CommandOf<'program.stop'>, DomainError>
+  setGoal(input: Untrusted<unknown>): Result<CommandOf<'program.set-goal'>, DomainError>
+  setMethodology(input: Untrusted<unknown>): Result<CommandOf<'program.set-methodology'>, DomainError>
+  setExploration(input: Untrusted<unknown>): Result<CommandOf<'program.set-exploration'>, DomainError>
+  createIssue(input: Untrusted<unknown>): Result<CommandOf<'issue.create'>, DomainError>
+  claimIssue(input: Untrusted<unknown>): Result<CommandOf<'issue.claim'>, DomainError>
+  commentIssue(input: Untrusted<unknown>): Result<CommandOf<'issue.comment'>, DomainError>
+  closeIssue(input: Untrusted<unknown>): Result<CommandOf<'issue.close'>, DomainError>
+  proposeExperiment(input: Untrusted<unknown>): Result<CommandOf<'experiment.propose'>, DomainError>
+  reviewExperiment(input: Untrusted<unknown>): Result<CommandOf<'experiment.review'>, DomainError>
+  closeExperiment(input: Untrusted<unknown>): Result<CommandOf<'experiment.close'>, DomainError>
+  requestCI(input: Untrusted<unknown>): Result<CommandOf<'ci.request'>, DomainError>
 }
 
-export interface CommentRequest {
-  readonly programId: ProgramId
-  readonly issueId: string
-  readonly body: string
-}
-
-export interface SetExplorationRequest {
-  readonly programId: ProgramId
-  readonly level: 'low' | 'normal' | 'high'
-}
-
-export interface RequestCIRequest {
-  readonly programId: ProgramId
-  readonly experimentId: string
-}
-
-/** Route table the Host mounts; handlers are typed by these request/response pairs. */
-export interface ManagementRoutes {
-  readonly 'GET /aleph/api/programs': { readonly response: ApiResponse<readonly ProgramSummary[]> }
-  readonly 'POST /aleph/api/programs': { readonly request: CreateProgramRequest; readonly response: ApiResponse<Program> }
-  readonly 'GET /aleph/api/programs/:id': { readonly response: ApiResponse<ProgramSnapshot> }
-  readonly 'POST /aleph/api/issues': { readonly request: CreateIssueRequest; readonly response: ApiResponse<Issue> }
-  readonly 'POST /aleph/api/issues/:id/claim': { readonly request: ClaimIssueRequest; readonly response: ApiResponse<Issue> }
-  readonly 'POST /aleph/api/issues/:id/comments': { readonly request: CommentRequest; readonly response: ApiResponse<IssueComment> }
-  readonly 'POST /aleph/api/experiments/:id/ci': { readonly request: RequestCIRequest; readonly response: ApiResponse<CIRun> }
+/** Route surface; the actor parameter is the compile-time authorization. */
+export interface ManagementApi {
+  createProgram(actor: OperatorPrincipal, body: Untrusted<unknown>): Promise<ApiResponse<RunningProgram>>
+  pauseProgram(actor: OperatorPrincipal, programId: ProgramId): Promise<ApiResponse<PausedProgram>>
+  resumeProgram(actor: OperatorPrincipal, programId: ProgramId): Promise<ApiResponse<RunningProgram>>
+  stopProgram(actor: OperatorPrincipal, programId: ProgramId): Promise<ApiResponse<StoppedProgram>>
+  setGoal(actor: OperatorPrincipal, programId: ProgramId, goal: string): Promise<ApiResponse<RunningProgram>>
+  setMethodology(actor: OperatorPrincipal, programId: ProgramId, methodology: string): Promise<ApiResponse<RunningProgram>>
+  setExploration(actor: OperatorPrincipal, programId: ProgramId, level: string): Promise<ApiResponse<RunningProgram>>
+  createIssue(actor: OperatorPrincipal | ResearcherPrincipal, body: Untrusted<unknown>): Promise<ApiResponse<Issue>>
+  claimIssue(actor: ResearcherPrincipal, issueId: IssueId): Promise<ApiResponse<Issue>>
+  commentIssue(actor: OperatorPrincipal | ResearcherPrincipal, issueId: IssueId, body: Untrusted<unknown>): Promise<ApiResponse<IssueComment>>
+  closeIssue(actor: OperatorPrincipal | ResearcherPrincipal, issueId: IssueId, body: Untrusted<unknown>): Promise<ApiResponse<Issue>>
+  proposeExperiment(actor: ResearcherPrincipal, issueId: IssueId, body: Untrusted<unknown>): Promise<ApiResponse<Experiment>>
+  reviewExperiment(actor: ResearcherPrincipal, experimentId: ExperimentId, body: Untrusted<unknown>): Promise<ApiResponse<Experiment>>
+  closeExperiment(actor: ResearcherPrincipal, experimentId: ExperimentId, body: Untrusted<unknown>): Promise<ApiResponse<Experiment>>
+  requestCI(actor: ResearcherPrincipal, experimentId: ExperimentId): Promise<ApiResponse<CIRecord>>
+  snapshot(actor: Principal, programId: ProgramId): Promise<ApiResponse<ProgramSnapshot>>
 }

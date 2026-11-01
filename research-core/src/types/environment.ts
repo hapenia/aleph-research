@@ -1,36 +1,23 @@
-/** What a Experiment branch declares so the Host can build its CI environment. */
+/** Every Experiment builds its own uv environment; no shared runtime fallback. */
 import type { BranchName, CommitSha } from './ids.js'
 
-/**
- * Every Experiment gets its own environment built with uv. There is no shared
- * Program runtime fallback (review decision): a Experiment without a declaration is
- * invalid, not silently accepted.
- */
 export type EnvironmentDeclaration =
-  | {
-      readonly kind: 'uv-lock'
-      /** Repository-relative path of the lock file the Host installs with uv. */
-      readonly lockFile: string
-      readonly pythonVersion: string
-    }
-  | {
-      readonly kind: 'requirements'
-      readonly requirementsFile: string
-      readonly pythonVersion: string
-    }
-
-/** The built environment handed to the CI entry. */
-export interface BuiltEnvironment {
-  readonly declaration: EnvironmentDeclaration
-  /** Absolute interpreter path; exported as ALEPH_SUBMISSION_PYTHON. */
-  readonly python: string
-  readonly digest: string
-  readonly root: string
-}
+  | { readonly kind: 'uv-lock'; readonly lockFile: string; readonly pythonVersion: string }
+  | { readonly kind: 'requirements'; readonly requirementsFile: string; readonly pythonVersion: string }
 
 export interface RepositorySnapshot {
   readonly branch: BranchName
   readonly commit: CommitSha
-  /** Absolute path of the copied branch tree. */
+  /** Absolute path of the copied Experiment tree. */
+  readonly root: string
+  /** Absolute path of the declaration file inside the snapshot. */
+  readonly declarationPath: string
+}
+
+export interface BuiltEnvironment {
+  readonly declaration: EnvironmentDeclaration
+  readonly snapshot: RepositorySnapshot
+  readonly python: string
+  readonly digest: string
   readonly root: string
 }

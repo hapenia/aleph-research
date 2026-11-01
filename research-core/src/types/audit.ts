@@ -1,21 +1,27 @@
 /**
- * Audit log: every Host decision is recorded, but the log is not the source of truth.
- *
- * The review decided that replaying history has no meaning for research. State lives in
- * current-state repositories; the audit log exists so a person can see who changed what,
- * why, and what the Host checked, without reconstructing old states.
- *
- * The entry is a discriminated union: an action can only be paired with the actor and
- * subject its type permits, so "CI passed, recorded by a Researcher" or "issue claimed,
- * subject is a CI run" cannot be represented.
+ * Audit log: every decision is recorded, but the log is not the source of truth.
+ * The entry is a mapped union: the action fixes the allowed actor kinds and the subject.
  */
-import type { ExperimentId, IsoTimestamp, ProgramId, SessionId } from './ids.js'
+import type {
+  ArtifactId,
+  AuditId,
+  CIRunId,
+  ExperimentId,
+  IsoTimestamp,
+  IssueId,
+  NonEmptyArray,
+  ProgramId,
+} from './ids.js'
+import type { Principal } from './actors.js'
+import type { CommandType } from './commands.js'
 
 export type AuditAction =
   | 'program.created'
   | 'program.paused'
   | 'program.resumed'
   | 'program.stopped'
+  | 'program.goal-changed'
+  | 'program.methodology-changed'
   | 'program.exploration-changed'
   | 'issue.created'
   | 'issue.claimed'
@@ -23,8 +29,9 @@ export type AuditAction =
   | 'issue.closed'
   | 'experiment.proposed'
   | 'experiment.opened'
+  | 'experiment.revised'
   | 'experiment.reviewed'
-  | 'implementation.submitted'
+  | 'experiment.closed'
   | 'ci.requested'
   | 'ci.started'
   | 'ci.passed'
@@ -32,32 +39,23 @@ export type AuditAction =
   | 'artifact.stored'
   | 'attention.raised'
 
-export type AuditActorKind = 'operator' | 'researcher' | 'implementer' | 'watchdog' | 'host'
-
-export type AuditActor =
-  | { readonly kind: 'operator'; readonly sessionId: SessionId }
-  | { readonly kind: 'researcher'; readonly sessionId: SessionId }
-  | { readonly kind: 'implementer'; readonly sessionId: SessionId }
-  | { readonly kind: 'watchdog'; readonly sessionId: SessionId }
-  | { readonly kind: 'host' }
-
-export type AuditSubjectKind = 'program' | 'issue' | 'experiment' | 'ci-run' | 'artifact'
-
-/** Compile-time table: the only actor kinds an action may be recorded from. */
 export type ActorKindForAction = {
   readonly 'program.created': 'operator'
   readonly 'program.paused': 'operator'
   readonly 'program.resumed': 'operator'
   readonly 'program.stopped': 'operator'
+  readonly 'program.goal-changed': 'operator'
+  readonly 'program.methodology-changed': 'operator'
   readonly 'program.exploration-changed': 'operator'
   readonly 'issue.created': 'operator' | 'researcher'
   readonly 'issue.claimed': 'researcher'
-  readonly 'issue.commented': 'researcher'
-  readonly 'issue.closed': 'researcher'
+  readonly 'issue.commented': 'researcher' | 'operator'
+  readonly 'issue.closed': 'researcher' | 'operator'
   readonly 'experiment.proposed': 'researcher'
   readonly 'experiment.opened': 'host'
+  readonly 'experiment.revised': 'implementer'
   readonly 'experiment.reviewed': 'researcher'
-  readonly 'implementation.submitted': 'implementer'
+  readonly 'experiment.closed': 'researcher'
   readonly 'ci.requested': 'researcher'
   readonly 'ci.started': 'host'
   readonly 'ci.passed': 'host'
@@ -66,12 +64,13 @@ export type ActorKindForAction = {
   readonly 'attention.raised': 'watchdog' | 'host'
 }
 
-/** Compile-time table: the only subject kind an action may point at. */
 export type SubjectKindForAction = {
   readonly 'program.created': 'program'
   readonly 'program.paused': 'program'
   readonly 'program.resumed': 'program'
   readonly 'program.stopped': 'program'
+  readonly 'program.goal-changed': 'program'
+  readonly 'program.methodology-changed': 'program'
   readonly 'program.exploration-changed': 'program'
   readonly 'issue.created': 'issue'
   readonly 'issue.claimed': 'issue'
@@ -79,8 +78,9 @@ export type SubjectKindForAction = {
   readonly 'issue.closed': 'issue'
   readonly 'experiment.proposed': 'issue'
   readonly 'experiment.opened': 'experiment'
+  readonly 'experiment.revised': 'experiment'
   readonly 'experiment.reviewed': 'experiment'
-  readonly 'implementation.submitted': 'experiment'
+  readonly 'experiment.closed': 'experiment'
   readonly 'ci.requested': 'ci-run'
   readonly 'ci.started': 'ci-run'
   readonly 'ci.passed': 'ci-run'
@@ -89,48 +89,71 @@ export type SubjectKindForAction = {
   readonly 'attention.raised': 'program'
 }
 
-interface AuditEntryBase<A extends AuditAction> {
-  readonly id: string
+/** Typed subject per kind: the id type cannot be mixed with another subject. */
+export type SubjectForAction = {
+  readonly 'program.created': { readonly kind: 'program'; readonly id: ProgramId }
+  readonly 'program.paused': { readonly kind: 'program'; readonly id: ProgramId }
+  readonly 'program.resumed': { readonly kind: 'program'; readonly id: ProgramId }
+  readonly 'program.stopped': { readonly kind: 'program'; readonly id: ProgramId }
+  readonly 'program.goal-changed': { readonly kind: 'program'; readonly id: ProgramId }
+  readonly 'program.methodology-changed': { readonly kind: 'program'; readonly id: ProgramId }
+  readonly 'program.exploration-changed': { readonly kind: 'program'; readonly id: ProgramId }
+  readonly 'issue.created': { readonly kind: 'issue'; readonly id: IssueId }
+  readonly 'issue.claimed': { readonly kind: 'issue'; readonly id: IssueId }
+  readonly 'issue.commented': { readonly kind: 'issue'; readonly id: IssueId }
+  readonly 'issue.closed': { readonly kind: 'issue'; readonly id: IssueId }
+  readonly 'experiment.proposed': { readonly kind: 'issue'; readonly id: IssueId }
+  readonly 'experiment.opened': { readonly kind: 'experiment'; readonly id: ExperimentId }
+  readonly 'experiment.revised': { readonly kind: 'experiment'; readonly id: ExperimentId }
+  readonly 'experiment.reviewed': { readonly kind: 'experiment'; readonly id: ExperimentId }
+  readonly 'experiment.closed': { readonly kind: 'experiment'; readonly id: ExperimentId }
+  readonly 'ci.requested': { readonly kind: 'ci-run'; readonly id: CIRunId }
+  readonly 'ci.started': { readonly kind: 'ci-run'; readonly id: CIRunId }
+  readonly 'ci.passed': { readonly kind: 'ci-run'; readonly id: CIRunId }
+  readonly 'ci.failed': { readonly kind: 'ci-run'; readonly id: CIRunId }
+  readonly 'artifact.stored': { readonly kind: 'artifact'; readonly id: ArtifactId }
+  readonly 'attention.raised': { readonly kind: 'program'; readonly id: ProgramId }
+}
+
+interface AuditBase<A extends AuditAction> {
+  readonly id: AuditId
   readonly at: IsoTimestamp
   readonly programId: ProgramId
   readonly action: A
-  readonly subject: {
-    readonly kind: SubjectKindForAction[A]
-    readonly id: string
-    /** Present only for experiment subjects so a reader can jump to the right program. */
-    readonly experimentId?: ExperimentId
-  }
-  /** Free-form facts the Host checked; never a model's summary. */
+  readonly subject: SubjectForAction[A]
   readonly detail: Readonly<Record<string, string | number | boolean | null>>
-  readonly severity?: 'info' | 'warning' | 'blocked'
 }
 
-/** One immutable audit record; actor and subject follow from the action at compile time. */
+/** Actor and subject follow from the action at compile time. */
 export type AuditEntry = {
-  readonly [A in AuditAction]: AuditEntryBase<A> & {
-    readonly actor: Extract<AuditActor, { readonly kind: ActorKindForAction[A] }>
+  readonly [A in AuditAction]: AuditBase<A> & {
+    readonly actor: Extract<Principal, { readonly kind: ActorKindForAction[A] }>
   }
 }[AuditAction]
 
-/** The audit action a command type records, derived at compile time. */
-export type AuditActionForCommand = {
+/** Compile-time relation between a user command and its audit action. */
+export type CommandAuditMap = {
   readonly 'program.create': 'program.created'
   readonly 'program.pause': 'program.paused'
+  readonly 'program.resume': 'program.resumed'
   readonly 'program.stop': 'program.stopped'
+  readonly 'program.set-goal': 'program.goal-changed'
+  readonly 'program.set-methodology': 'program.methodology-changed'
   readonly 'program.set-exploration': 'program.exploration-changed'
   readonly 'issue.create': 'issue.created'
   readonly 'issue.claim': 'issue.claimed'
   readonly 'issue.comment': 'issue.commented'
   readonly 'issue.close': 'issue.closed'
   readonly 'experiment.propose': 'experiment.proposed'
+  readonly 'experiment.review': 'experiment.reviewed'
+  readonly 'experiment.close': 'experiment.closed'
   readonly 'ci.request': 'ci.requested'
-  readonly 'implementation.submit': 'implementation.submitted'
-  readonly 'experiment.open': 'experiment.opened'
+  readonly 'ticket.submit': 'experiment.revised'
 }
 
-export type AuditActionOf<T extends keyof AuditActionForCommand> = AuditActionForCommand[T]
+export type AuditActionOf<T extends CommandType> = T extends keyof CommandAuditMap ? CommandAuditMap[T] : never
 
 export interface AuditLog {
-  append(entries: readonly AuditEntry[]): Promise<void>
+  append(entries: NonEmptyArray<AuditEntry>): Promise<void>
   list(programId: ProgramId, limit: number): Promise<readonly AuditEntry[]>
 }

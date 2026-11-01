@@ -1,43 +1,82 @@
-/** Issues: research questions claimed by one Researcher and worked to completion. */
-import type { CommitSha, IsoTimestamp, IssueId, ProgramId, ExperimentId, ResearcherSessionId, SessionId } from './ids.js'
+/** Issues: research questions with exactly one Researcher owner. */
+import type { IssueAuthor, OperatorPrincipal, ResearcherPrincipal } from './actors.js'
+import type { CommitSha, ExperimentId, IsoTimestamp, IssueId, ProgramId, ResearcherSessionId } from './ids.js'
 
-export type IssueStatus = 'open' | 'assigned' | 'in-review' | 'closed'
-export type IssueResolution = 'accepted' | 'rejected' | 'abandoned'
 export type IssueLabel = 'research' | 'experiment' | 'analysis' | 'bug' | 'blocked'
+export type IssueResolution = 'accepted' | 'rejected' | 'abandoned'
 
-interface IssueBase {
+interface IssueCommon {
   readonly id: IssueId
   readonly programId: ProgramId
   readonly title: string
-  /** Goal and acceptance criteria, written by the operator or a Researcher. */
   readonly body: string
   readonly labels: readonly IssueLabel[]
-  readonly createdBy: SessionId
+  readonly author: IssueAuthor
   readonly createdAt: IsoTimestamp
 }
 
-/** One state per discriminant; illegal field combinations do not typecheck. */
-export interface OpenIssue extends IssueBase {
+export declare class OpenIssue implements IssueCommon {
+  private constructor()
+  private readonly __open: true
   readonly status: 'open'
+  readonly id: IssueId
+  readonly programId: ProgramId
+  readonly title: string
+  readonly body: string
+  readonly labels: readonly IssueLabel[]
+  readonly author: IssueAuthor
+  readonly createdAt: IsoTimestamp
+  claim(actor: ResearcherPrincipal, at: IsoTimestamp): AssignedIssue
+  close(actor: OperatorPrincipal, resolution: IssueResolution, at: IsoTimestamp): ClosedIssue
 }
 
-export interface AssignedIssue extends IssueBase {
+export declare class AssignedIssue implements IssueCommon {
+  private constructor()
+  private readonly __assigned: true
   readonly status: 'assigned'
-  readonly assignee: ResearcherSessionId
+  readonly id: IssueId
+  readonly programId: ProgramId
+  readonly title: string
+  readonly body: string
+  readonly labels: readonly IssueLabel[]
+  readonly author: IssueAuthor
+  readonly createdAt: IsoTimestamp
+  readonly assignee: ResearcherPrincipal
   readonly assignedAt: IsoTimestamp
+  /** The assignee only may attach the Experiment it proposed. */
+  attachExperiment(actor: ResearcherPrincipal, experimentId: ExperimentId, head: CommitSha, at: IsoTimestamp): InReviewIssue
+  close(actor: ResearcherPrincipal, resolution: IssueResolution, at: IsoTimestamp): ClosedIssue
 }
 
-export interface InReviewIssue extends IssueBase {
+export declare class InReviewIssue implements IssueCommon {
+  private constructor()
+  private readonly __inReview: true
   readonly status: 'in-review'
-  readonly assignee: ResearcherSessionId
+  readonly id: IssueId
+  readonly programId: ProgramId
+  readonly title: string
+  readonly body: string
+  readonly labels: readonly IssueLabel[]
+  readonly author: IssueAuthor
+  readonly createdAt: IsoTimestamp
+  readonly assignee: ResearcherPrincipal
   readonly assignedAt: IsoTimestamp
-  /** The Experiment whose CI is being reviewed. */
   readonly experimentId: ExperimentId
   readonly head: CommitSha
+  close(actor: ResearcherPrincipal, resolution: IssueResolution, at: IsoTimestamp): ClosedIssue
 }
 
-export interface ClosedIssue extends IssueBase {
+export declare class ClosedIssue implements IssueCommon {
+  private constructor()
+  private readonly __closed: true
   readonly status: 'closed'
+  readonly id: IssueId
+  readonly programId: ProgramId
+  readonly title: string
+  readonly body: string
+  readonly labels: readonly IssueLabel[]
+  readonly author: IssueAuthor
+  readonly createdAt: IsoTimestamp
   readonly assignee: ResearcherSessionId | null
   readonly closedAt: IsoTimestamp
   readonly resolution: IssueResolution
@@ -45,11 +84,12 @@ export interface ClosedIssue extends IssueBase {
 
 export type Issue = OpenIssue | AssignedIssue | InReviewIssue | ClosedIssue
 
-/** Comments are the discussion of an Issue; the experiment plan lives here. */
+/** Comments carry the typed experiment plan and the review discussion. */
 export interface IssueComment {
   readonly id: string
   readonly issueId: IssueId
-  readonly author: SessionId
+  readonly authorSessionId: ResearcherSessionId | 'operator'
   readonly body: string
   readonly at: IsoTimestamp
+  readonly kind: 'comment' | 'plan'
 }

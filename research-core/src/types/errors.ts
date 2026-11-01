@@ -1,14 +1,10 @@
-/** Domain results and errors. Commands return a Result; they never throw for domain refusals. */
-import type { HttpStatus, Version } from './ids.js'
+/** Domain results, refusals and their HTTP mapping. */
+import type { NonEmptyString } from './ids.js'
 
 export type Ok<T> = { readonly ok: true; readonly value: T }
 export type Err<E> = { readonly ok: false; readonly error: E }
 export type Result<T, E> = Ok<T> | Err<E>
 
-export const ok = <T>(value: T): Ok<T> => ({ ok: true, value })
-export const err = <E>(error: E): Err<E> => ({ ok: false, error })
-
-/** Closed set of domain refusal reasons; the management API maps each to a status. */
 export type DomainErrorCode =
   | 'not-found'
   | 'conflict'
@@ -17,32 +13,24 @@ export type DomainErrorCode =
   | 'invalid-state'
   | 'invalid-input'
   | 'budget-exhausted'
-  | 'acceptance-not-met'
   | 'ci-not-passed'
-  | 'merge-conflict'
   | 'environment-invalid'
+  | 'sampling-unavailable'
 
-export interface DomainError {
-  readonly code: DomainErrorCode
-  readonly message: string
-  /** Structured details for the panel and logs; never parsed by the domain. */
-  readonly details?: Readonly<Record<string, unknown>>
-}
+/** A refusal is a union per code, so the mapped extraction is inhabitable. */
+export type DomainError = {
+  readonly [C in DomainErrorCode]: {
+    readonly code: C
+    readonly message: NonEmptyString
+    readonly details?: Readonly<Record<string, string | number | boolean | null>>
+  }
+}[DomainErrorCode]
 
-export interface VersionConflict {
-  readonly code: 'version-conflict'
-  readonly expected: Version
-  readonly actual: Version
-}
-
-/** Storage/appending failures are separate from domain refusals. */
 export type StoreError =
-  | { readonly kind: 'version-conflict'; readonly conflict: VersionConflict }
-  | { readonly kind: 'io'; readonly message: string }
-  | { readonly kind: 'corrupt'; readonly message: string }
+  | { readonly kind: 'version-conflict'; readonly expected: number; readonly actual: number }
+  | { readonly kind: 'io'; readonly message: NonEmptyString }
+  | { readonly kind: 'corrupt'; readonly message: NonEmptyString }
 
-
-/** Compile-time mapping from domain refusal to HTTP status; handlers cannot invent one. */
 export type HttpStatusForError = {
   readonly 'not-found': 404
   readonly conflict: 409
@@ -51,21 +39,17 @@ export type HttpStatusForError = {
   readonly 'invalid-state': 409
   readonly 'invalid-input': 400
   readonly 'budget-exhausted': 422
-  readonly 'acceptance-not-met': 422
   readonly 'ci-not-passed': 422
-  readonly 'merge-conflict': 409
   readonly 'environment-invalid': 422
+  readonly 'sampling-unavailable': 422
 }
 
-export type StatusOf<E extends DomainErrorCode> = HttpStatusForError[E] extends HttpStatus
-  ? HttpStatusForError[E]
-  : never
+export type StatusOf<C extends DomainErrorCode> = HttpStatusForError[C]
 
-/** The API answer for a refusal; the status follows from the code. */
 export type DomainFailure = {
-  readonly [E in DomainErrorCode]: {
+  readonly [C in DomainErrorCode]: {
     readonly ok: false
-    readonly status: StatusOf<E>
-    readonly error: Extract<DomainError, { readonly code: E }>
+    readonly status: StatusOf<C>
+    readonly error: Extract<DomainError, { readonly code: C }>
   }
 }[DomainErrorCode]

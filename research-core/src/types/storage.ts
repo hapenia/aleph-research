@@ -1,73 +1,79 @@
 /**
- * Host storage interfaces: the only components that touch persistence.
- *
- * The Host is the sole writer of research state. The event store is the source of
- * truth and the read repositories are projections; both are behind these interfaces
- * so phase 1 can start in memory and swap to SQLite without changing the domain.
+ * Host storage ports: current-state repositories plus an audit log. There is no replay
+ * engine; every write is versioned for optimistic concurrency.
  */
+import type { ArtifactId, CIRunId, ExperimentId, IssueId, ProgramId, ResearcherSessionId, Version } from './ids.js'
 import type { Program } from './program.js'
 import type { Issue, IssueComment } from './issue.js'
 import type { Experiment, ExperimentReview } from './experiment.js'
-import type { CIRun } from './ci.js'
+import type { MetricQuery, MetricQueryResult, CIRecord } from './metrics.js'
+import type { ArtifactRef } from './artifacts.js'
+import type { Attention } from './attention.js'
 import type { AuditLog } from './audit.js'
-import type { DomainError, Result } from './errors.js'
-import type { ProgramId } from './ids.js'
-import type { SessionIdentity } from './roles.js'
-import type { IsoTimestamp } from './ids.js'
-import type { Decision } from './commands.js'
+import type { CommandExecutor } from './executor.js'
+import type { DomainError, Result, StoreError } from './errors.js'
+import type { ProgramSnapshot } from './api.js'
+
+export interface Versioned<T> {
+  readonly value: T
+  readonly version: Version
+}
 
 export interface ProgramRepository {
-  get(id: ProgramId): Promise<Program | undefined>
-  list(): Promise<readonly Program[]>
-  save(program: Program): Promise<void>
+  get(id: ProgramId): Promise<Versioned<Program> | undefined>
+  list(): Promise<readonly Versioned<Program>[]>
+  save(expected: Version, next: Program): Promise<Result<Version, StoreError>>
 }
 
 export interface IssueRepository {
-  get(id: string): Promise<Issue | undefined>
+  get(id: IssueId): Promise<Versioned<Issue> | undefined>
   listByProgram(programId: ProgramId): Promise<readonly Issue[]>
-  listAssignedTo(researcherId: string): Promise<readonly Issue[]>
-  comments(issueId: string): Promise<readonly IssueComment[]>
+  listAssignedTo(assignee: ResearcherSessionId): Promise<readonly Issue[]>
+  save(expected: Version, next: Issue): Promise<Result<Version, StoreError>>
+  comments(issueId: IssueId): Promise<readonly IssueComment[]>
+  appendComment(comment: IssueComment): Promise<Result<void, StoreError>>
 }
 
 export interface ExperimentRepository {
-  get(id: string): Promise<Experiment | undefined>
+  get(id: ExperimentId): Promise<Versioned<Experiment> | undefined>
   listByProgram(programId: ProgramId): Promise<readonly Experiment[]>
-  listByIssue(issueId: string): Promise<readonly Experiment[]>
-  reviews(experimentId: string): Promise<readonly ExperimentReview[]>
+  listByIssue(issueId: IssueId): Promise<readonly Experiment[]>
+  save(expected: Version, next: Experiment): Promise<Result<Version, StoreError>>
+  reviews(experimentId: ExperimentId): Promise<readonly ExperimentReview[]>
+  appendReview(review: ExperimentReview): Promise<Result<void, StoreError>>
 }
 
-export interface CIRunRepository {
-  get(id: string): Promise<CIRun | undefined>
-  listByExperiment(experimentId: string): Promise<readonly CIRun[]>
+export interface CIRecordRepository {
+  get(id: CIRunId): Promise<CIRecord | undefined>
+  listByExperiment(experimentId: ExperimentId): Promise<readonly CIRecord[]>
+  query(query: MetricQuery): Promise<MetricQueryResult>
+  append(record: CIRecord): Promise<Result<void, StoreError>>
 }
 
-/** Who executes a command, and when; deciders and handlers receive this, not raw sessions. */
-export interface CommandContext {
-  readonly identity: SessionIdentity
-  readonly at: IsoTimestamp
-  readonly requestId: string
+export interface ArtifactRepository {
+  get(id: ArtifactId): Promise<ArtifactRef | undefined>
+  listByExperiment(experimentId: ExperimentId): Promise<readonly ArtifactRef[]>
+  append(ref: ArtifactRef): Promise<Result<void, StoreError>>
 }
 
-/** Repositories are the source of truth; state is updated in place, audited separately. */
+export interface AttentionRepository {
+  listByProgram(programId: ProgramId): Promise<readonly Attention[]>
+  append(attention: Attention): Promise<Result<void, StoreError>>
+}
+
 export interface UnitOfWork {
   readonly programs: ProgramRepository
   readonly issues: IssueRepository
   readonly experiments: ExperimentRepository
-  readonly ciRuns: CIRunRepository
+  readonly ciRecords: CIRecordRepository
+  readonly artifacts: ArtifactRepository
+  readonly attention: AttentionRepository
   readonly audit: AuditLog
   transaction<T>(work: (uow: UnitOfWork) => Promise<T>): Promise<T>
 }
 
-/**
- * Executes one command against current state, records the audit entries in the same
- * transaction and returns the refreshed read model pieces. There is no replay engine:
- * the audit log is for people, not for rebuilding state.
- */
-export interface CommandExecutor {
-  execute<C, R>(command: C, context: CommandContext): Promise<Result<Decision<R>, DomainError>>
+export interface ReadModel {
+  snapshot(programId: ProgramId): Promise<Result<ProgramSnapshot, DomainError>>
 }
 
-/** Read model assembled from the repositories for the panel and Session tools. */
-export interface ReadModel {
-  snapshot(programId: ProgramId): Promise<import('./api.js').ProgramSnapshot>
-}
+export type { CommandExecutor }

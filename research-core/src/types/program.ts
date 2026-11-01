@@ -1,31 +1,26 @@
-/** The Program: goal, evaluation contract, budget and best result. */
-import type { ArtifactRef } from './artifacts.js'
-import type { CIRunId, CommitSha, DurationMs, ExperimentId, IsoTimestamp, NonEmptyArray, NonEmptyString, NonNegativeInt, PositiveInt, ProgramId, Score } from './ids.js'
+/** Program: goal, methodology, metrics contract, exploration level, budget and status. */
+import type { MetricDefinition } from './metrics.js'
+import type { OperatorPrincipal } from './actors.js'
+import type { DurationMs, IsoTimestamp, NonEmptyArray, NonEmptyString, PositiveInt, ProgramId } from './ids.js'
 
-export type ProgramStatus = 'running' | 'paused' | 'stopped'
-
-/**
- * Exploration breadth, inherited from the retired design and kept for its purpose:
- * genetic-algorithm-like diversity so a Researcher does not lock onto one method.
- * The Operator owns the level; the Researcher never chooses a strategy.
- *
- * Fixed quota semantics (review decision): `low` exploits only, `normal` requires one
- * explore Experiment in every three, `high` requires one in every two. Explore
- * Experiments branch from the research mainline, exploit Experiments from the best
- * result.
- */
 export type ExplorationLevel = 'low' | 'normal' | 'high'
 
-export type ExplorationQuota =
-  | { readonly level: 'low'; readonly exploitOnly: true; readonly exploreEvery: null }
-  | { readonly level: 'normal' | 'high'; readonly exploitOnly: false; readonly exploreEvery: number }
-export type StopReason = 'goal-met' | 'budget-exhausted' | 'operator' | 'error'
+export interface EvaluationContract {
+  /** Command the Host runs inside the Experiment environment. */
+  readonly ciEntry: NonEmptyString
+  readonly timeoutMs: DurationMs
+  /** Metrics every CI record must contain to be usable; others may be reported too. */
+  readonly requiredMetrics: NonEmptyArray<string>
+}
 
-/** The declared compute budget of one Program. No scheduler enforces it; the Host does. */
+export interface UtilityConfig {
+  readonly metrics: NonEmptyArray<MetricDefinition>
+}
+
 export interface Budget {
-  readonly maxExperiments: number
-  readonly maxComputeMinutes: number
-  readonly maxTokens: number
+  readonly maxExperiments: PositiveInt
+  readonly maxComputeMinutes: PositiveInt
+  readonly maxTokens: PositiveInt
 }
 
 export interface BudgetUsage {
@@ -34,66 +29,77 @@ export interface BudgetUsage {
   readonly tokens: number
 }
 
-/** The evaluation contract names the CI entry and how a score is read from it. */
-export interface EvaluationContract {
-  /** Command run in the Experiment environment, for example `eval/ci.sh`. */
-  readonly ciEntry: NonEmptyString
-  /** Timeout for one CI run; zero or negative values are unrepresentable. */
-  readonly timeoutMs: DurationMs
-  /** The JSON score is read from this field of the entry's stdout. */
-  readonly scoreField: NonEmptyString
-}
-
-
-
-export interface BestResult {
-  readonly score: Score
-  readonly experimentId: ExperimentId
-  readonly commit: CommitSha
-  readonly ciRunId: CIRunId
-  /** The persisted model weights or report this score belongs to. */
-  readonly artifacts: NonEmptyArray<ArtifactRef>
-  readonly at: IsoTimestamp
-}
-
-interface ProgramBase {
+interface ProgramCommon {
   readonly id: ProgramId
   readonly name: NonEmptyString
-  /** The research goal in the operator's words; the only field the operator edits. */
   readonly goal: NonEmptyString
-  readonly contract: EvaluationContract
-  readonly budget: Budget
-  /** How the Workers of this Program are told to research; editable per Program. */
   readonly methodology: NonEmptyString
-  /** How much diversity the Host requires across Experiments (operator-owned). */
+  readonly contract: EvaluationContract
+  readonly utility: UtilityConfig
   readonly exploration: ExplorationLevel
-  readonly best: BestResult | null
+  readonly budget: Budget
+  readonly usage: BudgetUsage
   readonly createdAt: IsoTimestamp
 }
 
-export interface RunningProgram extends ProgramBase {
+/** A running Program may change its goal, exploration and methodology. */
+export declare class RunningProgram implements ProgramCommon {
+  private constructor()
+  private readonly __running: true
   readonly status: 'running'
+  readonly id: ProgramId
+  readonly name: NonEmptyString
+  readonly goal: NonEmptyString
+  readonly methodology: NonEmptyString
+  readonly contract: EvaluationContract
+  readonly utility: UtilityConfig
+  readonly exploration: ExplorationLevel
+  readonly budget: Budget
+  readonly usage: BudgetUsage
+  readonly createdAt: IsoTimestamp
+  pause(actor: OperatorPrincipal, at: IsoTimestamp): PausedProgram
+  stop(actor: OperatorPrincipal, reason: NonEmptyString, at: IsoTimestamp): StoppedProgram
+  setGoal(actor: OperatorPrincipal, goal: NonEmptyString, at: IsoTimestamp): RunningProgram
+  setMethodology(actor: OperatorPrincipal, methodology: NonEmptyString, at: IsoTimestamp): RunningProgram
+  setExploration(actor: OperatorPrincipal, level: ExplorationLevel, at: IsoTimestamp): RunningProgram
+  recordUsage(next: BudgetUsage): RunningProgram
 }
 
-export interface PausedProgram extends ProgramBase {
+export declare class PausedProgram implements ProgramCommon {
+  private constructor()
+  private readonly __paused: true
   readonly status: 'paused'
+  readonly id: ProgramId
+  readonly name: NonEmptyString
+  readonly goal: NonEmptyString
+  readonly methodology: NonEmptyString
+  readonly contract: EvaluationContract
+  readonly utility: UtilityConfig
+  readonly exploration: ExplorationLevel
+  readonly budget: Budget
+  readonly usage: BudgetUsage
+  readonly createdAt: IsoTimestamp
   readonly pausedAt: IsoTimestamp
+  resume(actor: OperatorPrincipal, at: IsoTimestamp): RunningProgram
+  stop(actor: OperatorPrincipal, reason: NonEmptyString, at: IsoTimestamp): StoppedProgram
 }
 
-export interface StoppedProgram extends ProgramBase {
+export declare class StoppedProgram implements ProgramCommon {
+  private constructor()
+  private readonly __stopped: true
   readonly status: 'stopped'
-  readonly stopReason: StopReason
+  readonly id: ProgramId
+  readonly name: NonEmptyString
+  readonly goal: NonEmptyString
+  readonly methodology: NonEmptyString
+  readonly contract: EvaluationContract
+  readonly utility: UtilityConfig
+  readonly exploration: ExplorationLevel
+  readonly budget: Budget
+  readonly usage: BudgetUsage
+  readonly createdAt: IsoTimestamp
   readonly stoppedAt: IsoTimestamp
+  readonly stopReason: NonEmptyString
 }
 
-/** A Program is exactly one of the three statuses; a stopped Program must say why. */
 export type Program = RunningProgram | PausedProgram | StoppedProgram
-
-
-/** A page of a collection for Session tools and the read-only panel. */
-export interface Paginated<T> {
-  readonly items: readonly T[]
-  readonly total: number
-  readonly offset: number
-  readonly limit: number
-}

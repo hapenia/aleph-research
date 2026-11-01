@@ -1,179 +1,226 @@
-/** Commands: the only way to change a Program; each role may issue a subset. */
-import type { Budget, EvaluationContract } from './program.js'
-import type { IssueLabel } from './issue.js'
-
+/**
+ * User commands. Payloads are data; who may issue them is fixed at compile time by
+ * CapabilityForCommand and ActorForCommand, and the result type by CommandResultMap.
+ */
+import type { ImplementerPrincipal, OperatorPrincipal, ResearcherPrincipal } from './actors.js'
+import type {
+  CommitSha,
+  DurationMs,
+  ExperimentId,
+  IssueId,
+  NonEmptyArray,
+  NonEmptyString,
+  PositiveInt,
+  ProgramId,
+  TicketId,
+} from './ids.js'
+import type { Budget, EvaluationContract, ExplorationLevel, UtilityConfig } from './program.js'
 import type { EnvironmentDeclaration } from './environment.js'
+import type { IssueLabel, IssueResolution, IssueComment } from './issue.js'
+import type { ExperimentReview, ExperimentPlan, OpenExperiment, CIPendingExperiment, ClosedExperiment } from './experiment.js'
+import type { RequestedCIRun } from './ci.js'
 import type { AuditEntry } from './audit.js'
-import type { NonEmptyArray } from './ids.js'
-import type { CommitSha, IssueId, ProgramId, ExperimentId, TicketId } from './ids.js'
+import type { Capability } from './actors.js'
+import type { AssignedIssue, ClosedIssue, OpenIssue, InReviewIssue } from './issue.js'
+import type { PausedProgram, RunningProgram, StoppedProgram } from './program.js'
 
-/** What the operator creates; the only command that carries the whole contract. */
 export interface CreateProgramCommand {
   readonly type: 'program.create'
-  readonly name: string
-  readonly goal: string
+  readonly name: NonEmptyString
+  readonly goal: NonEmptyString
+  readonly methodology: NonEmptyString
   readonly contract: EvaluationContract
+  readonly utility: UtilityConfig
+  readonly exploration: ExplorationLevel
   readonly budget: Budget
 }
 
-export interface PauseProgramCommand {
-  readonly type: 'program.pause'
-  readonly programId: ProgramId
-}
-
+export interface PauseProgramCommand { readonly type: 'program.pause'; readonly programId: ProgramId }
+export interface ResumeProgramCommand { readonly type: 'program.resume'; readonly programId: ProgramId }
 export interface StopProgramCommand {
   readonly type: 'program.stop'
   readonly programId: ProgramId
-  readonly reason: string
+  readonly reason: NonEmptyString
 }
-
+export interface SetGoalCommand {
+  readonly type: 'program.set-goal'
+  readonly programId: ProgramId
+  readonly goal: NonEmptyString
+}
+export interface SetMethodologyCommand {
+  readonly type: 'program.set-methodology'
+  readonly programId: ProgramId
+  readonly methodology: NonEmptyString
+}
+export interface SetExplorationCommand {
+  readonly type: 'program.set-exploration'
+  readonly programId: ProgramId
+  readonly level: ExplorationLevel
+}
 export interface CreateIssueCommand {
   readonly type: 'issue.create'
   readonly programId: ProgramId
-  readonly title: string
-  readonly body: string
-  readonly labels: readonly IssueLabel[]
+  readonly title: NonEmptyString
+  readonly body: NonEmptyString
+  readonly labels: NonEmptyArray<IssueLabel>
 }
-
-/** The claiming Researcher is the Session in the decision context, not a command field. */
 export interface ClaimIssueCommand {
   readonly type: 'issue.claim'
   readonly programId: ProgramId
   readonly issueId: IssueId
 }
-
 export interface CommentOnIssueCommand {
   readonly type: 'issue.comment'
   readonly programId: ProgramId
   readonly issueId: IssueId
-  readonly body: string
+  readonly body: NonEmptyString
+  readonly kind: 'comment' | 'plan'
 }
-
-/** The Researcher's experiment plan; the Host turns it into an Implementer Ticket. */
+export interface CloseIssueCommand {
+  readonly type: 'issue.close'
+  readonly programId: ProgramId
+  readonly issueId: IssueId
+  readonly resolution: IssueResolution
+  readonly summary: NonEmptyString
+}
 export interface ProposeExperimentCommand {
   readonly type: 'experiment.propose'
   readonly programId: ProgramId
   readonly issueId: IssueId
   readonly plan: ExperimentPlan
 }
-
-/** A typed reference to a stored artifact; the Host mounts it into the ticket. */
-export interface ArtifactInputRef {
-  readonly artifactId: string
-  readonly mountAs: string
-}
-
-export interface ExperimentPlan {
-  readonly hypothesis: string
-  readonly steps: readonly string[]
-  /** Earlier artifacts this Experiment consumes, such as the best model weights. */
-  readonly inputs?: readonly ArtifactInputRef[]
-  /** What would count as success when CI reports, before seeing the score. */
-  readonly expected: {
-    readonly direction: 'higher' | 'lower'
-    readonly minDelta?: number
-    readonly rationale: string
-  }
-  readonly environment: EnvironmentDeclaration
-}
-
-/** Host-internal: opens the Experiment after assigning lineage from the exploration quota. */
-export interface HostOpenExperimentCommand {
-  readonly type: 'experiment.open'
+export interface ReviewExperimentCommand {
+  readonly type: 'experiment.review'
   readonly programId: ProgramId
-  readonly issueId: IssueId
-  readonly plan: ExperimentPlan
-  readonly lineage: {
-    readonly base: 'best' | 'mainline'
-    readonly baseCommit: CommitSha
-    readonly strategy: 'exploit' | 'explore'
-  }
+  readonly experimentId: ExperimentId
+  readonly body: NonEmptyString
+  readonly kind: 'review' | 'ci-request'
 }
-
+export interface CloseExperimentCommand {
+  readonly type: 'experiment.close'
+  readonly programId: ProgramId
+  readonly experimentId: ExperimentId
+  readonly reason: NonEmptyString
+}
 export interface RequestCICommand {
   readonly type: 'ci.request'
   readonly programId: ProgramId
   readonly experimentId: ExperimentId
-  readonly commit: CommitSha
+  readonly ciRunId: string
 }
-
-export interface CloseIssueCommand {
-  readonly type: 'issue.close'
-  readonly programId: ProgramId
-  readonly issueId: IssueId
-  readonly resolution: 'accepted' | 'rejected' | 'abandoned'
-  readonly summary: string
-}
-
-/** Implementer submits the Ticket for CI; no score is claimed here. */
+/** The Host injects ticketId and experimentId; the model only supplies the submission. */
 export interface SubmitImplementationCommand {
-  readonly type: 'implementation.submit'
+  readonly type: 'ticket.submit'
   readonly ticketId: TicketId
-  readonly branch: string
+  readonly experimentId: ExperimentId
   readonly head: CommitSha
   readonly environment: EnvironmentDeclaration
-}
-
-/** Host-internal commands; only the Host's effects may issue them. */
-export type HostCommand =
-  | HostOpenExperimentCommand
-  | { readonly type: 'ci.start'; readonly ciRunId: string }
-  | { readonly type: 'ci.finish'; readonly ciRunId: string }
-
-export interface SetExplorationCommand {
-  readonly type: 'program.set-exploration'
-  readonly programId: ProgramId
-  readonly level: 'low' | 'normal' | 'high'
 }
 
 export type OperatorCommand =
   | CreateProgramCommand
   | PauseProgramCommand
+  | ResumeProgramCommand
   | StopProgramCommand
-  | CreateIssueCommand
+  | SetGoalCommand
+  | SetMethodologyCommand
   | SetExplorationCommand
+  | CreateIssueCommand
+
 export type ResearcherCommand =
   | ClaimIssueCommand
   | CommentOnIssueCommand
-  | ProposeExperimentCommand
-  | RequestCICommand
   | CloseIssueCommand
+  | ProposeExperimentCommand
+  | ReviewExperimentCommand
+  | CloseExperimentCommand
+  | RequestCICommand
+  | CreateIssueCommand
+
 export type ImplementerCommand = SubmitImplementationCommand
-/** Every command type literal, the key of the compile-time maps below. */
-export type CommandType = AnyCommand['type']
+export type UserCommand = OperatorCommand | ResearcherCommand | ImplementerCommand
+export type CommandType = UserCommand['type']
+export type CommandOf<T extends CommandType> = Extract<UserCommand, { readonly type: T }>
 
-/** The payload type of one command literal. */
-export type CommandOf<T extends CommandType> = Extract<AnyCommand, { readonly type: T }>
-
-/** Which capability a command requires; a command in no map is Host-internal. */
+/** Compile-time capability per command. */
 export type CapabilityForCommand = {
   readonly 'program.create': 'program:create'
   readonly 'program.pause': 'program:pause'
+  readonly 'program.resume': 'program:pause'
   readonly 'program.stop': 'program:stop'
+  readonly 'program.set-goal': 'program:goal'
+  readonly 'program.set-methodology': 'program:goal'
   readonly 'program.set-exploration': 'program:exploration'
   readonly 'issue.create': 'issue:create'
   readonly 'issue.claim': 'issue:claim'
   readonly 'issue.comment': 'issue:comment'
   readonly 'issue.close': 'issue:close'
   readonly 'experiment.propose': 'experiment:propose'
+  readonly 'experiment.review': 'experiment:review'
+  readonly 'experiment.close': 'issue:close'
   readonly 'ci.request': 'ci:request'
-  readonly 'implementation.submit': 'ticket:submit'
+  readonly 'ticket.submit': 'ticket:submit'
 }
 
-/** The capability is known at compile time from the command literal. */
-export type CapabilityOfCommand<T extends CommandType> =
-  T extends keyof CapabilityForCommand ? CapabilityForCommand[T] : never
+export type CapabilityOfCommand<T extends CommandType> = T extends keyof CapabilityForCommand
+  ? CapabilityForCommand[T]
+  : never
 
-/** A command whose type is statically known to require this capability. */
-export type RequiringCapability<K extends string> = {
-  readonly [T in keyof CapabilityForCommand]: CapabilityForCommand[T] extends K ? T : never
-}[keyof CapabilityForCommand]
+/** The principal that may issue each command; host-only work is not a user command. */
+export type ActorForCommand = {
+  readonly 'program.create': OperatorPrincipal
+  readonly 'program.pause': OperatorPrincipal
+  readonly 'program.resume': OperatorPrincipal
+  readonly 'program.stop': OperatorPrincipal
+  readonly 'program.set-goal': OperatorPrincipal
+  readonly 'program.set-methodology': OperatorPrincipal
+  readonly 'program.set-exploration': OperatorPrincipal
+  readonly 'issue.create': OperatorPrincipal | ResearcherPrincipal
+  readonly 'issue.claim': ResearcherPrincipal
+  readonly 'issue.comment': OperatorPrincipal | ResearcherPrincipal
+  readonly 'issue.close': OperatorPrincipal | ResearcherPrincipal
+  readonly 'experiment.propose': ResearcherPrincipal
+  readonly 'experiment.review': ResearcherPrincipal
+  readonly 'experiment.close': ResearcherPrincipal
+  readonly 'ci.request': ResearcherPrincipal
+  readonly 'ticket.submit': ImplementerPrincipal
+}
 
-/** What executing one command returns: the read value plus the audit records it wrote. */
-export interface Decision<R> {
-  readonly result: R
-  /** A command always records at least one decision fact. */
+export type ActorOfCommand<T extends CommandType> = ActorForCommand[T]
+
+/** The value a successfully executed command produces. */
+export type CommandResultMap = {
+  readonly 'program.create': RunningProgram
+  readonly 'program.pause': PausedProgram
+  readonly 'program.resume': RunningProgram
+  readonly 'program.stop': StoppedProgram
+  readonly 'program.set-goal': RunningProgram
+  readonly 'program.set-methodology': RunningProgram
+  readonly 'program.set-exploration': RunningProgram
+  readonly 'issue.create': OpenIssue
+  readonly 'issue.claim': AssignedIssue
+  readonly 'issue.comment': IssueComment
+  readonly 'issue.close': ClosedIssue
+  readonly 'experiment.propose': OpenExperiment
+  readonly 'experiment.review': ExperimentReview
+  readonly 'experiment.close': ClosedExperiment
+  readonly 'ci.request': RequestedCIRun
+  readonly 'ticket.submit': OpenExperiment
+}
+
+export type CommandResult<T extends CommandType> = CommandResultMap[T]
+
+export interface CommandContext<K extends CommandType> {
+  readonly actor: ActorOfCommand<K>
+  readonly at: import('./ids.js').IsoTimestamp
+  readonly requestId: string
+}
+
+/** A successful command returns its value and the audit entries written with it. */
+export interface Decision<T> {
+  readonly value: T
   readonly audit: NonEmptyArray<AuditEntry>
 }
 
-export type AnyCommand = OperatorCommand | ResearcherCommand | ImplementerCommand | HostCommand
+/** Re-exported capability union for tool registration checks. */
+export type { Capability }

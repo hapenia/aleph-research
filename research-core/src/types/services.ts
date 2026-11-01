@@ -1,84 +1,72 @@
 /**
- * Host service ports: CI execution, environment building, git, merge policy, Sessions
- * and attention. Implementations live in phase 2+; domain code depends only on these.
+ * Host service ports. Implementations live in the adapter; the domain depends only on
+ * these interfaces. Each one names the exact input and output types.
  */
-import type { CIRun, CheckResult, CIRequest } from './ci.js'
-import type { BuiltEnvironment, EnvironmentDeclaration, RepositorySnapshot } from './environment.js'
-import type { EvaluationContract } from './program.js'
-
-import type { DomainError, Result } from './errors.js'
-import type { BranchName, CommitSha, IsoTimestamp, SessionId } from './ids.js'
+import type { ArtifactCandidate, ArtifactStore } from './artifacts.js'
 import type { Attention } from './attention.js'
-import type { WakeReason } from './session.js'
+import type { CIFailureReason } from './ci.js'
+import type { BuiltEnvironment, EnvironmentDeclaration, RepositorySnapshot } from './environment.js'
+import type { MetricMap } from './metrics.js'
+import type { ExperimentId, ImplementerSessionId, IsoTimestamp, ProgramId, ResearcherSessionId, TicketId } from './ids.js'
+import type { DomainError, Result } from './errors.js'
+import type { Sampler } from './sampling.js'
 
 export interface Clock {
   now(): IsoTimestamp
 }
 
-/** Runs the Program's CI entry inside the Experiment environment. */
-export interface CIRunner {
-  run(request: CIExecutionRequest): Promise<CIExecutionResult>
+/** Builds an Experiment's uv environment from its declaration and snapshot. */
+export interface EnvironmentBuilder {
+  build(declaration: EnvironmentDeclaration, snapshot: RepositorySnapshot): Promise<Result<BuiltEnvironment, DomainError>>
 }
 
-export interface CIExecutionRequest {
-  readonly request: CIRequest
-  readonly snapshot: RepositorySnapshot
+/** Copies a branch at a commit into a workspace the CI can run in. */
+export interface RepositoryService {
+  snapshot(branch: string, commit: string): Promise<Result<RepositorySnapshot, DomainError>>
+}
+
+export interface CIExecutionInput {
+  readonly experimentId: ExperimentId
+  readonly commit: string
   readonly environment: BuiltEnvironment
-  readonly contract: EvaluationContract
+  /** The Program's evaluation contract: entry, timeout, required metrics. */
+  readonly ciEntry: string
+  readonly timeoutMs: number
+  readonly requiredMetrics: readonly string[]
 }
 
 export type CIExecutionResult =
   | {
       readonly status: 'passed'
-      readonly score: number
-      readonly checks: readonly CheckResult[]
-      /** Where the entry left the results the Host must persist. */
+      readonly metrics: MetricMap
       readonly artifacts: readonly ArtifactCandidate[]
-      readonly logPath: string
       readonly durationMs: number
+      readonly logPath: string
     }
   | {
       readonly status: 'failed'
-      readonly reason: string
+      readonly reason: CIFailureReason
       readonly detail: string
       readonly logPath: string
     }
 
-/** Builds a Experiment's declared environment with uv. */
-export interface EnvironmentBuilder {
-  build(declaration: EnvironmentDeclaration): Promise<Result<BuiltEnvironment, DomainError>>
+export interface CIRunner {
+  run(input: CIExecutionInput): Promise<Result<CIExecutionResult, DomainError>>
 }
 
-/** The Host never merges branches: research keeps experiments as snapshots. */
-export interface RepositoryService {
-  head(branch: BranchName): Promise<CommitSha>
-  /** Copies one branch at a commit into a workspace for CI. */
-  snapshot(input: { readonly branch: BranchName; readonly commit: CommitSha }): Promise<RepositorySnapshot>
-}
-
-/** Pause/stop immediately cancel the Implementer work already running. */
+/** Pause/stop cancels in-flight Implementer work and pending CI. */
 export interface RunCanceller {
-  cancelOpenImplementers(programId: string, reason: string): Promise<readonly string[]>
+  cancelProgram(programId: ProgramId, reason: string): Promise<readonly TicketId[]>
 }
 
-/** Persists results across runs; declared in artifacts.ts. */
-export type { ArtifactStore } from './artifacts.js'
-
-/** Holds the resident Researcher Sessions and wakes the right one. */
 export interface SessionPool {
-  ensure(researcherId: string): Promise<SessionId>
-  wake(sessionId: SessionId, reason: WakeReason, prompt: string): Promise<void>
-  idle(): Promise<readonly SessionId[]>
+  ensureResearcher(sessionId: ResearcherSessionId): Promise<void>
+  ensureImplementer(ticketId: TicketId): Promise<ImplementerSessionId>
+  wakeResearcher(sessionId: ResearcherSessionId, message: string): Promise<void>
 }
 
 export interface AttentionSink {
   raise(attention: Attention): Promise<void>
 }
 
-
-/** A result file a CI entry produced; the Host copies it into ArtifactStore. */
-export interface ArtifactCandidate {
-  readonly kind: 'model-weights' | 'report' | 'figure' | 'dataset' | 'log' | 'other'
-  readonly path: string
-  readonly retention: 'keep-best' | 'keep-forever' | 'discard-after-merge' | 'temporary'
-}
+export type { ArtifactStore, Sampler }
