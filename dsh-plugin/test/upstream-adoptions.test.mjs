@@ -1278,3 +1278,23 @@ test('the Host starts a prepared batch when the Composer cannot be woken', async
     await cleanup(root);
   }
 });
+
+test('a corrupted orchestrator record is repaired by the next Leader action', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-orch-repair-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    // Storage from an older build can point at a researcher session.
+    await service.mutate(project.id, (state) => ({ ...state, orchestratorSessionId: 'researcher-session' }));
+    service.sessions = { get: (id) => (id === 'researcher-session' ? { header: { id } } : undefined) };
+    service.agentPresets = { presetForSession: (session) => (session?.header?.id === 'researcher-session' ? 'aleph-researcher' : null) };
+    service.presetOfAgent = (agent) => (agent?.id === 'session-leader' ? 'aleph' : 'aleph-researcher');
+
+    await service.rememberOrchestrator(project.id, { id: 'session-leader' });
+    assert.equal(service.get(project.id).orchestratorSessionId, 'session-leader', 'the Leader session replaces the stale record');
+  } finally {
+    await cleanup(root);
+  }
+});

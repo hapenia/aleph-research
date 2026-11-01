@@ -316,6 +316,8 @@ class ProjectService {
     this.sessions = deps.sessions;
     this.subagents = deps.subagents;
     this.agentPresets = deps.agentPresets;
+    this.sessionQuery = deps.sessionQuery;
+    this.agentDefaultModel = deps.agentDefaultModel;
     this.writeChain = Promise.resolve();
   }
 
@@ -902,7 +904,19 @@ class ProjectService {
     if (!agent?.id) return;
     if (this.presetOfAgent && this.presetOfAgent(agent) !== 'aleph') return;
     const project = this.get(projectId);
-    if (!project || project.orchestratorSessionId === agent.id) return;
+    if (!project) return;
+    const storedIsLeader = (() => {
+      if (!project.orchestratorSessionId) return false;
+      const session = this.sessions?.get?.(project.orchestratorSessionId);
+      const preset = session && this.agentPresets?.presetForSession ? this.agentPresets.presetForSession(session) : null;
+      return preset === 'aleph';
+    })();
+    // A stored id that is not a Leader session is corruption from an older build; replace it.
+    if (project.orchestratorSessionId && project.orchestratorSessionId !== agent.id && !storedIsLeader) {
+      await this.mutate(projectId, (current) => ({ ...current, orchestratorSessionId: agent.id })).catch(() => undefined);
+      return;
+    }
+    if (project.orchestratorSessionId === agent.id) return;
     await this.mutate(projectId, (current) => ({ ...current, orchestratorSessionId: agent.id })).catch(() => undefined);
   }
 
@@ -957,14 +971,14 @@ class ProjectService {
     const last = this.revives.get(sessionId) ?? 0;
     if (Date.now() - last < 60_000) return null;
     this.revives.set(sessionId, Date.now());
-    const sessions = this.ctx?.get?.('sessionQuery');
-    const presets = this.ctx?.get?.('agentPresets');
+    const sessions = this.sessionQuery;
+    const presets = this.agentPresets;
     try {
       const observation = await sessions?.observeSession?.(sessionId);
       if (!observation) return null;
       const presetId = observation.projections?.values?.agentPreset ?? 'aleph';
       const resolved = presets ? (await presets.resolve(presetId)).id : presetId;
-      const selection = this.ctx?.get?.('agentDefaultModel')?.currentSelection?.() ?? {};
+      const selection = this.agentDefaultModel?.currentSelection?.() ?? {};
       const resumed = await this.ctx.agents.resume({
         resumeSessionId: sessionId,
         agentOptions: { ...(selection.provider ? { provider: selection.provider } : {}), ...(selection.model ? { model: selection.model } : {}) },
@@ -974,7 +988,7 @@ class ProjectService {
       });
       return resumed?.agent ?? null;
     } catch (error) {
-      this.ctx?.logger?.warn?.(`aleph: could not revive session ${sessionId}: ${String(error?.message ?? error)}`);
+      console.warn(`[aleph] could not revive session ${sessionId}: ${String(error?.message ?? error)}`);
       return null;
     }
   }
@@ -2628,8 +2642,10 @@ export async function apply(ctx) {
   const sessions = ctx.get('sessions');
   const subagents = ctx.get('subagents');
   const agentPresets = ctx.get('agentPresets');
+  const sessionQuery = ctx.get('sessionQuery');
+  const agentDefaultModel = ctx.get('agentDefaultModel');
   const workspaceRegistry = ctx.get('workspaceRegistry');
-  const service = new ProjectService(ctx, domain, { sessions, subagents, agentPresets });
+  const service = new ProjectService(ctx, domain, { sessions, subagents, agentPresets, sessionQuery, agentDefaultModel });
   ctx.effect(() => { const timer = setInterval(() => service.checkProcesses(), 5000); timer.unref?.(); return () => clearInterval(timer); });
   service.recoverAfterRestart().then(
     (summary) => { if (summary) console.warn('[aleph] restart recovery', summary); },
