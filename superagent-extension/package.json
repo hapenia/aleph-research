@@ -13,7 +13,8 @@
     "./client": "./client.js",
     "./package.json": "./package.json",
     "./request-tool": "./request-tool.js",
-    "./research-host": "./research-host.js"
+    "./research-host": "./research-host.js",
+    "./research-storage": "./research-storage.js"
   },
   "files": [
     "index.js",
@@ -21,7 +22,8 @@
     "cordis.patch.yml",
     "research-extension.js",
     "request-tool.js",
-    "research-host.js"
+    "research-host.js",
+    "research-storage.js"
   ],
   "dsh": {
     "bundle": {
