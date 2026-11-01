@@ -87,7 +87,3 @@ export interface MetricQueryResult {
   readonly summaries: readonly MetricSummary[]
 }
 
-/** The sampler reads only valid passed records; validity is computed, not stored. */
-export interface SamplingPopulation {
-  passedRecords(programId: ProgramId): Promise<readonly PassedCIRecord[]>
-}

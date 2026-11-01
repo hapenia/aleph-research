@@ -18,8 +18,6 @@ export declare class ArtifactRef {
   readonly ciRunId: CIRunId
   readonly retention: ArtifactRetention
   readonly createdAt: IsoTimestamp
-  static create(input: Omit<ArtifactRef, 'fromRow'>): ArtifactRef
-  static fromRow(row: unknown): Result<ArtifactRef, StoreError>
 }
 
 /** A result file the CI entry produced; the Host copies it into ArtifactStore. */

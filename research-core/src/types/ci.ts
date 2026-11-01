@@ -27,8 +27,6 @@ export declare class PassedCICompletion {
   readonly environmentDigest: string
   readonly durationMs: PassedCIRecord['durationMs']
   readonly finishedAt: IsoTimestamp
-  static create(record: PassedCIRecord): Result<PassedCICompletion, DomainError>
-  static fromRow(row: unknown): Result<PassedCICompletion, StoreError>
 }
 
 /** Proof that a specific Experiment/commit failed CI for a stated reason. */
@@ -42,6 +40,4 @@ export declare class FailedCICompletion {
   readonly reason: CIFailureReason
   readonly detail: string
   readonly finishedAt: IsoTimestamp
-  static create(record: FailedCIRecord): Result<FailedCICompletion, DomainError>
-  static fromRow(row: unknown): Result<FailedCICompletion, StoreError>
 }

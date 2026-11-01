@@ -20,14 +20,12 @@ export declare class OperatorPrincipal {
   private readonly __operator: true
   readonly kind: 'operator'
   readonly sessionId: OperatorSessionId
-  static fromRow(row: unknown): Result<OperatorPrincipal, StoreError>
 }
 export declare class ResearcherPrincipal {
   private constructor()
   private readonly __researcher: true
   readonly kind: 'researcher'
   readonly sessionId: ResearcherSessionId
-  static fromRow(row: unknown): Result<ResearcherPrincipal, StoreError>
 }
 export declare class ImplementerPrincipal {
   private constructor()
@@ -36,29 +34,24 @@ export declare class ImplementerPrincipal {
   readonly sessionId: ImplementerSessionId
   /** Bound by the Host when the Ticket starts; the model cannot choose it. */
   readonly ticketId: TicketId
-  static fromRow(row: unknown): Result<ImplementerPrincipal, StoreError>
 }
 export declare class WatchdogPrincipal {
   private constructor()
   private readonly __watchdog: true
   readonly kind: 'watchdog'
   readonly sessionId: WatchdogSessionId
-  static fromRow(row: unknown): Result<WatchdogPrincipal, StoreError>
 }
 export declare class HostPrincipal {
   private constructor()
   private readonly __host: true
   readonly kind: 'host'
   /** The one root authority the adapter creates at startup; see the trust-boundary note. */
-  static create(): HostPrincipal
-  static fromRow(row: unknown): Result<HostPrincipal, StoreError>
 }
 export declare class RouterPrincipal {
   private constructor()
   private readonly __router: true
   readonly kind: 'router'
   readonly sessionId: RouterSessionId
-  static fromRow(row: unknown): Result<RouterPrincipal, StoreError>
 }
 
 export type Principal =
@@ -80,8 +73,6 @@ export declare class IssueAssignment {
   private readonly __assignment: true
   readonly issueId: IssueId
   readonly assignee: ResearcherPrincipal
-  static create(issueId: IssueId, assignee: ResearcherPrincipal): IssueAssignment
-  static fromRow(row: unknown): Result<IssueAssignment, StoreError>
 }
 
 /**
@@ -94,8 +85,6 @@ export declare class TicketBinding {
   readonly ticketId: TicketId
   readonly experimentId: ExperimentId
   readonly sessionId: ImplementerSessionId
-  static create(ticketId: TicketId, experimentId: ExperimentId, sessionId: ImplementerSessionId): TicketBinding
-  static fromRow(row: unknown): Result<TicketBinding, StoreError>
 }
 
 export type Capability =

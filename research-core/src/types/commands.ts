@@ -261,11 +261,6 @@ export type CommandOutcome<K extends CommandType> =
       readonly audit: NonEmptyArray<AuditEntry>
     }
 
-/** Backwards-compatible alias for a successful outcome. */
-export type Decision<T> = {
-  readonly value: T
-  readonly audit: NonEmptyArray<AuditEntry>
-}
 
 /** Re-exported capability union for tool registration checks. */
 export type { Capability }

@@ -26,19 +26,23 @@ constructors, private brand fields, fields owned by their variant. Variants cann
 assigned to each other, and the spread lookalike that supplies every field of another
 state is rejected by the private brand (compile-time test).
 
-A class cannot prevent `JSON.parse`, `any` or `as`. v3 therefore declares a real trust
-boundary instead of pretending there is none:
+A class cannot prevent `JSON.parse`, `any` or `as`. The blueprint therefore declares a
+single construction/hydration boundary instead of pretending there is none:
 
-- every state class declares `static create(...)` for Host-internal construction and
-  `static fromRow(row: unknown): Result<State, StoreError>` for hydration;
-- `fromRow` is the single place allowed to validate and (internally) cast a storage row;
-- repositories and services only accept constructed classes, never raw rows;
+- `src/factories.ts` is the only module allowed to construct domain states (private
+  constructors) and to trust Host-supplied input;
+- `src/hydration.ts` is the only module allowed to parse storage rows or JSON into domain
+  states; every function returns a `Result` and validates at runtime;
+- ESLint and ast-grep reject factory calls, type assertions, `any`, `JSON.parse`, global
+  clocks and dynamic imports outside those two modules (and the type tests), so the
+  boundary does not depend on discipline;
+- repositories and services accept constructed classes only, never raw rows;
 - `DomainFailureMapper.toFailure` is the single place mapping a refusal code to its HTTP
-  status;
-- `Schema.fromRow` / `Schema.create` are the boundary for tool schemas.
+  status.
 
-The negative tests prove the boundary is load-bearing where the compiler can see it; they
-do not and cannot prove that a cast never happens inside `fromRow`.
+The negative tests and lint rules prove the boundary is load-bearing where the tools can
+see it; they cannot prove that a rogue module did not fabricate an authority or a state
+with `as` inside the boundary. This is a checked convention, and the document says so.
 
 ## State machines
 
@@ -106,7 +110,7 @@ a runtime rule.
 
 ## Tools and API
 
-- `Schema<T>` is nominal with `parse`, `toJsonSchema`, `create` and `fromRow`.
+- `Schema<T>` is a plain interface with `parse` and `toJsonSchema`; the adapter supplies both.
 - Command tools carry the command literal; Implementer submit input omits `binding`;
   output is `ReadyExperiment`.
 - Routes are actor-typed; responses are `ApiResponse<T>` = value or `DomainFailure` whose
@@ -146,10 +150,10 @@ second static layer, wired into `verify.sh` and CI:
 - The checks are part of `npm run lint`, `scripts/verify.sh` and the CI job, so a new
   bypass fails the build even when `tsc` accepts it.
 
-The runtime trust anchor remains a single `HostAuthority` value created by the adapter at
-startup; every state factory receives it. Static analysis can prove that only boundary
-modules call factories, but it cannot prove that the process has no rogue module that
-fabricated an authority with `as`; this limit is stated rather than hidden.
+There is no separate authority token: the boundary is the pair of modules above. Static
+analysis can prove that no other module calls a factory or parses rows, but it cannot
+prove that a rogue module fabricated state with `as` inside the boundary; this limit is
+stated rather than hidden.
 
 ## Compile-time guarantees and tests
 
@@ -160,8 +164,9 @@ and status correlation, nomial id mixing, ownership-token substitution, Host-onl
 cancellation, completed-Program transitions, empty audit rejection, tool input narrowing,
 and lineage separation.
 
-Third-review fixes already applied: `HostPrincipal.create/fromRow`; corrected
-`ReadyExperiment.create` omission; `ciRunId` on completion tokens; CI failure duration;
+Third-review fixes already applied: the factory/hydration boundary moved out of the state
+classes after the lint layer made per-class factories redundant; `ciRunId` on completion
+tokens; CI failure duration;
 command audit entries parameterized by the action map and moved into `commands.ts`; audit
 on API responses; `RouteSpec`; public `Schema` constructor taking a validator; a
 `program.budget-paused` action; and negative tests for success/refusal audit
@@ -199,6 +204,6 @@ stored best/aggregates, event replay or panel controls in v1.
 
 ## Review request
 
-Please review the trust boundary (`static create` / `fromRow` in the state classes), the
+Please review the factory/hydration boundary (`src/factories.ts`, `src/hydration.ts`), the
 ownership tokens (`IssueAssignment`, `TicketBinding`), and the cancellation/CI-record
 surface first. Implementation starts after approval.

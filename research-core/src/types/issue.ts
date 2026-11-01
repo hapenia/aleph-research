@@ -41,8 +41,6 @@ export declare class OpenIssue implements IssueCommon {
   readonly labels: readonly IssueLabel[]
   readonly author: IssueAuthor
   readonly createdAt: IsoTimestamp
-  static create(input: Omit<OpenIssue, 'status' | 'claim' | 'close'>): OpenIssue
-  static fromRow(row: unknown): Result<OpenIssue, StoreError>
   claim(actor: ResearcherPrincipal, at: IsoTimestamp): AssignedIssue
   close(actor: OperatorPrincipal, resolution: IssueResolution, summary: NonEmptyString, at: IsoTimestamp): ClosedIssue
 }
@@ -62,8 +60,6 @@ export declare class AssignedIssue implements IssueCommon {
   readonly assignedAt: IsoTimestamp
   /** Every Experiment proposed for this Issue; iteration does not add a new entry. */
   readonly experimentIds: readonly ExperimentId[]
-  static create(input: Omit<AssignedIssue, 'status' | 'authorize' | 'addExperiment' | 'close'>): AssignedIssue
-  static fromRow(row: unknown): Result<AssignedIssue, StoreError>
   /** Runtime check: only the assignee gets a token. */
   authorize(actor: ResearcherPrincipal): Result<IssueAssignment, DomainError>
   addExperiment(assignment: IssueAssignment, experimentId: ExperimentId, at: IsoTimestamp): AssignedIssue
@@ -85,8 +81,6 @@ export declare class ClosedIssue implements IssueCommon {
   readonly closedAt: IsoTimestamp
   readonly resolution: IssueResolution
   readonly summary: NonEmptyString
-  static create(input: Omit<ClosedIssue, 'status'>): ClosedIssue
-  static fromRow(row: unknown): Result<ClosedIssue, StoreError>
 }
 
 export type Issue = OpenIssue | AssignedIssue | ClosedIssue

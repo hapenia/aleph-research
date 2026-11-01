@@ -8,12 +8,12 @@ import type { CIRecord, MetricQuery, MetricQueryResult } from './metrics.js'
 import type { Experiment, ExperimentReview, OpenExperiment, ReadyExperiment } from './experiment.js'
 import type { Issue } from './issue.js'
 import type { Program } from './program.js'
+import type { ProgramSnapshot } from './api.js'
 import type { ArtifactRef } from './artifacts.js'
 import type { Attention } from './attention.js'
 import type { CommandOf, CommandType } from './commands.js'
 import type { DomainError, Result } from './errors.js'
 import type { ExperimentId, IssueId, ProgramId } from './ids.js'
-import type { StoreError } from './errors.js'
 
 /** A boundary schema: it parses untrusted input and emits JSON Schema for DSH tools. */
 export declare class Schema<T> {
@@ -22,7 +22,6 @@ export declare class Schema<T> {
   constructor(parse: (input: unknown) => Result<T, DomainError>, toJsonSchema: () => unknown)
   parse(input: unknown): Result<T, DomainError>
   toJsonSchema(): unknown
-  static fromRow<T>(row: unknown): Result<Schema<T>, StoreError>
 }
 
 export interface ToolDefinition<Input, Output> {
@@ -37,18 +36,10 @@ export interface CommandTool<K extends CommandType, Output, Input = CommandOf<K>
   readonly command: K
 }
 
-export interface ProgramSnapshotView {
-  readonly program: Program
-  readonly issues: readonly Issue[]
-  readonly experiments: readonly Experiment[]
-  readonly ciRecords: readonly CIRecord[]
-  readonly artifacts: readonly ArtifactRef[]
-  readonly attention: readonly Attention[]
-}
 
 /** Researcher tools; the adapter injects the ResearcherPrincipal, never the model. */
 export interface ResearcherTools {
-  readonly readProgram: ToolDefinition<{ readonly programId: ProgramId }, ProgramSnapshotView>
+  readonly readProgram: ToolDefinition<{ readonly programId: ProgramId }, ProgramSnapshot>
   readonly readMetrics: ToolDefinition<MetricQuery, MetricQueryResult>
   readonly createIssue: CommandTool<'issue.create', Issue>
   readonly claimIssue: CommandTool<'issue.claim', Issue>

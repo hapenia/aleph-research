@@ -63,8 +63,6 @@ export declare class RunningProgram implements ProgramCommon {
   readonly budget: Budget
   readonly usage: BudgetUsage
   readonly createdAt: IsoTimestamp
-  static create(input: Omit<RunningProgram, 'status' | 'pause' | 'pauseForBudget' | 'stop' | 'complete' | 'setGoal' | 'setMethodology' | 'setExploration' | 'recordUsage'>): RunningProgram
-  static fromRow(row: unknown): Result<RunningProgram, StoreError>
   pause(actor: OperatorPrincipal, at: IsoTimestamp): PausedProgram
   /** The Host pauses without an operator when a budget counter is exhausted. */
   pauseForBudget(actor: HostPrincipal, at: IsoTimestamp): PausedProgram
@@ -92,8 +90,6 @@ export declare class PausedProgram implements ProgramCommon {
   readonly usage: BudgetUsage
   readonly createdAt: IsoTimestamp
   readonly pausedAt: IsoTimestamp
-  static create(input: Omit<PausedProgram, 'status' | 'resume' | 'stop' | 'complete' | 'setGoal' | 'setMethodology' | 'setExploration' | 'recordUsage'>): PausedProgram
-  static fromRow(row: unknown): Result<PausedProgram, StoreError>
   resume(actor: OperatorPrincipal, at: IsoTimestamp): RunningProgram
   stop(actor: OperatorPrincipal, reason: NonEmptyString, at: IsoTimestamp): StoppedProgram
   complete(actor: HostPrincipal, reason: NonEmptyString, at: IsoTimestamp): CompletedProgram
@@ -119,8 +115,6 @@ export declare class StoppedProgram implements ProgramCommon {
   readonly createdAt: IsoTimestamp
   readonly stoppedAt: IsoTimestamp
   readonly stopReason: NonEmptyString
-  static create(input: Omit<StoppedProgram, 'status'>): StoppedProgram
-  static fromRow(row: unknown): Result<StoppedProgram, StoreError>
 }
 
 export declare class CompletedProgram implements ProgramCommon {
@@ -139,8 +133,6 @@ export declare class CompletedProgram implements ProgramCommon {
   readonly createdAt: IsoTimestamp
   readonly completedAt: IsoTimestamp
   readonly completionReason: NonEmptyString
-  static create(input: Omit<CompletedProgram, 'status'>): CompletedProgram
-  static fromRow(row: unknown): Result<CompletedProgram, StoreError>
 }
 
 export type Program = RunningProgram | PausedProgram | StoppedProgram | CompletedProgram
