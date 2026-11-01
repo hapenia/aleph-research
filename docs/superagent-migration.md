@@ -131,8 +131,24 @@ Three standalone modules landed so the remaining wiring is small:
 - `superagent-extension/research-channel.js`: the local research Channel, an
   append-only JSONL log with idempotent sends and a link back to the research panel.
 
-Not yet done in Phase 1: wiring these into the Source kind and the Worker toolset, and
-retirement of the old plugin's roles.
+### Phase 2/3 building blocks from the agent team
+
+Three modules were written by teammates in isolated worktrees and reviewed before merge:
+
+- `superagent-extension/budget.js`: tier classification (`explore`, `analysis`,
+  `training`, `design`) and budget-tiered acceptance, so cheap work auto-accepts while
+  training or design work becomes an issue for a person.
+- `superagent-extension/watchdog.js`: stall detection over open Tickets
+  (45-minute default), counts, and a Markdown brief for a Watchdog Session that
+  suggests stop, retry-or-check, or blocked-on-person.
+- `superagent-extension/results.js`: append-only, idempotent evaluation log with
+  best-result selection, trajectory, summary and a brief for the main Session.
+
+All three are pure Node ESM with no dependencies; 98 extension tests pass in total.
+
+Not yet done in Phase 1: wiring the channel and result log into the Source kind and the
+Worker toolset, the Watchdog Session itself, the panel, and retirement of the old
+plugin's roles.
 
 ## Next phases
 
