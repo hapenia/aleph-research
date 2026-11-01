@@ -478,17 +478,31 @@ window.__ModuleLoader__.load({
       );
     }
 
-    /** A status pill for the orchestrator health board. */
-    function healthBadge(t, health) {
+    /**
+     * The runtime's own health wins over an off optional Source: the disabled GitHub
+     * Source reports `paused`, but the orchestrator is still ready. Mirrors the tested
+     * `panel-state.js` helper; the client bundle uses a plain function.
+     */
+    function healthState(health) {
       const entries = health && typeof health === 'object' && !Array.isArray(health)
         ? Object.values(health).filter((entry) => entry && typeof entry === 'object')
         : [];
-      if (entries.length === 0) return h('span', { style: styles.metricValue }, t('value.none'));
+      if (entries.length === 0) return { state: 'none', errors: 0 };
       const errors = entries.filter((entry) => entry.state === 'error').length;
-      let state = 'ready';
+      const runtime = health.runtime && typeof health.runtime === 'object' ? health.runtime.state : undefined;
+      let state = typeof runtime === 'string' ? runtime : 'ready';
       if (errors > 0) state = 'error';
-      else if (entries.some((entry) => entry.state === 'paused')) state = 'paused';
-      else if (entries.some((entry) => entry.state === 'starting')) state = 'starting';
+      else if (typeof runtime !== 'string') {
+        if (entries.some((entry) => entry.state === 'starting')) state = 'starting';
+        else if (entries.some((entry) => entry.state === 'paused')) state = 'paused';
+      }
+      return { state, errors };
+    }
+
+    /** A status pill for the orchestrator health board. */
+    function healthBadge(t, health) {
+      const { state, errors } = healthState(health);
+      if (state === 'none') return h('span', { style: styles.metricValue }, t('value.none'));
       const text = t('status.' + state) + (errors > 0 ? ' · ' + String(errors) : '');
       return h(
         'span',
