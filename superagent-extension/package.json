@@ -12,14 +12,16 @@
     ".": "./index.js",
     "./client": "./client.js",
     "./package.json": "./package.json",
-    "./request-tool": "./request-tool.js"
+    "./request-tool": "./request-tool.js",
+    "./research-host": "./research-host.js"
   },
   "files": [
     "index.js",
     "client.js",
     "cordis.patch.yml",
     "research-extension.js",
-    "request-tool.js"
+    "request-tool.js",
+    "research-host.js"
   ],
   "dsh": {
     "bundle": {
