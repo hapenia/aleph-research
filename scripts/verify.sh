@@ -31,6 +31,8 @@ if [ -f research-core/package.json ]; then
   (cd research-core && npm run -s lint)
   echo "== mutation: research core guarantees"
   (cd research-core && npm run -s test:mutation)
+  echo "== build: research core package"
+  (cd research-core && npm run -s build && npm run -s test:dist && bash scripts/build-check.sh)
 fi
 
 if [ -f research-core/package.json ]; then

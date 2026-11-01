@@ -51,6 +51,9 @@ jobs:
           npm run test:mutation
           npm test
           bash scripts/lint-fixtures.sh
+          npm run build
+          npm run test:dist
+          bash scripts/build-check.sh
 
       - name: Lint the research extension adapter
         working-directory: superagent-extension
