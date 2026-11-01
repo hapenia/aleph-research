@@ -173,6 +173,132 @@ The panel is read-only: `GET /aleph/api/programs` and
 Experiments, reviews, CI runs, artifacts, audit). Operator routes create programs and
 issues; Researcher capabilities are Session tools.
 
+## Integration with DSH and dsh-superagent
+
+The rewrite does not replace DeepSeek Harness or the Super-agent prototype. It becomes
+another Cordis plugin in the same composition: the prototype keeps the domain it owns
+(Source, Trigger, Eval, Mandate, Policy, Ticket, Assignment, Executor, Router, Outbox),
+and the new TypeScript core is the research application on top of it.
+
+```text
+DSH host process
+  dsh-base, dsh-web-app                 (harness services)
+  dsh-superagent                         (vendored prototype bundle)
+      ctx.orchestrator  ───────────────────────────┐
+      Sources / Eval / Tickets / Executor / Router │  service seam
+  @local/dsh-aleph-superagent (rewritten)           │
+      bootstrap (hot reload)                        │
+      adapter (TS) ── imports ── research-core (TS domain)
+      client.js (TS panel)
+```
+
+### Packages and build
+
+- `research-core/` stays a pure TypeScript library: domain types, command handlers,
+  repositories and ports. It has no DSH dependency and is unit-tested alone.
+- `superagent-extension/` becomes the adapter and is rewritten in TypeScript. It keeps
+  the **same package name** (`@local/dsh-aleph-superagent`) and the same bundle patch
+  shape, so profiles and lab scripts do not change. Its entry keeps the existing
+  bootstrap (cache-busting re-import plus disposers) for hot reload.
+- `index.ts` in the adapter exports the thin Cordis plugin: it opens storage, registers
+  management routes and tools, ensures Researcher Sessions, then wires the prototype.
+- `vendor/dsh-superagent` stays pinned and patched as today; the worker tool allowlist
+  patch still admits the submit tool.
+- CI builds both packages with `tsc` (plus the client bundle step) before tests.
+
+### Service mapping
+
+| DSH / prototype service | Adapter use | Blueprint port |
+| --- | --- | --- |
+| `ctx.webServer` | mount `/aleph/api/programs*`, operator routes, panel | `ManagementRoutes` |
+| `ctx.tools` | register Operator/Researcher/Implementer tools, guarded by preset | `tools.ts` contracts |
+| `ctx.sessions`, `sessionController`, `agents` | ensure/wake Researcher Sessions, attach tool scopes | `SessionPool` |
+| `ctx.agentPresets` | select the `aleph-researcher` preset for Researcher Sessions | `session.ts` |
+| `ctx.orchestrator` | register the `aleph` Source; `context(alephKind).receive(trigger)`; read tickets | `TriggerFactory` to `SourceContext.receive` |
+| prototype settings | executor `prepare`, blocked commands, executor model | ticket lifecycle (unchanged) |
+| DSH storage domain or SQLite | Programs, Issues, Experiments, CI runs, artifacts metadata, audit | `storage.ts` repositories |
+| `ctx.subprocess` / shell | uv environment build and CI entry execution | `EnvironmentBuilder`, `CIRunner` |
+| `ctx.effects` / notify | attention to the Main Session | `AttentionSink` |
+| filesystem + git | artifact bytes and repository snapshots | `ArtifactStore`, `RepositoryService` |
+| `ctx.fiber` | restart on panel reload | bootstrap |
+
+Storage is a DSH storage domain (registering `aleph_research`) so it lives with the rest
+of the harness state and is backed up the same way; artifact bytes stay on the
+filesystem. The exact domain tables are an adapter-phase decision, hidden behind the
+repository interfaces.
+
+### End-to-end flow across the seam
+
+1. Operator creates a Program and an Issue through `/aleph/api`; the adapter writes the
+   records and the audit log.
+2. A Researcher Session calls `claim_issue` and `propose_experiment` (its tools are
+   registered by the adapter, guarded by the `aleph-researcher` preset). The adapter
+   assigns the exploration strategy and base from the Program's level and quota.
+3. The adapter builds a Trigger draft (`experiment-proposed`) and calls
+   `ctx.orchestrator.context(alephKind).receive(trigger)`; the Trigger lands on the
+   Program Thread.
+4. The prototype's Eval authorizes the Trigger against the Policy (per-ticket
+   authorization); the prototype Router hands the accepted candidate to the Executor,
+   which starts a Worker Session for the Experiment Ticket.
+5. The prototype `prepare` command creates the ticket workspace from the Experiment's
+   branch, copies artifact inputs, writes `AGENTS.md` with the plan, methodology and
+   environment declaration.
+6. The Worker implements and calls `aleph_submit_result`. In the rewrite this tool no
+   longer scores inline: it calls `CIRunner`, which builds the uv environment from the
+   declaration, runs the Program's `ciEntry` inside it, parses the score and collects
+   artifacts. The adapter stores the `CIRun`, artifacts and audit entries.
+7. The adapter emits a `ci-completed` Trigger into the same Source; the assigned
+   Researcher Session is woken with the CI result and reads the Program snapshot through
+   its tools.
+8. The Researcher closes the Issue or proposes the next Experiment; the Main Session only
+   sees attention Triggers, never research decisions.
+
+### Researcher Sessions and presets
+
+- The profile patch gains one preset, `aleph-researcher`, with the research tools, a
+  persona that forbids implementation, and read-only file access at most. The prototype's
+  router and worker presets are untouched.
+- The adapter ensures a small pool of Researcher Sessions with stable Session ids, maps
+  Issues to their assignee Session, and wakes only the assignee (or an idle Session for an
+  unassigned Issue) using the same `agent.followup` mechanism the current watchdog uses.
+- Implementer work continues to use the prototype's Worker preset and Executor; the
+  Experiment Ticket's assignment text is generated by the adapter from the plan.
+
+### Prototype evaluation versus the new CI
+
+The prototype's Eval authorizes work; it does not score results. Scoring moves to the
+adapter's `CIRunner` (uv environment + `ciEntry`), and the result enters the domain as an
+audit fact plus a Trigger. The old extension's inline evaluation module is replaced by the
+`CIRunner` implementation; the prototype's `aleph_submit_result` tool name and worker
+allowlist stay, so worker prompts and the sandbox composition do not change.
+
+### Panel and hot reload
+
+The client entry is rewritten in TypeScript and keeps the same slot keys. It reads
+`/aleph/api/programs*` only; it never calls prototype routes directly. The Host-side
+bootstrap keeps the cache-busting import and the disposer discipline, so a reload replaces
+the adapter and core modules while storage connections are reopened; Researcher Sessions
+keep running and their tool calls resolve against the new registration.
+
+### What stays untouched
+
+- Vendored prototype, its domain, Executor, worker preset, sandbox and permission setup.
+- Profile composition and lab scripts, apart from the new Researcher preset and the
+  tool-allowlist environment variables.
+- The case fixture and the runtime layout; the preparation script gains an Experiment-plan
+  section but keeps its existing contract.
+
+### Integration risks
+
+- A hot reload with live Researcher Sessions can race tool re-registration; the adapter
+  must re-register before waking any Session and the reload route must drain in-flight
+  commands.
+- Two writers must never exist: if the old JS extension is mounted at the same time as
+  the adapter during migration, state and tools collide. The migration keeps only one
+  entry mounted per profile.
+- Storage domain migrations must be additive; artifacts on disk need a digest index so a
+  moved state file does not orphan model weights.
+
 ## Phases
 
 1. **Domain**: branded parsers, transition tables, command handlers, repositories in
