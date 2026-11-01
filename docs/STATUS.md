@@ -317,3 +317,18 @@ timing. It now lives where it belongs:
 A live run confirmed the split: the researcher's system message begins with the
 persona contract, the Host message names the worktree, branch, mission repo, data
 directory and conventions, and the Leader's opening assignment appears verbatim.
+
+## Repository management
+
+Development now follows [git-workflow.md](git-workflow.md): short-lived branches,
+conventional commits, squash merges through pull requests, and a protected `main`
+that no one can push to directly.
+
+- CI runs `node --check` on the plugin sources and the plugin test suite on every
+  pull request and on `main`. The job name, `plugin syntax and tests`, is the
+  required status check.
+- `scripts/verify.sh` is the local gate and a superset of CI;
+  `scripts/install-hooks.sh` wires it into `pre-push` and adds staged syntax checks
+  to `pre-commit`.
+- This change itself arrived as pull request #33, passed CI in nineteen seconds and
+  was squash-merged, which is the pattern for everything that follows.
