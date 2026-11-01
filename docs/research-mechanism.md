@@ -38,8 +38,9 @@ There is no "best" and no fixed exploit/explore quota. The Host chooses the base
 Experiment by sampling from the previous Experiments with a Boltzmann distribution:
 
 - each candidate Experiment gets a weight `exp(utility / temperature)`;
-- the Operator's exploration degree sets the temperature: a low temperature concentrates
-  on high-utility results, a high temperature makes the choice nearly uniform;
+- the Operator's exploration degree sets a fixed temperature: a low temperature
+  concentrates on high-utility results, a high temperature makes the choice nearly
+  uniform;
 - a separate fresh-start probability chooses "start from zero": branch from the scaffold
   and attempt a direction not present in the current population (including methods no
   human has tried in this project);
@@ -86,12 +87,24 @@ it when the budget is exhausted.
 
 ## Boltzmann exploration
 
-- Operator sets the exploration level (`low | normal | high`), which maps to a sampling
-  temperature and a fresh-start probability; the Operator may override the exact numbers.
-- Candidate weights use a utility configured per Program over the reported metrics
-  (weights and directions per metric), normalized across the current population.
-- Fresh start (branch from the scaffold) is always available with a probability that grows
-  with the exploration level; with no history it is the only choice.
+Fixed levels, no per-Program override:
+
+| level | temperature | fresh-start probability |
+| --- | ---: | ---: |
+| `low` | 0.2 | 2% |
+| `normal` | 1.0 | 10% |
+| `high` | 3.0 | 25% |
+
+- Candidate weights use a utility configured per Program: the Operator lists metrics with
+  a direction (`higher` or `lower`) and a weight. The Host min-max normalizes each metric
+  across the current population, sums the weighted normalized values and uses that scalar
+  as `utility`.
+- The evaluation contract lists the required metrics; a CI run without all of them is
+  invalid for sampling (it may still be stored).
+- The candidate population is every Experiment in the Program that has at least one valid
+  CI run; no time window and no per-Issue restriction.
+- Fresh start (branch from the scaffold) is chosen with the table's probability; with an
+  empty population it is the only choice.
 - Iterating on the same Experiment does not sample a new base and does not change the
   population; only a new Experiment adds a candidate.
 - There is no quota counter.
@@ -108,10 +121,10 @@ it when the budget is exhausted.
 
 ## Results table
 
-The Host owns a metrics registry: one row per CI run with `metrics`, plus a per-Experiment
-view of the latest run. The panel and the Researcher tools query it (filter by Issue,
-strategy, time; sort by any metric). The sampler computes weights from the utility the
-Operator configures over those metrics. Artifacts stay attached to their CI run and
+The Host stores **raw CI records only**: one row per CI run with its commit, timestamp,
+metrics and artifacts. There is no stored latest-per-Experiment view and no stored best:
+the panel, Researcher tools and the sampler derive their views (latest, average, sorted,
+filtered) at query time from the raw records. Artifacts stay attached to their CI run and
 Experiment; a later Experiment may consume them through typed inputs.
 
 ## Budget and cancellation
@@ -146,25 +159,21 @@ Experiment; a later Experiment may consume them through typed inputs.
 
 ## Resolved in this round
 
-- No "best" and no quota: quality is a multi-metric results table; exploration is a
-  Boltzmann-weighted base choice with a fresh-start probability.
-- Experiment record is created when the Researcher proposes it, and the Host assigns the
-  sampled base at that moment.
+- No "best" and no quota: quality is a raw multi-metric results table; exploration is a
+  Boltzmann-weighted base choice with a fixed fresh-start probability per level.
+- Utility is a weighted sum of min-max normalized metrics; the Operator configures weights
+  and directions per Program; the evaluation contract lists required metrics.
+- Exploration levels are the fixed table above; no override.
+- The candidate population is every Experiment with at least one valid CI run in the
+  Program.
+- Storage keeps raw CI records only; views and aggregates are queries.
+- Experiment record is created when the Researcher proposes it, and the Host samples the
+  base at that moment.
 - The same Experiment may receive new commits and repeated CI (iteration).
 - CI is requested explicitly by the Researcher.
 - The first Experiment (empty population) is a fresh start from the scaffold.
 
-## Open questions for this round
-
-1. **Utility over multiple metrics.** How is the Boltzmann weight computed when a CI run
-   reports several metrics? Options: Operator configures weights and a direction per
-   metric and the utility is a normalized weighted sum (proposed); a single Program score
-   field is required and used (contradicts multi-metric); the Researcher supplies a utility
-   per sampling; Pareto rank instead of a scalar.
-2. **Exploration level mapping.** Fixed presets for `low | normal | high` (temperatures and
-   fresh-start probabilities) with an Operator override, or only presets, or fully manual
-   numbers?
-3. **Candidate population.** All Experiments with at least one valid CI run in this
-   Program, or a time window, or per Issue?
-4. **Results table storage.** Store every CI run's metrics plus a latest-per-Experiment
-   view and query it by metric (proposed), or store only aggregated values?
+No open questions remain in the mechanism. The next step is rewriting the TypeScript
+blueprint (nominal classes with factories, typed command executor, per-role tool schemas,
+nominal storage ids with versions, Program state machine, review flow, metrics/artifacts
+ports) against this mechanism and the adversarial review's findings.
