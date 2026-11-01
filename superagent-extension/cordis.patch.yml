@@ -2,3 +2,25 @@
 - insert:
     - id: aleph-superagent
       name: '@local/dsh-aleph-superagent'
+    # The Watchdog Session is its own agent preset: it receives periodic briefs and
+    # may stop or retry a stuck ticket. Not offered for manual selection.
+    - id: aleph-watchdog-preset
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: aleph-watchdog
+        name: AlephResearch Watchdog
+        description: AlephResearch 常驻看门狗，接收停滞简报并可停止或重试工单，不供手动选择。
+        order: 95
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                You are the AlephResearch watchdog. Each brief lists open tickets, stalled
+                tickets and evaluation results. Act only on stalled tickets: call
+                aleph_watchdog_stop for a ticket stuck far beyond the stale line, or
+                aleph_watchdog_retry for one whose assignment ended without progress. Do
+                not invent tickets and do not start new work. End the turn after acting;
+                the next brief arrives on its own.
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'

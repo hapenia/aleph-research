@@ -8,6 +8,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { execFile } from 'node:child_process'
+import { mkdir } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import { z } from 'zod'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -15,12 +16,14 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { evaluateSubmission } from './evaluation.js'
 import { createResearchChannel } from './research-channel.js'
 import { ConfigStore } from './config-store.js'
+import { findStalledTickets, summarizeTickets, watchdogBrief } from './watchdog.js'
+import { retryTicket, stopTicket } from './watchdog-actions.js'
 import { applySourceSettings } from './hot-config.js'
 import { bestResult, readResults, recordResult, resultsBrief } from './results.js'
 import { findTicketForDirectory, resultTrigger } from './submit-result.js'
 
 export const name = 'dsh-aleph-superagent'
-export const inject = ['orchestrator', 'tools']
+export const inject = ['orchestrator', 'tools', 'sessionController', 'workspaceRegistry']
 
 /** Where evaluation records live; the lab points this at the run state directory. */
 const resultsDir = () => process.env.ALEPH_RESULTS_DIR ?? `${process.cwd()}/.aleph-results`
@@ -364,6 +367,148 @@ export function apply(ctx) {
       }
     },
   }))
+
+  const isWatchdog = (agent) => agent?.session?.header?.agentPreset === 'aleph-watchdog'
+  const openTickets = () => sourceContext().tickets.open()
+
+  /** Everything a watchdog turn needs: what is open, what is stuck, and the scores. */
+  const watchdogState = async () => {
+    const tickets = openTickets()
+    const stalled = findStalledTickets(tickets)
+    const summary = summarizeTickets(tickets)
+    const records = await readResults(resultsDir())
+    const project = String(sourceContext().config('aleph')?.project ?? 'default')
+    return {
+      openTickets: tickets.length,
+      stalled,
+      summary,
+      brief: watchdogBrief({ stalled, summary }),
+      scores: resultsBrief(records, { project }),
+    }
+  }
+
+  ctx.tools.register(defineTool({
+    name: 'aleph_watchdog_brief',
+    description: 'Read the current open tickets, stalled tickets and evaluation scores. Only the Watchdog session may call it.',
+    parameters: {},
+    output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }] },
+    execute: async (_args, exec) => {
+      if (!isWatchdog(exec?.agent)) return { ok: false, error: 'aleph_watchdog_brief is only available to the Watchdog session' }
+      return { ok: true, ...(await watchdogState()) }
+    },
+  }))
+
+  const ticketTool = (name, description, action) => defineTool({
+    name,
+    description,
+    parameters: {
+      ticketId: { type: 'string', description: 'The Ticket id from the brief.', required: true },
+      reason: { type: 'string', description: 'One line on why this action is needed.' },
+    },
+    output: { schema: { type: 'json' }, render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }] },
+    execute: async (args, exec) => {
+      if (!isWatchdog(exec?.agent)) return { ok: false, error: `${name} is only available to the Watchdog session` }
+      const base = managementBase()
+      if (!base) return { ok: false, error: 'no management API is configured (ALEPH_MANAGEMENT_API)' }
+      try {
+        const answer = action(base, args?.ticketId)
+        return { ok: true, ticketId: args?.ticketId, reason: args?.reason ?? null, answer: await answer }
+      } catch (error) {
+        return { ok: false, error: String(error?.message ?? error) }
+      }
+    },
+  })
+  ctx.tools.register(ticketTool('aleph_watchdog_stop', 'Stop a stalled ticket. Only the Watchdog session may call it.', stopTicket))
+  ctx.tools.register(ticketTool('aleph_watchdog_retry', 'Retry a stalled ticket. Only the Watchdog session may call it.', retryTicket))
+
+  const watchdogStatus = { enabled: false, intervalMs: 0, sessionId: null, lastTickAt: null, lastError: null, lastBriefAt: null }
+  {
+    ctx.inject(['webServer'], (child) => {
+      child.webServer.register({
+        kind: 'exact',
+        path: '/aleph/api/watchdog/status',
+        async handler(req, res) {
+          if (req.method !== 'GET') return sendJson(res, 405, { ok: false })
+          return sendJson(res, 200, { ok: true, ...watchdogStatus })
+        },
+      })
+    })
+  }
+
+  // The resident Watchdog: one DSH session that receives a brief on an interval and
+  // acts through the tools above. Disabled unless ALEPH_WATCHDOG_INTERVAL_MS is set,
+  // so a composition without a watchdog deployment never grows an extra session.
+  const watchdogInterval = Number(process.env.ALEPH_WATCHDOG_INTERVAL_MS ?? 0)
+  if (Number.isFinite(watchdogInterval) && watchdogInterval >= 1000) {
+    const watchdogDir = process.env.ALEPH_WATCHDOG_DIR ?? `${process.cwd()}/.aleph-watchdog`
+    const watchdogSessionId = `aleph-watchdog-${Buffer.from(watchdogDir).toString('hex').slice(0, 16)}`
+    Object.assign(watchdogStatus, { enabled: true, intervalMs: watchdogInterval, sessionId: watchdogSessionId })
+    let ticking = false
+    // A Watchdog that wakes the model for an unchanged, empty state just burns tokens:
+    // wake it when something is stalled, or when the state signature changed since the
+    // last brief.
+    let lastSignature = null
+
+    const ensureSession = async () => {
+      let resolved = await ctx.sessionController.resolveAgent(watchdogSessionId)
+      if ('error' in resolved && resolved.error?.code === 'session/not-found') {
+        // The workspace registry resolves a real path, so the directory must exist first.
+        await mkdir(watchdogDir, { recursive: true })
+        const workspace = await ctx.workspaceRegistry.create(watchdogDir)
+        await ctx.sessionController.create({ sessionId: watchdogSessionId, workspaceId: workspace.id, agentPreset: 'aleph-watchdog' })
+        resolved = await ctx.sessionController.resolveAgent(watchdogSessionId)
+      }
+      if ('error' in resolved) throw resolved.error
+      return resolved.agent
+    }
+
+    let tickCount = 0
+    const tick = async () => {
+      watchdogStatus.tickCount = (watchdogStatus.tickCount ?? 0) + 1
+      watchdogStatus.enteredAt = new Date().toISOString()
+      if (ticking) return
+      ticking = true
+      tickCount += 1
+      watchdogStatus.startedTicks = tickCount
+      try {
+        await sourceContext().ready
+        const agent = await ensureSession()
+        watchdogStatus.lastTickAt = new Date().toISOString()
+        watchdogStatus.lastError = null
+        if (agent.status === 'running' || agent.status === 'starting') return
+        const state = await watchdogState()
+        const signature = JSON.stringify([state.stalled.map((entry) => entry.ticketId), state.openTickets, state.scores.length])
+        if (signature === lastSignature && state.stalled.length === 0) {
+          watchdogStatus.lastSkippedAt = new Date().toISOString()
+          return
+        }
+        lastSignature = signature
+        watchdogStatus.lastBriefAt = new Date().toISOString()
+        agent.followup({
+          id: `watchdog-${Date.now()}`,
+          role: 'user',
+          content: [{ type: 'text', text: [`Watchdog brief (${new Date().toISOString()}).`, '', state.brief, '', state.scores].join('\n') }],
+          source: { kind: 'aleph-watchdog' },
+        })
+      } catch (error) {
+        watchdogStatus.lastError = String(error?.message ?? error)
+        ctx.logger.warn('dsh-aleph-superagent watchdog tick failed: %s', watchdogStatus.lastError)
+      } finally {
+        ticking = false
+      }
+    }
+
+    // A recursive timeout keeps one wake-up in flight at a time and avoids timers
+    // that a long model turn would pile up behind. The timer lives as long as the
+    // plugin fiber; the host process ends it.
+    const schedule = () => {
+      setTimeout(async () => {
+        await tick()
+        schedule()
+      }, watchdogInterval)
+    }
+    tick().finally(schedule)
+  }
 
   ctx.logger.info('dsh-aleph-superagent ready: aleph Source registered')
 }
