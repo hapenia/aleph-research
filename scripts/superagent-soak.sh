@@ -45,7 +45,8 @@ while [ "$SECONDS" -lt "$deadline" ]; do
   alive=1
   [ -n "$state" ] || alive=0
   [ -z "$results" ] && results='{"count":0}'
-  record="$(jq -n \
+  # One line per sample: a JSONL log is easier to tail and to summarise.
+  record="$(jq -c -n \
     --arg at "$(date -Is)" \
     --argjson elapsed "$((now - started))" \
     --argjson alive "$alive" \
