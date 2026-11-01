@@ -54,8 +54,29 @@ harness (`KEY|PASSWORD|SECRET|TOKEN` names).
   and `runtime` is ready again — the resident loop does not need a browser;
 - the panel serves the application shell and references `dsh-superagent`.
 
-Not yet done: a Ticket has not been created yet, because every Trigger needs a
-Source and the planned `aleph` Source arrives in Phase 1.
+### Phase 1: the `aleph` Source
+
+`superagent-extension` mounts on top of the prototype bundle and registers a local
+research Source through the supported seam (`ctx.orchestrator.sources.register`):
+
+- kind `aleph`, one project per Source instance, config field `project`;
+- Threads `research:<project>:ticket:<ticket>`;
+- Triggers: `request`, `result`, `timer`, `note`, with stable ids
+  `aleph:<kind>:<requestId>`; a Channel reference points at the same Thread;
+- Policy part: an operator allowlist, defaulting to `operator`, so a local request can
+  originate work while other senders cannot;
+- management routes `POST /aleph/api/trigger` and `GET /aleph/api/state`, enough to
+  inject a local research request and inspect open Tickets.
+
+Verified in lab `sa5` (port 40206): after the policy granted one enabled research
+rule and `eval.mode = auto`, a request produced a Ticket with an **explicit** Mandate
+(`sender: operator`), the assignment launched a Worker Session, and the ticket
+directory `state/work/well-data-profile-…` appeared. The Source reports `ready` and
+one `received` event.
+
+Not yet done in Phase 1: the prepare command does not create a git worktree, the
+Worker preset has no research tools yet, and the old plugin's roles are still in the
+tree.
 
 ## Next phases
 

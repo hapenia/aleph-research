@@ -1,0 +1,4 @@
+# AlephResearch extension layer for the dsh-superagent profile.
+- insert:
+    - id: aleph-superagent
+      name: '@local/dsh-aleph-superagent'

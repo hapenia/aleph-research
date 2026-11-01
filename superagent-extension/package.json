@@ -1,0 +1,26 @@
+{
+  "name": "@local/dsh-aleph-superagent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AlephResearch extension for dsh-superagent: research Source, evaluation, watchdog and panel.",
+  "type": "module",
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}

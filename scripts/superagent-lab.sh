@@ -38,6 +38,15 @@ export HOME="$run_root/dsh/home"
 dsh --profile "$profile" --from-default-profile web --help >/dev/null
 dsh plugin --profile "$profile" add "$vendor" >/dev/null
 
+# AlephResearch extension: mounts the aleph Source, evaluation and (later) the
+# research panel on top of the prototype bundle.
+extension="$repo/superagent-extension"
+if [ -d "$extension" ]; then
+  # A linked plugin keeps its own dependencies, so install them in place once.
+  (cd "$extension" && npm install --no-audit --no-fund --silent)
+  dsh plugin --profile "$profile" add "$extension" >/dev/null
+fi
+
 patch="$DSH_HOME/profiles/$profile/cordis.patch.yml"
 if grep -qx '\[\]' "$patch"; then printf '' > "$patch"; fi
 cat >> "$patch" <<YAML

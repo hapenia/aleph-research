@@ -12,3 +12,4 @@ host.log
 vendor/dsh-superagent/node_modules/
 vendor/dsh-superagent/lib/
 vendor/dsh-superagent/.artifacts/
+superagent-extension/node_modules/
