@@ -94,6 +94,7 @@ const projectSchema = z.object({
   exploration: z.enum(['low', 'normal', 'high']).optional(),
   paused: z.boolean().optional(),
   pausedAt: z.string().nullable().optional(),
+  dispatchSignature: z.string().nullable().optional(),
   pendingDispatch: z.object({ at: z.string(), running: z.number().optional(), target: z.number().optional() }).nullable().optional(),
   bootstrap: z.object({
     status: z.enum(['pending', 'running', 'done', 'skipped']),
@@ -1690,10 +1691,21 @@ class ProjectService {
         if (live && interrupted.length > 0) {
           await this.resumeResearchers({ projectId: project.id }).catch(() => undefined);
         }
-        const queued = (project.missions ?? []).filter((mission) => mission.status === 'approved').length;
-        const composer = (project.agents ?? []).some((item) => item.role === 'composer' && item.status === 'running');
-        if (live && queued > 0 && !composer) {
-          await this.notifyComposer({ projectId: project.id, agent: null, event: 'dispatch pending', detail: `${queued} mission(s) queued` }).catch(() => undefined);
+        // Announce a queue state once. Repeating the same notice every tick is the
+        // difference between a Host that reports changes and a Host that polls.
+        const signature = this.queueSignature(project);
+        if (live && signature !== project.dispatchSignature) {
+          const queued = (project.missions ?? []).filter((mission) => mission.status === 'approved').length;
+          const busy = (project.batches ?? []).some((batch) => batch.status === 'running');
+          await this.mutate(project.id, (current) => ({ ...current, dispatchSignature: signature })).catch(() => undefined);
+          if (queued > 0 || busy) {
+            await this.notifyComposer({
+              projectId: project.id,
+              agent: null,
+              event: 'dispatch pending',
+              detail: `${queued} mission(s) queued; machine ${busy ? 'busy' : 'free'}`,
+            }).catch(() => undefined);
+          }
         }
         const interruptedBatch = (project.batches ?? []).find((batch) => batch.status === 'interrupted');
         if (interruptedBatch && !this.resumeScheduled?.has?.(interruptedBatch.id)) {
@@ -1973,8 +1985,30 @@ class ProjectService {
     }
   }
 
+  /** A value that changes only when the dispatchable state changes. */
+  queueSignature(project) {
+    const queued = (project.missions ?? [])
+      .filter((mission) => mission.status === 'approved')
+      .map((mission) => mission.id)
+      .sort()
+      .join(',');
+    const batches = (project.batches ?? [])
+      .filter((batch) => ['forming', 'running'].includes(batch.status))
+      .map((batch) => `${batch.id}:${batch.status}`)
+      .sort()
+      .join(',');
+    return `${queued}|${batches}|${project.paused ? 'paused' : 'open'}`;
+  }
+
   /** Tell the Composer the MissionQueue changed. */
   async notifyComposer({ projectId, agent, event, detail }) {
+    this.composerNotices ??= new Map();
+    const key = `${event}|${detail}`;
+    const previous = this.composerNotices.get(projectId);
+    if (previous && previous.key === key && Date.now() - previous.at < 60_000) {
+      return { started: false, delivered: false, deduped: true, reason: 'the same notice was just sent' };
+    }
+    this.composerNotices.set(projectId, { key, at: Date.now() });
     const project = this.get(projectId);
     if (!project) return { delivered: false, reason: 'no project' };
     const record = (project.agents ?? []).filter((item) => item.role === 'composer' && item.childId && item.status !== 'failed').pop();
