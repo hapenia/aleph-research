@@ -16,7 +16,8 @@
   "files": [
     "index.js",
     "client.js",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "research-extension.js"
   ],
   "dsh": {
     "bundle": {

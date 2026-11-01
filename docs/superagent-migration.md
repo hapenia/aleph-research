@@ -239,8 +239,27 @@ POST budget {maxAutoPerHour:0}                    -> revision 1
 POST trigger "Measure the floor value."           -> 202 hourly budget exhausted
 ```
 
-Not yet done: extension code hot reload beyond the fiber restart, and retirement of the
-old plugin's roles.
+### Phase 4: extension code hot reload
+
+`index.js` is now a bootstrap: it re-imports `research-extension.js` with a fresh
+cache-busting query on every activation, and the module keeps its timers, tools and
+routes as disposers that are released before re-registering. `POST /aleph/api/reload`
+therefore reloads the extension code itself, not just the configuration. A duplicate
+route registration was the failure mode behind the first attempt: the old fiber's
+routes stayed registered, the new apply threw and the old module kept answering;
+tracking every registration fixed it.
+
+Verified in lab `reload-test4` (port 40364):
+
+```text
+GET  version                                  -> research-extension/1
+edit file to research-extension/2; POST reload
+GET  version                                  -> research-extension/2 (applied count 3)
+restore file to /1; POST reload; GET version  -> research-extension/1 (applied count 4)
+routes state/budget/results/version           -> 200 after every reload
+```
+
+Not yet done: retirement of the old plugin's roles.
 
 ## Next phases
 
