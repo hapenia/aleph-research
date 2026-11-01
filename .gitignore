@@ -9,3 +9,6 @@ cookie.txt
 host.pid
 host.log
 .github-watch.json
+vendor/dsh-superagent/node_modules/
+vendor/dsh-superagent/lib/
+vendor/dsh-superagent/.artifacts/

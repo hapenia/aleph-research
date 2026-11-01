@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# Start an isolated DSH lab on the dsh-superagent composition.
+#
+#   scripts/superagent-lab.sh [run-name] [port]
+#
+# Builds the vendored prototype if needed, creates a dedicated profile that mounts
+# only the superagent bundle, configures the GitHub account check, and waits until
+# the main Session exists. Writes <run>/run.json with the panel URL.
+set -euo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+vendor="$repo/vendor/dsh-superagent"
+run_name="${1:-sa-$(date +%Y%m%d-%H%M%S)}"
+run_root="${ALEPH_RUN_ROOT:-/tmp/aleph-runs}/$run_name"
+profile="${ALEPH_SUPERAGENT_PROFILE:-aleph-superagent}"
+github_repository="${ALEPH_SUPERAGENT_REPOSITORY:-hapenia/aleph-research}"
+
+[ -d "$vendor" ] || { echo "no vendored prototype at $vendor" >&2; exit 1; }
+[ -e "$run_root" ] && { echo "run already exists: $run_root" >&2; exit 1; }
+
+port="${2:-}"
+if [ -z "$port" ]; then
+  port=40201
+  while ss -ltn 2>/dev/null | grep -q ":$port "; do port=$((port + 1)); done
+fi
+
+if [ ! -f "$vendor/lib/index.js" ]; then
+  echo "building vendored prototype"
+  (cd "$vendor" && pnpm install --frozen-lockfile >/dev/null && pnpm build >/dev/null)
+fi
+
+mkdir -p "$run_root/dsh/home" "$run_root/work"
+export DSH_HOME="$run_root/dsh"
+export HOME="$run_root/dsh/home"
+
+# A dedicated profile: the prototype changes process-wide PATH and git settings,
+# so it must not share a profile with the default agent tooling.
+dsh --profile "$profile" --from-default-profile web --help >/dev/null
+dsh plugin --profile "$profile" add "$vendor" >/dev/null
+
+patch="$DSH_HOME/profiles/$profile/cordis.patch.yml"
+if grep -qx '\[\]' "$patch"; then printf '' > "$patch"; fi
+cat >> "$patch" <<YAML
+- id: webserver
+  config:
+    host: 127.0.0.1
+    port: $port
+- id: dsh-superagent
+  config:
+    stateDir: $run_root/state
+- id: agent-default-model
+  config:
+    provider: opencode-go
+    model: deepseek-v4.1-flash
+    reasoningEffort: max
+- id: llm-pi-ai
+  name: "@deepseek-ai/dsh-llm-pi-ai"
+  config:
+    providers:
+      opencode-go:
+        apiKeyEnv: OPENCODE_GO_API_KEY
+YAML
+
+real_home="${ALEPH_REAL_HOME:-/home/hapenia}"
+cp "$real_home/.dsh/.credentials.yaml" "$DSH_HOME/.credentials.yaml"
+api_key="$(sed -n 's/.*OPENCODE_GO_API_KEY:[[:space:]]*\([^[:space:]]*\).*/\1/p' "$DSH_HOME/.credentials.yaml" | head -1)"
+# gh keeps its login in the operator's keyring; point the isolated HOME at the
+# operator's gh config so the deployment check can read the account. A token in an
+# environment variable is scrubbed from child processes by the harness.
+gh_config_dir="${GH_CONFIG_DIR:-$real_home/.config/gh}"
+
+DSH_HOME="$DSH_HOME" HOME="$HOME" GH_CONFIG_DIR="$gh_config_dir" OPENCODE_GO_API_KEY="$api_key" \
+  nohup dsh --profile "$profile" --no-open --host 127.0.0.1 --port "$port" \
+  > "$run_root/host.log" 2>&1 &
+echo $! > "$run_root/host.pid"
+
+token=""
+for _ in $(seq 1 120); do
+  token="$(grep -o 'token=[A-Za-z0-9_-]*' "$run_root/host.log" 2>/dev/null | head -1 | cut -d= -f2 || true)"
+  [ -n "$token" ] && break
+  sleep 0.5
+done
+[ -n "$token" ] || { echo "host did not start; see $run_root/host.log" >&2; exit 1; }
+
+url="http://127.0.0.1:$port/?token=$token"
+curl -sS -m 10 -c "$run_root/cookie.txt" "$url" >/dev/null
+
+api="http://127.0.0.1:$port/orchestrator/api"
+state=""
+for _ in $(seq 1 120); do
+  state="$(curl -sS -m 5 -H 'x-orchestrator-request: 1' "$api/state" 2>/dev/null || true)"
+  [ -n "$state" ] && break
+  sleep 0.5
+done
+[ -n "$state" ] || { echo "orchestrator API did not answer; see $run_root/host.log" >&2; exit 1; }
+
+# Wait for the first deployment check to settle, then give it the repository it
+# needs. Workers receive gh/git shims even while the GitHub Source stays off.
+setup_problem() {
+  curl -sS -m 5 -H 'x-orchestrator-request: 1' "$api/state" 2>/dev/null | python3 -c '
+import json, sys
+try:
+    problem = (json.load(sys.stdin).get("setup") or {}).get("problem")
+except Exception:
+    problem = None
+print("" if not problem else problem.get("code", "problem"))
+' 2>/dev/null || true
+}
+for _ in $(seq 1 60); do
+  problem="$(setup_problem)"
+  [ "$problem" != "" ] && break
+  sleep 1
+done
+if [ -z "${problem:-}" ]; then
+  echo "setup already resolved"
+elif [ "$problem" = "repositoryUnset" ] || [ "$problem" = "agentCliSignedOut" ] || [ "$problem" = "agentCliUnset" ]; then
+  revision="$(curl -sS -H 'x-orchestrator-request: 1' "$api/settings" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(next(s["revision"] for s in d["sources"] if s["id"]=="github"))')"
+  curl -sS -X PUT -H 'x-orchestrator-request: 1' -H 'content-type: application/json' \
+    "$api/settings/source:github" \
+    -d "{\"value\":{\"enabled\":false,\"config\":{\"repository\":\"$github_repository\",\"cli\":\"gh\",\"observeIssues\":false,\"observePulls\":false,\"observeComments\":false,\"observeCi\":false}},\"revision\":$revision}" >/dev/null || true
+  curl -sS -X POST -H 'x-orchestrator-request: 1' "$api/setup/check" >/dev/null || true
+  sleep 6
+fi
+for _ in $(seq 1 60); do
+  problem="$(setup_problem)"
+  [ -z "$problem" ] && break
+  sleep 1
+done
+if [ -n "${problem:-}" ]; then
+  echo "deployment check still failing: $problem" >&2
+  curl -sS -H 'x-orchestrator-request: 1' "$api/state" >&2 || true
+  exit 1
+fi
+
+master=""
+for _ in $(seq 1 60); do
+  payload="$(curl -sS -m 5 -H 'x-orchestrator-request: 1' "$api/state" 2>/dev/null || true)"
+  master="$(printf '%s' "$payload" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("masterId") or "")' 2>/dev/null || true)"
+  [ -n "$master" ] && break
+  sleep 1
+done
+[ -n "$master" ] || { echo "main Session did not start; see $run_root/host.log" >&2; exit 1; }
+
+python3 - "$run_root" "$port" "$token" "$url" "$master" <<'PY'
+import json, sys
+run_root, port, token, url, master = sys.argv[1:6]
+info = {
+    "run_root": run_root, "port": int(port), "url": url, "token": token,
+    "master_session": master, "dsh_home": f"{run_root}/dsh", "state_dir": f"{run_root}/state",
+}
+json.dump(info, open(f"{run_root}/run.json", "w"), indent=2)
+print(json.dumps(info, indent=2))
+PY
