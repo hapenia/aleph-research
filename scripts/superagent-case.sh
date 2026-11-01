@@ -47,6 +47,8 @@ git -C "$run_root/research" -c user.name=AlephResearch -c user.email=aleph@local
 cat > "$run_root/case-eval.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
+# The case evaluator makes its scratch directory under \$ALEPH_WORKSPACE/.aleph.
+mkdir -p "$template/.aleph"
 export ALEPH_WORKSPACE="$template"
 export ALEPH_TESTSET="$template/testsets"
 export ALEPH_VISIBLE_DATA="$template/visible-data"
