@@ -6,6 +6,17 @@
 # Builds the vendored prototype if needed, creates a dedicated profile that mounts
 # only the superagent bundle, configures the GitHub account check, and waits until
 # the main Session exists. Writes <run>/run.json with the panel URL.
+#
+# Iteration knobs (all optional):
+#   ALEPH_REBUILD_VENDOR=1        rebuild the vendored prototype even when current
+#   ALEPH_SUPERAGENT_PROFILE_FROM=<dsh-home>
+#                                 copy a previously built profile from that DSH home
+#                                 before creating one; it is then reused as-is
+#   ALEPH_REBUILD_PROFILE=1       create the profile afresh even if it already exists
+#   ALEPH_FORCE_INSTALL=1         run npm install for the extension even when current
+#   ALEPH_ROLE_EFFORT=<effort>    reasoning effort for the eval and executor roles
+#                                 (default low; the agent default keeps max)
+#   ALEPH_AGENT_EFFORT=<effort>   reasoning effort of the agent default model
 set -euo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,8 +26,19 @@ run_root="${ALEPH_RUN_ROOT:-/tmp/aleph-runs}/$run_name"
 profile="${ALEPH_SUPERAGENT_PROFILE:-aleph-superagent}"
 github_repository="${ALEPH_SUPERAGENT_REPOSITORY:-hapenia/aleph-research}"
 
+# The Eval decision and the Worker turn are seeded with an explicit role model:
+# inheriting the agent default would spend minutes of max-effort thinking on the
+# one-line smoke ticket. Same provider and model as the default, lower effort.
+role_provider="${ALEPH_ROLE_PROVIDER:-opencode-go}"
+role_model="${ALEPH_ROLE_MODEL:-deepseek-v4.1-flash}"
+role_effort="${ALEPH_ROLE_EFFORT:-low}"
+agent_effort="${ALEPH_AGENT_EFFORT:-max}"
+
 [ -d "$vendor" ] || { echo "no vendored prototype at $vendor" >&2; exit 1; }
 [ -e "$run_root" ] && { echo "run already exists: $run_root" >&2; exit 1; }
+
+# shellcheck source=phase-timing.sh
+source "$repo/scripts/phase-timing.sh"
 
 port="${2:-}"
 if [ -z "$port" ]; then
@@ -43,31 +65,78 @@ python3 -c 'import json; print(json.dumps({"score": 80.0}))'
 EVAL
 fi
 
-if [ ! -f "$vendor/lib/index.js" ] || [ -n "${ALEPH_REBUILD_VENDOR:-}" ]; then
+# Rebuild only when the build output is missing or older than any source, package
+# manifest or local patch. A stale check beats rebuilding the prototype every run.
+vendor_is_current() {
+  local ref="$vendor/lib/.build-stamp" stale
+  # The patch series is reversed after the build, which rewrites source mtimes, so
+  # the stamp written once the build script has fully returned is the real boundary.
+  [ -f "$ref" ] || ref="$vendor/lib/index.js"
+  [ -f "$ref" ] || return 1
+  stale="$(find "$vendor/src" "$vendor/package.json" "$vendor/tsdown.config.ts" \
+    "$repo/vendor/patches" -newer "$ref" -print -quit 2>/dev/null || true)"
+  [ -z "$stale" ]
+}
+if [ -n "${ALEPH_REBUILD_VENDOR:-}" ] || ! vendor_is_current; then
   echo "building vendored prototype"
   "$repo/scripts/build-superagent-vendor.sh" >/dev/null
+  # The build script's EXIT trap reverses the patches, so source files end up newer
+  # than lib/; stamp the finished, restored tree for the next run to compare against.
+  touch "$vendor/lib/.build-stamp"
 fi
+phase "vendored prototype"
 
 mkdir -p "$run_root/dsh/home" "$run_root/work"
 export DSH_HOME="$run_root/dsh"
 export HOME="$run_root/dsh/home"
 
-# A dedicated profile: the prototype changes process-wide PATH and git settings,
-# so it must not share a profile with the default agent tooling.
-dsh --profile "$profile" --from-default-profile web --help >/dev/null
-dsh plugin --profile "$profile" add "$vendor" >/dev/null
-
-# AlephResearch extension: mounts the aleph Source, evaluation and (later) the
-# research panel on top of the prototype bundle.
-extension="$repo/superagent-extension"
-if [ -d "$extension" ]; then
-  # A linked plugin keeps its own dependencies, so install them in place once.
-  (cd "$extension" && npm install --no-audit --no-fund --silent)
-  dsh plugin --profile "$profile" add "$extension" >/dev/null
+# Reuse a built profile: creating it installs the bundle into the profile, which is
+# fixed cost on every run. A copy keeps the relative links into vendor/ and
+# superagent-extension/ intact because the profile sits at the same depth.
+profile_dir="$DSH_HOME/profiles/$profile"
+if [ -n "${ALEPH_SUPERAGENT_PROFILE_FROM:-}" ] && [ ! -d "$profile_dir" ]; then
+  from="$ALEPH_SUPERAGENT_PROFILE_FROM"
+  if [ -d "$from/profiles/$profile" ]; then
+    mkdir -p "$DSH_HOME/profiles"
+    cp -a "$from/profiles/." "$DSH_HOME/profiles/"
+    echo "copied built profile from $from"
+  fi
 fi
+profile_reused=0
+if [ -d "$profile_dir" ] && [ -z "${ALEPH_REBUILD_PROFILE:-}" ]; then
+  echo "reusing built profile at $profile_dir"
+  profile_reused=1
+else
+  # A dedicated profile: the prototype changes process-wide PATH and git settings,
+  # so it must not share a profile with the default agent tooling.
+  dsh --profile "$profile" --from-default-profile web --help >/dev/null
+  dsh plugin --profile "$profile" add "$vendor" >/dev/null
+
+  # AlephResearch extension: mounts the aleph Source, evaluation and (later) the
+  # research panel on top of the prototype bundle.
+  extension="$repo/superagent-extension"
+  if [ -d "$extension" ]; then
+    # A linked plugin keeps its own dependencies. npm records the install in
+    # node_modules/.package-lock.json, so a newer lock there means the tree
+    # already matches package.json.
+    if [ -n "${ALEPH_FORCE_INSTALL:-}" ] || [ ! -d "$extension/node_modules" ] \
+      || [ ! -f "$extension/node_modules/.package-lock.json" ] \
+      || [ "$extension/package.json" -nt "$extension/node_modules/.package-lock.json" ] \
+      || { [ -f "$extension/package-lock.json" ] && [ "$extension/package-lock.json" -nt "$extension/node_modules/.package-lock.json" ]; }; then
+      (cd "$extension" && npm install --no-audit --no-fund --silent)
+    else
+      echo "extension dependencies are current"
+    fi
+    dsh plugin --profile "$profile" add "$extension" >/dev/null
+  fi
+fi
+phase "profile/plugin install"
 
 patch="$DSH_HOME/profiles/$profile/cordis.patch.yml"
-if grep -qx '\[\]' "$patch"; then printf '' > "$patch"; fi
+# A reused profile carries the previous run's port and state directory, and the
+# patch file holds only the blocks appended below, so it is regenerated.
+if [ "$profile_reused" = 1 ]; then printf '' > "$patch"
+elif grep -qx '\[\]' "$patch"; then printf '' > "$patch"; fi
 cat >> "$patch" <<YAML
 - id: webserver
   config:
@@ -107,9 +176,9 @@ cat >> "$patch" <<YAML
     additionalWritableRoots: ["$run_root/state", "$run_root/fixtures/research"]
 - id: agent-default-model
   config:
-    provider: opencode-go
-    model: deepseek-v4.1-flash
-    reasoningEffort: max
+    provider: $role_provider
+    model: $role_model
+    reasoningEffort: $agent_effort
 - id: llm-pi-ai
   name: "@deepseek-ai/dsh-llm-pi-ai"
   config:
@@ -156,6 +225,7 @@ for _ in $(seq 1 120); do
   sleep 0.5
 done
 [ -n "$state" ] || { echo "orchestrator API did not answer; see $run_root/host.log" >&2; exit 1; }
+phase "host start"
 
 # Wait for the first deployment check to settle, then give it the repository it
 # needs. Workers receive gh/git shims even while the GitHub Source stays off.
@@ -194,6 +264,7 @@ if [ -n "${problem:-}" ]; then
   curl -sS -H 'x-orchestrator-request: 1' "$api/state" >&2 || true
   exit 1
 fi
+phase "deployment check"
 
 master=""
 for _ in $(seq 1 60); do
@@ -203,15 +274,17 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 [ -n "$master" ] || { echo "main Session did not start; see $run_root/host.log" >&2; exit 1; }
+phase "main session"
 
 # Point the research Source at the fixture, give the Executor its prepare command,
 # and enable one research rule with automatic acceptance. Everything here is a
 # setting: changing it later needs no restart.
 api="http://127.0.0.1:$port/orchestrator/api"
-python3 - "$api" "$fixtures" "$repo" <<'PYSEED'
+python3 - "$api" "$fixtures" "$repo" "$role_provider" "$role_model" "$role_effort" <<'PYSEED'
 import json, sys, urllib.error, urllib.request
 
-api, fixtures, repo = sys.argv[1:4]
+api, fixtures, repo, role_provider, role_model, role_effort = sys.argv[1:7]
+role = {'provider': role_provider, 'model': role_model, 'reasoningEffort': role_effort}
 
 def call(method, path, body=None):
     data = json.dumps(body).encode() if body is not None else None
@@ -248,6 +321,7 @@ saved('source aleph', call('PUT', '/settings/source:aleph', {
 
 executor = settings['blocks']['executor']
 value = dict(executor['value'])
+value['model'] = role
 value['prepare'] = f'sh {repo}/scripts/superagent-prepare.sh'
 # gh, git and lark-cli are reserved by the prototype and cannot be blocked;
 # the research instructions forbid pushing and the Channel never pushes.
@@ -271,16 +345,20 @@ saved('policy', call('PUT', '/settings/policy', {'value': value, 'revision': pol
 eval_block = settings['blocks']['eval']
 value = dict(eval_block['value'])
 value['mode'] = 'auto'
+value['model'] = role
 saved('eval', call('PUT', '/settings/eval', {'value': value, 'revision': eval_block['revision']}))
 PYSEED
+phase "settings seed"
 
 if [ "${ALEPH_SUPERAGENT_SMOKE:-0}" = "1" ]; then
   echo "smoke: sending one research request"
   curl -sS -X POST -H 'content-type: application/json' \
-    -d '{"project":"fixture","ticket":"fixture-smoke","requestId":"smoke-1","text":"Read data/labels.csv, count rows per well and the clipped floor of por, write the result to findings.md, commit it, then call aleph_submit_result (required before reporting) and report the score."}' \
+    -d '{"project":"fixture","ticket":"fixture-smoke","requestId":"smoke-1","text":"Read data/labels.csv. Write a short findings.md with two lines: the row count per well and the clipped floor of por. Commit it once, then call aleph_submit_result (required before reporting) and report the score."}' \
     "http://127.0.0.1:$port/aleph/api/trigger" || true
   echo
+  date +%s%3N > "$run_root/request-at.ms"
 fi
+phase "smoke request"
 
 python3 - "$run_root" "$port" "$token" "$url" "$master" <<'PY'
 import json, sys
@@ -292,3 +370,4 @@ info = {
 json.dump(info, open(f"{run_root}/run.json", "w"), indent=2)
 print(json.dumps(info, indent=2))
 PY
+phase "total"
