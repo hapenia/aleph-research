@@ -74,7 +74,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/type-tests.ts', 'src/factories.ts', 'src/hydration.ts', 'src/parsers.ts', 'src/parsers-commands.ts'],
+    files: ['src/type-tests.ts', 'src/factories.ts', 'src/hydration.ts', 'src/parsers.ts'],
     rules: {
       '@typescript-eslint/consistent-type-assertions': 'off',
       'no-restricted-syntax': 'off',
@@ -85,6 +85,14 @@ export default tseslint.config(
       '@typescript-eslint/no-non-null-assertion': 'off',
       'no-restricted-imports': 'off',
       '@typescript-eslint/ban-ts-comment': 'off',
+    },
+  },
+  {
+    // The command parser reuses parsers.ts; it gets only the import exemption, not the
+    // assertion/predicate/JSON allowlist.
+    files: ['src/parsers-commands.ts'],
+    rules: {
+      'no-restricted-imports': 'off',
     },
   },
   {
