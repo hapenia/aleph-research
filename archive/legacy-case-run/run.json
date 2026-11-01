@@ -1,0 +1,7 @@
+{
+  "run_root": "/tmp/aleph-runs/case-1",
+  "port": 40370,
+  "master_session": "orchestrator-1f1d4a164adab857204c0b29a6cfecdf",
+  "dsh_home": "/tmp/aleph-runs/case-1/dsh",
+  "state_dir": "/tmp/aleph-runs/case-1/state"
+}
