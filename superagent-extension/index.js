@@ -14,6 +14,8 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 
 import { evaluateSubmission } from './evaluation.js'
 import { createResearchChannel } from './research-channel.js'
+import { ConfigStore } from './config-store.js'
+import { applySourceSettings } from './hot-config.js'
 import { bestResult, readResults, recordResult, resultsBrief } from './results.js'
 import { findTicketForDirectory, resultTrigger } from './submit-result.js'
 
@@ -22,6 +24,15 @@ export const inject = ['orchestrator', 'tools']
 
 /** Where evaluation records live; the lab points this at the run state directory. */
 const resultsDir = () => process.env.ALEPH_RESULTS_DIR ?? `${process.cwd()}/.aleph-results`
+
+/** Versioned research configuration; changes are applied to the live Source. */
+const configStore = () => new ConfigStore({
+  dir: process.env.ALEPH_CONFIG_DIR ?? `${process.cwd()}/.aleph-config`,
+  validate: (value) => { AlephConfigSchema.parse(value) },
+})
+
+/** Prototype management API root, used to apply configuration changes without a restart. */
+const managementBase = () => process.env.ALEPH_MANAGEMENT_API ?? ''
 
 /** Source configuration: one research project per Source instance. */
 const AlephConfigSchema = z.object({
@@ -192,6 +203,48 @@ export function apply(ctx) {
           })
         } catch (error) {
           return sendJson(res, 500, { ok: false, error: String(error?.message ?? error) })
+        }
+      },
+    })
+    // Research configuration with versions, an audit trail and rollback. A save is
+    // applied to the running Source through the prototype's own settings API, so the
+    // change is hot; the versioned store keeps what changed and lets the panel undo it.
+    child.webServer.register({
+      kind: 'exact',
+      path: '/aleph/api/config',
+      async handler(req, res) {
+        try {
+          const store = configStore()
+          if (req.method === 'GET') {
+            return sendJson(res, 200, { ok: true, current: store.current(), history: store.history(), changes: store.changes() })
+          }
+          if (req.method !== 'POST') return sendJson(res, 405, { ok: false })
+          const body = await readBody(req)
+          const saved = store.save(body?.value, { origin: body?.origin ?? 'panel' })
+          const base = managementBase()
+          const applied = base ? await applySourceSettings(base, 'aleph', saved.value) : null
+          return sendJson(res, 200, { ok: true, current: saved, applied })
+        } catch (error) {
+          return sendJson(res, 400, { ok: false, error: String(error?.message ?? error) })
+        }
+      },
+    })
+    child.webServer.register({
+      kind: 'exact',
+      path: '/aleph/api/config/rollback',
+      async handler(req, res) {
+        if (req.method !== 'POST') return sendJson(res, 405, { ok: false })
+        try {
+          const body = await readBody(req)
+          const store = configStore()
+          const saved = body?.revision === undefined
+            ? store.rollbackLast({ origin: body?.origin ?? 'panel' })
+            : store.restore(Number(body.revision), { origin: body?.origin ?? 'panel' })
+          const base = managementBase()
+          const applied = base ? await applySourceSettings(base, 'aleph', saved.value) : null
+          return sendJson(res, 200, { ok: true, current: saved, applied })
+        } catch (error) {
+          return sendJson(res, 400, { ok: false, error: String(error?.message ?? error) })
         }
       },
     })

@@ -176,8 +176,29 @@ registered from scratch; module code that changed on disk still needs a host res
 configuration does not. `scripts/verify.sh` and CI now syntax-check both extension
 files.
 
-Not yet done: hot configuration versions and rollback, the Watchdog Session, budget
-wiring into acceptance, and retirement of the old plugin's roles.
+### Phase 4: versioned hot configuration
+
+`GET /aleph/api/config` returns the live research configuration with its history and
+audit origins; `POST /aleph/api/config` saves a new revision and applies it to the
+running Source through the prototype's own settings API, so no restart happens;
+`POST /aleph/api/config/rollback` (and `{revision}` for a specific version) restores an
+older value as a new revision. The store is `ConfigStore` (atomic writes, 50-entry
+history, validator) and the apply step is `applySourceSettings`.
+
+Verified in lab `cfg-test` (port 40341):
+
+```text
+GET  config                     -> revision 0, null value
+POST config {project, conventions:"hot v1"} -> revision 1, applied revision 2
+GET  orchestrator settings      -> source aleph project = fixture (live)
+POST config {conventions:"hot v2"} -> revision 2
+POST config/rollback            -> revision 3, conventions "hot v1"
+GET  orchestrator settings      -> source aleph conventions = "hot v1" (live)
+history                         -> revisions 3,2,1 with origin "panel"
+```
+
+Not yet done: the Watchdog Session, budget wiring into acceptance, extension code hot
+reload beyond the fiber restart, and retirement of the old plugin's roles.
 
 ## Next phases
 
