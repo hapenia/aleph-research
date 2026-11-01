@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { alephKind, alephTrigger } from '../index.js'
+import { alephKind, alephTrigger } from '../research-extension.js'
 
 test('the aleph Source kind declares a configurable project and an operator allowlist', () => {
   assert.equal(alephKind.kind, 'aleph')
