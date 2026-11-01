@@ -22,8 +22,13 @@ composition smoke test.
 ## Rules for this copy
 
 - Do not edit files here; our behaviour lives in `@local/dsh-aleph-research` and in
-  the profile patch. If a change is unavoidable, keep it as a patch file under
-  `vendor/patches/` and record it here.
+  the profile patch. When a change is unavoidable, keep it as a patch file under
+  `vendor/patches/` and record it here. `scripts/build-superagent-vendor.sh` applies
+  the series before building, idempotently.
+
+| Patch | Why |
+| --- | --- |
+| `0001-configurable-session-permission.patch` | The prototype pins every session to `danger-full-access`; the patch lets a deployment choose the permission preset through `ALEPH_SESSION_PERMISSION` while keeping the default.
 - Do not commit `node_modules`, `lib` or `.artifacts`; they are build output.
 - Build with `pnpm install && pnpm build` from this directory.
 

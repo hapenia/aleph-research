@@ -29,7 +29,12 @@ if [ -e "$dir" ]; then
 fi
 
 mkdir -p "$(dirname "$dir")"
-git -C "$repo" worktree add -b "ticket/$name" "$dir" "$template" >/dev/null
+# A self-contained repository inside the ticket: its git directory lives in the
+# workspace, so the sandbox never has to expose the research repository itself.
+git init -q -b "ticket/$name" "$dir"
+git -C "$dir" remote add origin "$repo"
+git -C "$dir" fetch -q --no-tags origin "$template"
+git -C "$dir" reset -q --hard FETCH_HEAD
 
 # The data a Worker may read is copied in, not linked: a write through the link
 # would reach the source directory.

@@ -1,0 +1,13 @@
+--- a/src/app/sessions.ts	2026-11-01 20:08:29.348651405 +0800
++++ b/src/app/sessions.ts	2026-11-01 20:08:29.365848252 +0800
+@@ -149,7 +149,9 @@
+     const settings = this.host.store.settings()
+     await initializeRoleModel(ctx, result.agent, role === 'orchestrator' ? settings.eval.model : settings.executor.model)
+     await this.decorate(result.agent)
+-    ctx.permissionPresets.set(result.agent.session, 'danger-full-access')
++    // Vendored patch: allow a deployment to confine its sessions instead of always
++    // granting full access. The default keeps the prototype's documented behaviour.
++    ctx.permissionPresets.set(result.agent.session, process.env.ALEPH_SESSION_PERMISSION ?? 'danger-full-access')
+     await ctx.sessionController.rename({ sessionId: id as SessionId, title })
+     return result.agent
+   }

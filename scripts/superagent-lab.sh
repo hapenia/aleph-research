@@ -36,9 +36,9 @@ if [ ! -d "$fixtures/research/.git" ]; then
   printf 'well,por,perm,sw\nw1,0.10,0.01,99.9\nw1,0.18,12.5,45.2\nw2,0.10,0.01,99.9\nw2,0.22,88.0,31.7\n' > "$fixtures/data/labels.csv"
 fi
 
-if [ ! -f "$vendor/lib/index.js" ]; then
+if [ ! -f "$vendor/lib/index.js" ] || [ -n "${ALEPH_REBUILD_VENDOR:-}" ]; then
   echo "building vendored prototype"
-  (cd "$vendor" && pnpm install --frozen-lockfile >/dev/null && pnpm build >/dev/null)
+  "$repo/scripts/build-superagent-vendor.sh" >/dev/null
 fi
 
 mkdir -p "$run_root/dsh/home" "$run_root/work"
@@ -69,6 +69,35 @@ cat >> "$patch" <<YAML
 - id: dsh-superagent
   config:
     stateDir: $run_root/state
+# Confine every shell to workspace-write with no approval prompt: the lab runs
+# unattended, and the restricted runner is the enforcement point.
+- id: permission
+  config:
+    defaultPreset: workspace-write
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: never
+      workspace-write:
+        sandbox: workspace-write
+        approval: never
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+- id: sandbox
+  config:
+    runnerCommand: ["bash", "$repo/scripts/bwrap-restricted.sh"]
+    runnerFailureSignatures: ["aleph-sandbox:"]
+# The sandbox must also expose the run directory, because the ticket worktree's
+# gitdir points at the research repository next to the state directory.
+- id: sandbox-policy
+  config:
+    mode: workspace-write
+    workspaceRoot: $run_root/state
+    # The ticket worktrees live under the state directory; their gitdir points into
+    # the fixture repository. The fixture data directory stays outside both, so a
+    # Worker cannot read the source data it was only meant to receive a copy of.
+    additionalWritableRoots: ["$run_root/state", "$run_root/fixtures/research"]
 - id: agent-default-model
   config:
     provider: opencode-go
@@ -90,7 +119,13 @@ api_key="$(sed -n 's/.*OPENCODE_GO_API_KEY:[[:space:]]*\([^[:space:]]*\).*/\1/p'
 # environment variable is scrubbed from child processes by the harness.
 gh_config_dir="${GH_CONFIG_DIR:-$real_home/.config/gh}"
 
-DSH_HOME="$DSH_HOME" HOME="$HOME" GH_CONFIG_DIR="$gh_config_dir" OPENCODE_GO_API_KEY="$api_key" \
+# Only these roots are readable by sandboxed commands; the case runtime is added by
+# the case lab when it points at one.
+aleph_read_roots="${ALEPH_READ_ROOTS:-/usr:/bin:/sbin:/lib:/lib64:/etc:/opt:/run}"
+
+# Sessions keep the prototype's danger-full-access unless the deployment asks for
+# confinement; the lab wants the sandbox runner to be the enforcement point.
+DSH_HOME="$DSH_HOME" HOME="$HOME" GH_CONFIG_DIR="$gh_config_dir" ALEPH_READ_ROOTS="$aleph_read_roots" ALEPH_SESSION_PERMISSION="${ALEPH_SESSION_PERMISSION:-workspace-write}" OPENCODE_GO_API_KEY="$api_key" \
   nohup dsh --profile "$profile" --no-open --host 127.0.0.1 --port "$port" \
   > "$run_root/host.log" 2>&1 &
 echo $! > "$run_root/host.pid"
