@@ -50,7 +50,7 @@ while [ "$SECONDS" -lt "$deadline" ]; do
     --arg at "$(date -Is)" \
     --argjson elapsed "$((now - started))" \
     --argjson alive "$alive" \
-    --arg load "$(printf '%s' "$state" | jq -c '.load // {}' 2>/dev/null || echo '{}')" \
+    --argjson load "$(printf '%s' "$state" | jq -c '.load // {}' 2>/dev/null || echo '{}')" \
     --argjson open "$(printf '%s' "$aleph" | jq -r '.openTickets // 0' 2>/dev/null || echo 0)" \
     --argjson results "$(printf '%s' "$results" | jq -r '.count // 0' 2>/dev/null || echo 0)" \
     --arg best "$(printf '%s' "$results" | jq -cr '.best.score // null' 2>/dev/null || echo null)" \
