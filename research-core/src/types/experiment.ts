@@ -1,7 +1,8 @@
 /** Experiments: one attempt at an Issue; a snapshot, never merged. */
 import type { HostPrincipal, ImplementerPrincipal, IssueAssignment, ResearcherPrincipal, TicketBinding } from './actors.js'
 import type { ArtifactRef } from './artifacts.js'
-import type { FailedCICompletion, PassedCICompletion } from './ci.js'
+import type { CIRequestToken, FailedCICompletion, PassedCICompletion } from './ci.js'
+import type { FailedCIRecord } from './metrics.js'
 import type { EnvironmentDeclaration } from './environment.js'
 import type { DomainError, Result, StoreError } from './errors.js'
 import type {
@@ -97,7 +98,7 @@ export declare class ReadyExperiment implements ExperimentCommon {
   /** Only the Issue assignee may request CI; the Host mints the CI run id. */
   requestCI(
     assignment: IssueAssignment,
-    ciRunId: CIRunId,
+    token: CIRequestToken,
     at: IsoTimestamp,
   ): Result<CIPendingExperiment, DomainError>
   revise(
@@ -202,8 +203,8 @@ export declare class CIFailedExperiment implements ExperimentCommon {
   readonly requestedAt: IsoTimestamp
   readonly startedAt?: IsoTimestamp
   readonly environmentDigest?: string
-  readonly failureReason: FailedCICompletion['reason']
-  readonly failureDetail: string
+  readonly failureReason: FailedCIRecord['reason']
+  readonly failureDetail: FailedCIRecord['detail']
   readonly failedAt: IsoTimestamp
   revise(
     actor: ImplementerPrincipal,

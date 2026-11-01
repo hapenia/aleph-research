@@ -29,22 +29,25 @@ state is rejected by the private brand (compile-time test).
 A class cannot prevent `JSON.parse`, `any` or `as`. The blueprint therefore declares a
 single construction/hydration boundary instead of pretending there is none:
 
-- `src/factories.ts` is the only module allowed to construct domain states (private
-  constructors) and to trust Host-supplied input; it declares the constructible factory
-  functions for principals, tokens, Program, Issue, Experiment, lineages, artifacts and
-  CI completions;
-- `src/hydration.ts` is the only module allowed to parse storage rows or JSON into domain
-  states; every function returns a `Result` and validates at runtime;
-- ESLint and ast-grep reject factory calls, type assertions, `any`, `JSON.parse`, global
-  clocks and dynamic imports outside those two modules (and the type tests), so the
-  boundary does not depend on discipline;
+- `src/factories.ts` declares the only constructible factory functions (principals,
+  tokens, Program, Issue, Experiment, lineages, artifacts, CI completion/request tokens);
+- `src/hydration.ts` declares the only functions that turn storage rows or JSON into
+  domain states, and `src/parsers.ts` the only functions that turn untrusted input into
+  branded ids, timestamps, versions, metric names and schemas; every function returns a
+  `Result` and validates at runtime;
+- ESLint and ast-grep ban imports of those modules outside the composition root, ban
+  type predicates, `JSON`/`globalThis` parsing, assertions, `any`, global clocks and
+  dynamic imports outside the boundary; the adapter must run the same rules (listed as an
+  outstanding composition-root task, because the adapter package is separate);
 - repositories and services accept constructed classes only, never raw rows;
 - `DomainFailureMapper.toFailure` is the single place mapping a refusal code to its HTTP
   status.
 
-The negative tests and lint rules prove the boundary is load-bearing where the tools can
-see it; they cannot prove that a rogue module did not fabricate an authority or a state
-with `as` inside the boundary. This is a checked convention, and the document says so.
+The negative tests, lint rules and eight mutation checks prove the boundary is
+load-bearing where the tools can see it. They cannot prove that a module which is
+allowlisted (composition root, boundary module, adapter) does not fabricate state with
+`as`; this is a checked convention, not an unforgeable capability, and the document says
+so explicitly.
 
 ## State machines
 
@@ -76,20 +79,23 @@ CIPassedExperiment.close(IssueAssignment) / CIFailedExperiment.revise(TicketBind
 
 A role class alone does not prove ownership. Two nominal tokens express it:
 
-- `IssueAssignment` is minted only by `AssignedIssue.authorize(actor)`, which compares the
-  actor Session with the assignee at runtime. `addExperiment`, `close`, `requestCI` and
-  Experiment closes require it and return `Result`: the transition re-checks
-  `assignment.issueId` and the assignee before moving state.
-- `TicketBinding` is minted by the Host from a Ticket record and carries ticket, experiment
-  and Implementer Session. `submit` and `revise` require the Implementer principal and the
-  binding and return `Result`, re-checking ticket, experiment and Session.
-- `PassedCICompletion` / `FailedCICompletion` carry `ciRunId`, experiment and commit; the
-  CI transition re-checks them against the Experiment before recording the result.
+- `IssueAssignment` is produced by the factory boundary; the implementation calls
+  `AssignedIssue.authorize(actor)`, which compares the actor Session with the assignee.
+  `addExperiment`, `close`, `requestCI` and Experiment closes require it and return
+  `Result`; the implementation must compare `assignment.issueId` and the assignee before
+  moving state.
+- `TicketBinding` is minted from a `Ticket` record and carries ticket, experiment and
+  Implementer Session. `submit` and `revise` require the Implementer principal and the
+  binding and return `Result`; the implementation must compare all three.
+- `CIRequestToken` is minted by the Host for one Experiment/commit; `requestCI` takes it
+  instead of a caller-chosen run id.
+- `PassedCICompletion` / `FailedCICompletion` carry `ciRunId` and the raw record as their
+  only duplication; the implementation compares the record's experiment, commit and run
+  id with the Experiment before recording the result.
 
-The tokens prove that a runtime ownership check happened; they cannot prove at compile
-time that a Session id equals the stored assignee. Every association comparison is
-explicitly listed as a runtime rule and returns `DomainError` on mismatch, so a forged or
-stale token cannot silently move another aggregate's state.
+The type surface makes the comparisons possible and forces a `Result` return; the
+comparisons themselves are runtime implementation requirements, listed in the runtime
+section rather than claimed as compiler guarantees.
 
 ## Executor, commands and audit
 
@@ -110,7 +116,7 @@ stale token cannot silently move another aggregate's state.
   attention and audit.
 - `CIRecord` is a status union (`requested/running/passed/failed`) with metrics, artifacts,
   duration and environment digest where they exist; failed runs are persisted.
-- `Ticket` is a real aggregate (open/running/submitted/cancelled/failed) owned by the Host;
+- `Ticket` is a discriminated status union (open/running/submitted/cancelled/failed) owned by the Host;
   `TicketBinding` is minted from it and the repository only returns Tickets, never raw
   tuples.
 - `CIPassedExperiment` stores the CI run reference, not a duplicated metrics/artifact
@@ -124,9 +130,10 @@ stale token cannot silently move another aggregate's state.
 - `Schema<T>` is a plain interface with `parse` and `toJsonSchema`; the adapter supplies both.
 - Command tools carry the command literal; Implementer submit input omits `binding`;
   output is `ReadyExperiment`.
-- Writes have one path: `ApiWriteRoutes` is a mapped type whose every method receives the
-  typed `CommandExecutor` and the command's own actor and returns its `CommandOutcome`.
-  There is no route method that can write state directly.
+- Writes have one path: a write route only parses (`ApiWriteRoutes` maps each command to
+  a parser returning that command), and the generic `executeRoute` takes the parser
+  result, the typed actor and the executor. A route cannot fabricate an outcome or call
+  another command's executor slot.
 - The panel is the only non-write route family and reads `ProgramSnapshot` (current state,
   raw CI records, audit, artifacts, attention); no replay.
 - Responses are `ApiResponse<T>` = value or `DomainFailure`, both carrying audit; parsers
@@ -178,11 +185,14 @@ and status correlation, nominal id mixing, ownership-token substitution, Host-on
 cancellation, completed-Program transitions, empty audit rejection, wrong audit action,
 the capability map, and lineage separation.
 
-`research-core/scripts/type-mutation-check.sh` removes a guarantee in a throwaway copy
-and requires `tsc` to fail: deleting a private brand, widening an outcome audit, allowing
-a Researcher to pause, and mapping `program.pause` to the wrong capability are all killed.
-It runs in `verify.sh` and CI. Tool input shapes are adapter contracts, not a compile-time
-security boundary; the Host injects `binding` at execution time.
+`research-core/scripts/type-mutation-check.sh` removes a guarantee in a throwaway copy and
+requires `tsc` to fail **at the type tests with the expected diagnostic**, not from an
+unrelated error: deleting a private brand, widening the success or refusal audit, allowing
+a Researcher to pause, mapping `program.pause` to the wrong capability, dropping the
+ownership `Result` from `requestCI`, closing a passed Experiment with a principal and
+swapping the `ci.passed` trigger kind are all killed. It runs in `verify.sh` and CI.
+Tool input shapes are adapter contracts, not a compile-time security boundary; the Host
+injects `binding` at execution time.
 
 Third-review fixes already applied: the factory/hydration boundary moved out of the state
 classes after the lint layer made per-class factories redundant; `ciRunId` on completion
@@ -201,10 +211,12 @@ port; the capability map is load-bearing in a type test; and
 `scripts/type-mutation-check.sh` removes guarantees in a copy and fails if `tsc` still
 accepts the result (four mutations are killed, wired into verify and CI).
 
-Remaining runtime-only rules: the Session comparison behind `authorize`, the Ticket to
-Session binding, candidate deduplication and required-metric validation, trigger delivery
-to the prototype Eval, budget counter arithmetic, DSH tool registration, and storage
-hydration inside the boundary modules.
+Remaining runtime-only rules: the Session comparison behind `authorize`, the token
+association comparisons inside transitions, the Ticket to Session binding, candidate
+deduplication and required-metric validation, trigger delivery to the prototype Eval,
+budget counter arithmetic, DSH tool registration, storage hydration inside the boundary
+modules, and the adapter's use of the same lint rules (the adapter package is outside
+`research-core`'s ESLint scope until the composition-root lint lands).
 
 Known limits, stated instead of hidden:
 
@@ -218,7 +230,7 @@ Known limits, stated instead of hidden:
 
 ## Phases
 
-1. Factories/fromRow implementations, command handlers and audit, DSH storage-domain
+1. Factory/hydration/parser implementations, command handlers and audit, DSH storage-domain
    repositories, management routes, negative tests kept green.
 2. Host services: uv builder, CI runner, artifact store, sampler with injected RNG,
    session pool, attention, cancellation.

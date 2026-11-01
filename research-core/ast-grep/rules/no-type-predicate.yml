@@ -1,0 +1,13 @@
+id: no-type-predicate
+language: TypeScript
+severity: error
+message: User-defined type predicates can forge nominal types; parse inside the boundary instead.
+files:
+  - 'src/**/*.ts'
+ignores:
+  - 'src/type-tests.ts'
+  - 'src/factories.ts'
+  - 'src/hydration.ts'
+  - 'src/parsers.ts'
+rule:
+  kind: type_predicate

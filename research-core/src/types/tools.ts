@@ -11,9 +11,10 @@ import type { Program } from './program.js'
 import type { ProgramSnapshot } from './api.js'
 import type { ArtifactRef } from './artifacts.js'
 import type { Attention } from './attention.js'
-import type { CommandOf, CommandType } from './commands.js'
+import type { CommandOf, CommandResult, CommandType } from './commands.js'
 import type { DomainError, Result } from './errors.js'
 import type { ExperimentId, IssueId, ProgramId } from './ids.js'
+import type { AttentionSubject } from './attention.js'
 
 /** A boundary schema: it parses untrusted input and emits JSON Schema for DSH tools. */
 export declare class Schema<T> {
@@ -31,8 +32,9 @@ export interface ToolDefinition<Input, Output> {
   readonly output: Schema<Output>
 }
 
-/** A tool exposing one command; `Input` defaults to the full command payload. */
-export interface CommandTool<K extends CommandType, Output, Input = CommandOf<K>> extends ToolDefinition<Input, Output> {
+/** A tool exposing one command; its output is the command's declared result. */
+export interface CommandTool<K extends CommandType, Input = CommandOf<K>>
+  extends ToolDefinition<Input, CommandResult<K>> {
   readonly command: K
 }
 
@@ -41,14 +43,14 @@ export interface CommandTool<K extends CommandType, Output, Input = CommandOf<K>
 export interface ResearcherTools {
   readonly readProgram: ToolDefinition<{ readonly programId: ProgramId }, ProgramSnapshot>
   readonly readMetrics: ToolDefinition<MetricQuery, MetricQueryResult>
-  readonly createIssue: CommandTool<'issue.create', Issue>
-  readonly claimIssue: CommandTool<'issue.claim', Issue>
-  readonly commentOnIssue: CommandTool<'issue.comment', Issue>
-  readonly proposeExperiment: CommandTool<'experiment.propose', OpenExperiment>
-  readonly reviewExperiment: CommandTool<'experiment.review', ExperimentReview>
-  readonly requestCI: CommandTool<'ci.request', CIRecord>
-  readonly closeIssue: CommandTool<'issue.close', Issue>
-  readonly closeExperiment: CommandTool<'experiment.close', Experiment>
+  readonly createIssue: CommandTool<'issue.create'>
+  readonly claimIssue: CommandTool<'issue.claim'>
+  readonly commentOnIssue: CommandTool<'issue.comment'>
+  readonly proposeExperiment: CommandTool<'experiment.propose', Omit<CommandOf<'experiment.propose'>, 'assignment'>>
+  readonly reviewExperiment: CommandTool<'experiment.review', Omit<CommandOf<'experiment.review'>, 'assignment'>>
+  readonly requestCI: CommandTool<'ci.request'>
+  readonly closeIssue: CommandTool<'issue.close'>
+  readonly closeExperiment: CommandTool<'experiment.close', Omit<CommandOf<'experiment.close'>, 'assignment'>>
 }
 
 /**
@@ -56,29 +58,25 @@ export interface ResearcherTools {
  * omits both: the Host knows which Ticket and Experiment own the Session.
  */
 export interface ImplementerTools {
-  readonly submitImplementation: CommandTool<
-    'ticket.submit',
-    ReadyExperiment,
-    Omit<CommandOf<'ticket.submit'>, 'binding'>
-  >
+  readonly submitImplementation: CommandTool<'ticket.submit', Omit<CommandOf<'ticket.submit'>, 'binding'>>
   readonly readExperiment: ToolDefinition<{ readonly experimentId: ExperimentId }, Experiment>
 }
 
 /** Operator tools; the adapter only registers them on the operator surface. */
 export interface OperatorTools {
-  readonly createProgram: CommandTool<'program.create', Program>
-  readonly pauseProgram: CommandTool<'program.pause', Program>
-  readonly resumeProgram: CommandTool<'program.resume', Program>
-  readonly stopProgram: CommandTool<'program.stop', Program>
-  readonly setGoal: CommandTool<'program.set-goal', Program>
-  readonly setMethodology: CommandTool<'program.set-methodology', Program>
-  readonly setExploration: CommandTool<'program.set-exploration', Program>
-  readonly createIssue: CommandTool<'issue.create', Issue>
+  readonly createProgram: CommandTool<'program.create'>
+  readonly pauseProgram: CommandTool<'program.pause'>
+  readonly resumeProgram: CommandTool<'program.resume'>
+  readonly stopProgram: CommandTool<'program.stop'>
+  readonly setGoal: CommandTool<'program.set-goal'>
+  readonly setMethodology: CommandTool<'program.set-methodology'>
+  readonly setExploration: CommandTool<'program.set-exploration'>
+  readonly createIssue: CommandTool<'issue.create'>
 }
 
 export interface WatchdogTools {
   readonly listStalled: ToolDefinition<Record<string, never>, readonly Issue[]>
-  readonly raiseAttention: ToolDefinition<{ readonly reason: string; readonly subject: string }, Attention>
+  readonly raiseAttention: ToolDefinition<{ readonly reason: string; readonly subject: AttentionSubject }, Attention>
   readonly readMetrics: ToolDefinition<MetricQuery, MetricQueryResult>
 }
 

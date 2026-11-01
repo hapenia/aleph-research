@@ -2,7 +2,13 @@
  * User commands. Payloads are data; who may issue them is fixed at compile time by
  * CapabilityForCommand and ActorForCommand, and the result type by CommandResultMap.
  */
-import type { ImplementerPrincipal, OperatorPrincipal, ResearcherPrincipal, TicketBinding } from './actors.js'
+import type {
+  ImplementerPrincipal,
+  IssueAssignment,
+  OperatorPrincipal,
+  ResearcherPrincipal,
+  TicketBinding,
+} from './actors.js'
 import type {
   CommitSha,
   DurationMs,
@@ -94,12 +100,16 @@ export interface ProposeExperimentCommand {
   readonly type: 'experiment.propose'
   readonly programId: ProgramId
   readonly issueId: IssueId
+  /** Host-injected ownership proof; the tool input omits it. */
+  readonly assignment: IssueAssignment
   readonly plan: ExperimentPlan
 }
 export interface ReviewExperimentCommand {
   readonly type: 'experiment.review'
   readonly programId: ProgramId
   readonly experimentId: ExperimentId
+  /** Host-injected ownership proof; the tool input omits it. */
+  readonly assignment: IssueAssignment
   readonly body: NonEmptyString
   readonly verdict: 'approve' | 'request-changes' | 'comment'
 }
@@ -107,6 +117,8 @@ export interface CloseExperimentCommand {
   readonly type: 'experiment.close'
   readonly programId: ProgramId
   readonly experimentId: ExperimentId
+  /** Host-injected ownership proof; the tool input omits it. */
+  readonly assignment: IssueAssignment
   readonly reason: NonEmptyString
 }
 export interface RequestCICommand {
@@ -256,8 +268,8 @@ export type CommandOutcome<K extends CommandType> =
   | {
       readonly ok: false
       readonly error: DomainError
-      /** Refusals are audited too; they may carry entries for the attempted action. */
-      readonly audit: NonEmptyArray<AuditEntry>
+      /** Refusals are audited as a `command.refused` fact, not as a successful action. */
+      readonly audit: NonEmptyArray<AuditEntryOf<'command.refused'>>
     }
 
 

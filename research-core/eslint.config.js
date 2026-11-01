@@ -33,8 +33,12 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'error',
         {
-          selector: 'CallExpression[callee.property.name=/^(create|fromRow)$/]',
-          message: 'State construction goes through the declared factory/hydration boundary only.',
+          selector: 'TSTypePredicate',
+          message: 'User-defined type predicates can forge any nominal type; parse inside the boundary instead.',
+        },
+        {
+          selector: "MemberExpression[object.name='JSON']",
+          message: 'Hydration goes through the boundary parser, not JSON.',
         },
         {
           selector: "CallExpression[callee.object.name='JSON'][callee.property.name='parse']",
@@ -49,11 +53,22 @@ export default tseslint.config(
           message: 'Dynamic imports are not part of the domain package.',
         },
       ],
-      'no-restricted-globals': ['error', 'process', 'fetch', 'setTimeout', 'setInterval'],
+      'no-restricted-globals': ['error', 'process', 'fetch', 'setTimeout', 'setInterval', 'globalThis'],
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/factories.js', '**/hydration.js', '**/parsers.js'],
+              message: 'Boundary modules are imported only by the adapter/composition root.',
+            },
+          ],
+        },
+      ],
     },
   },
   {
-    files: ['src/type-tests.ts', 'src/factories.ts', 'src/hydration.ts'],
+    files: ['src/type-tests.ts', 'src/factories.ts', 'src/hydration.ts', 'src/parsers.ts'],
     rules: {
       '@typescript-eslint/consistent-type-assertions': 'off',
       'no-restricted-syntax': 'off',
@@ -62,6 +77,7 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-call': 'off',
       '@typescript-eslint/no-unsafe-member-access': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',
+      'no-restricted-imports': 'off',
     },
   },
   {

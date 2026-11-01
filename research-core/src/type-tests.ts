@@ -24,9 +24,14 @@ import type {
   IssueId,
   IssueRepository,
   OpenIssue,
+  ReadyExperiment,
   AssignedIssue,
   IssueAssignment,
   CIPendingExperiment,
+  TriggerReportFor,
+  CIRequestToken,
+  ApiWriteRoutes,
+  SubmittedTicket,
   CompletedProgram,
   ExperimentId,
   OperatorPrincipal,
@@ -166,6 +171,42 @@ declare const pendingExperiment: CIPendingExperiment
 // @ts-expect-error a Researcher cannot cancel pending CI
 pendingExperiment.cancel(someResearcher, at)
 pendingExperiment.cancel(host, at)
+
+// Transitions that check ownership return Result; the state itself is not the outcome.
+declare const readyExperiment: ReadyExperiment
+declare const ciRequestToken: CIRequestToken
+// @ts-expect-error requestCI returns a Result, not a bare pending Experiment
+const barePending: CIPendingExperiment = readyExperiment.requestCI(issueAssignment, ciRequestToken, at)
+const ownershipChecked: import('./types/errors.js').Result<CIPendingExperiment, import('./types/errors.js').DomainError> =
+  readyExperiment.requestCI(issueAssignment, ciRequestToken, at)
+
+// Closing a passed Experiment needs the ownership token, not a principal.
+declare const passedExperiment: CIPassedExperiment
+// @ts-expect-error a Researcher principal is not an ownership token
+passedExperiment.close(someResearcher, 'done' as NonEmptyString, at)
+
+// Refusal audit is the command.refused fact, not the successful action.
+// @ts-expect-error a refusal cannot cite the successful pause entry
+const wrongRefusalAudit: CommandOutcome<'program.pause'> = {
+  ok: false,
+  error: { code: 'invalid-state', message: 'x' as NonEmptyString },
+  audit: [pauseAudit],
+}
+
+// The trigger kind follows literally from the action.
+declare const passedTrigger: TriggerReportFor<'ci.passed'>
+const passedTriggerKind: 'ci-passed' = passedTrigger.kind
+
+// A write route only parses; it cannot return an outcome without the executor.
+declare const writeRoutes: ApiWriteRoutes
+const parsedCIRequest: import('./types/errors.js').Result<
+  import('./types/commands.js').CommandOf<'ci.request'>,
+  import('./types/errors.js').DomainError
+> = writeRoutes['ci.request']({})
+
+// Ticket fields are discriminated by status.
+declare const submittedTicket: SubmittedTicket
+const submittedHead: import('./types/ids.js').CommitSha = submittedTicket.head
 
 // A completed Program has no transitions left.
 declare const completedProgram: CompletedProgram

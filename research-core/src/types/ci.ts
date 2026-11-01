@@ -1,5 +1,4 @@
 /** CI completion tokens: only the Host CI runner can mint one. */
-import type { ArtifactRef } from './artifacts.js'
 import type { FailedCIRecord, PassedCIRecord } from './metrics.js'
 import type { DomainError } from './errors.js'
 import type { Result, StoreError } from './errors.js'
@@ -14,30 +13,30 @@ export type CIFailureReason =
   | 'infrastructure'
   | 'cancelled'
 
+/** Proof that the Host accepted a CI request for one Experiment and commit. */
+export declare class CIRequestToken {
+  private constructor()
+  private readonly __ciRequest: true
+  readonly ciRunId: CIRunId
+  readonly experimentId: ExperimentId
+  readonly commit: CommitSha
+  readonly requestedAt: IsoTimestamp
+}
+
 /** Proof that a specific Experiment/commit finished CI successfully. */
 export declare class PassedCICompletion {
   private constructor()
   private readonly __passedCompletion: true
-  readonly record: PassedCIRecord
   readonly ciRunId: CIRunId
-  readonly experimentId: ExperimentId
-  readonly commit: CommitSha
-  readonly metrics: PassedCIRecord['metrics']
-  readonly artifacts: readonly ArtifactRef[]
-  readonly environmentDigest: string
-  readonly durationMs: PassedCIRecord['durationMs']
-  readonly finishedAt: IsoTimestamp
+  /** The single source of the evidence; association is checked against its fields. */
+  readonly record: PassedCIRecord
 }
 
 /** Proof that a specific Experiment/commit failed CI for a stated reason. */
 export declare class FailedCICompletion {
   private constructor()
   private readonly __failedCompletion: true
-  readonly record: FailedCIRecord
   readonly ciRunId: CIRunId
-  readonly experimentId: ExperimentId
-  readonly commit: CommitSha
-  readonly reason: CIFailureReason
-  readonly detail: string
-  readonly finishedAt: IsoTimestamp
+  /** The single source of the evidence; association is checked against its fields. */
+  readonly record: FailedCIRecord
 }

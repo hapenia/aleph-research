@@ -17,7 +17,9 @@ import type {
   WatchdogPrincipal,
 } from './types/actors.js'
 import type { ArtifactRef } from './types/artifacts.js'
-import type { FailedCICompletion, PassedCICompletion } from './types/ci.js'
+import type { ExplorationLevel } from './types/program.js'
+import type { ExplorationPreset } from './types/sampling.js'
+import type { CIRequestToken, FailedCICompletion, PassedCICompletion } from './types/ci.js'
 import type { DomainError, Result } from './types/errors.js'
 import type { DerivedLineage, FreshLineage, OpenExperiment } from './types/experiment.js'
 import type { OpenIssue } from './types/issue.js'
@@ -37,6 +39,7 @@ import type {
 } from './types/ids.js'
 
 export declare function createHostPrincipal(): HostPrincipal
+export declare function createClock(): import('./types/services.js').Clock
 export declare function createOperatorPrincipal(sessionId: OperatorSessionId): OperatorPrincipal
 export declare function createResearcherPrincipal(sessionId: ResearcherSessionId): ResearcherPrincipal
 export declare function createImplementerPrincipal(
@@ -59,6 +62,9 @@ export declare function createDerivedLineage(input: unknown): Result<DerivedLine
 export declare function createFreshLineage(input: unknown): Result<FreshLineage, DomainError>
 export declare function createArtifactRef(input: unknown): Result<ArtifactRef, DomainError>
 
+export declare const EXPLORATION_PRESETS: Readonly<Record<ExplorationLevel, ExplorationPreset>>
+
+export declare function createCIRequestToken(input: unknown): Result<CIRequestToken, DomainError>
 export declare function createPassedCICompletion(input: unknown): Result<PassedCICompletion, DomainError>
 export declare function createFailedCICompletion(input: unknown): Result<FailedCICompletion, DomainError>
 

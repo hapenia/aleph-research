@@ -12,13 +12,6 @@ export interface ExplorationPreset {
   readonly freshStartProbability: number
 }
 
-/** Fixed table; no per-Program override (review decision). */
-export const EXPLORATION_PRESETS: Readonly<Record<ExplorationLevel, ExplorationPreset>> = {
-  low: { temperature: 0.2, freshStartProbability: 0.02 },
-  normal: { temperature: 1.0, freshStartProbability: 0.1 },
-  high: { temperature: 3.0, freshStartProbability: 0.25 },
-}
-
 /** What the sampler chose; the Host turns it into a lineage and never trusts a caller. */
 export type BaseChoice =
   | { readonly kind: 'derived'; readonly experimentId: ExperimentId; readonly commit: CommitSha }
@@ -34,11 +27,15 @@ export interface SampleCandidate {
 export interface SampleInput {
   readonly level: ExplorationLevel
   readonly definitions: readonly MetricDefinition[]
+  /** Injected RNG so sampling is reproducible in tests. */
+  readonly random: () => number
   /** Every Experiment with at least one valid CI record; may be empty on bootstrap. */
   readonly population: readonly SampleCandidate[]
 }
 
 /** The Host uses this port; implementations are pure functions with an injected RNG. */
 export interface Sampler {
+  /** Fixed presets, no per-Program override. */
+  presets(level: ExplorationLevel): ExplorationPreset
   sample(input: SampleInput): Result<BaseChoice, DomainError>
 }

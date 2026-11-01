@@ -19,10 +19,9 @@ export interface MetricDefinition {
   readonly name: MetricName
   readonly direction: MetricDirection
   readonly weight: PositiveNumber
-  readonly required: boolean
 }
 
-export type MetricMap = ReadonlyMap<MetricName, number>
+export type MetricMap = Readonly<Record<MetricName, number>>
 
 interface CIRecordBase {
   readonly id: CIRunId

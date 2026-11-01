@@ -42,6 +42,7 @@ export type AuditAction =
   | 'ci.failed'
   | 'artifact.stored'
   | 'attention.raised'
+  | 'command.refused'
 
 export type ActorKindForAction = {
   readonly 'program.created': 'operator'
@@ -71,6 +72,7 @@ export type ActorKindForAction = {
   readonly 'ci.failed': 'host'
   readonly 'artifact.stored': 'host'
   readonly 'attention.raised': 'watchdog' | 'host'
+  readonly 'command.refused': 'operator' | 'researcher' | 'implementer' | 'watchdog' | 'host'
 }
 
 export type SubjectKindForAction = {
@@ -99,6 +101,7 @@ export type SubjectKindForAction = {
   readonly 'ci.failed': 'ci-run'
   readonly 'artifact.stored': 'artifact'
   readonly 'attention.raised': 'program'
+  readonly 'command.refused': 'program'
 }
 
 /** Typed subject per kind: the id type cannot be mixed with another subject. */
@@ -130,6 +133,7 @@ export type SubjectForAction = {
   readonly 'ci.failed': { readonly kind: 'ci-run'; readonly id: CIRunId }
   readonly 'artifact.stored': { readonly kind: 'artifact'; readonly id: ArtifactId }
   readonly 'attention.raised': { readonly kind: 'program'; readonly id: ProgramId }
+  readonly 'command.refused': { readonly kind: 'program'; readonly id: ProgramId }
 }
 
 interface AuditBase<A extends AuditAction> {

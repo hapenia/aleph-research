@@ -65,37 +65,21 @@ export interface CreateIssueDto {
   readonly labels: readonly string[]
 }
 
-/** Parsers refine untrusted bodies into commands; validation errors are domain refusals. */
-export interface RequestParsers {
-  createProgram(input: unknown): Result<CommandOf<'program.create'>, DomainError>
-  pauseProgram(input: unknown): Result<CommandOf<'program.pause'>, DomainError>
-  resumeProgram(input: unknown): Result<CommandOf<'program.resume'>, DomainError>
-  stopProgram(input: unknown): Result<CommandOf<'program.stop'>, DomainError>
-  setGoal(input: unknown): Result<CommandOf<'program.set-goal'>, DomainError>
-  setMethodology(input: unknown): Result<CommandOf<'program.set-methodology'>, DomainError>
-  setExploration(input: unknown): Result<CommandOf<'program.set-exploration'>, DomainError>
-  createIssue(input: unknown): Result<CommandOf<'issue.create'>, DomainError>
-  claimIssue(input: unknown): Result<CommandOf<'issue.claim'>, DomainError>
-  commentIssue(input: unknown): Result<CommandOf<'issue.comment'>, DomainError>
-  closeIssue(input: unknown): Result<CommandOf<'issue.close'>, DomainError>
-  proposeExperiment(input: unknown): Result<CommandOf<'experiment.propose'>, DomainError>
-  reviewExperiment(input: unknown): Result<CommandOf<'experiment.review'>, DomainError>
-  closeExperiment(input: unknown): Result<CommandOf<'experiment.close'>, DomainError>
-  requestCI(input: unknown): Result<CommandOf<'ci.request'>, DomainError>
-}
-
 /**
- * Every write route is an executor call with the command's own actor type. A handler
- * cannot write state directly: it receives the executor and returns its typed outcome,
- * and the HTTP layer only maps the outcome to a status.
+ * A write route only parses. It cannot fabricate a success or choose another command:
+ * the generic `executeRoute` takes the route key, the typed actor and the executor.
  */
 export type ApiWriteRoutes = {
-  readonly [K in CommandType]: (
-    executor: CommandExecutor,
-    actor: ActorOfCommand<K>,
-    input: unknown,
-  ) => Promise<CommandOutcome<K>>
+  readonly [K in CommandType]: (input: unknown) => Result<CommandOf<K>, DomainError>
 }
+
+export declare function executeRoute<K extends CommandType>(
+  routes: ApiWriteRoutes,
+  executor: CommandExecutor,
+  actor: ActorOfCommand<K>,
+  route: K,
+  input: unknown,
+): Promise<CommandOutcome<K>>
 
 /** The panel surface; read-only and the only non-write route family. */
 export interface PanelApi {

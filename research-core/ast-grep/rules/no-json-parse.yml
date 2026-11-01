@@ -1,12 +1,15 @@
 id: no-json-parse
 language: TypeScript
 severity: error
-message: Hydration goes through the fromRow boundary, not JSON.parse.
+message: Hydration goes through the boundary parser, not JSON.parse (including globalThis.JSON).
 files:
   - 'src/**/*.ts'
 ignores:
   - 'src/type-tests.ts'
   - 'src/factories.ts'
   - 'src/hydration.ts'
+  - 'src/parsers.ts'
 rule:
-  pattern: JSON.parse($ARG)
+  any:
+    - pattern: JSON.parse($ARG)
+    - pattern: globalThis.JSON.parse($ARG)

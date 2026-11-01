@@ -5,9 +5,10 @@ several parts were still software-engineering thinking. v5 keeps the useful coll
 shape, removes every merge semantic, replaces best/quota with Boltzmann sampling and raw
 metrics, and records the lifecycle decisions the reviews forced.
 
-`research-core/` holds the v2 TypeScript blueprint rewritten against this mechanism; it
-was rejected by the second independent adversarial review and is being revised. The
-mechanism text below is the authority for that revision.
+`research-core/` holds the v3.1 TypeScript blueprint rewritten against this mechanism. It
+has been through four independent adversarial reviews; the latest revision adds
+factory/hydration/parser boundaries, ownership and CI tokens, a single write path and a
+mutation harness. The mechanism text below is the authority for the blueprint.
 
 ## Actors and powers
 

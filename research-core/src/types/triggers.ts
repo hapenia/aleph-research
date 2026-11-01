@@ -8,6 +8,7 @@ import type { ProgramSnapshot } from './api.js'
 export type ResearchTriggerKind =
   | 'program-created'
   | 'program-paused'
+  | 'program-budget-paused'
   | 'program-resumed'
   | 'program-stopped'
   | 'program-completed'
@@ -24,6 +25,7 @@ export type ResearchTriggerKind =
   | 'experiment-revised'
   | 'experiment-reviewed'
   | 'experiment-closed'
+  | 'experiment-cancelled'
   | 'ci-requested'
   | 'ci-started'
   | 'ci-passed'
@@ -32,9 +34,36 @@ export type ResearchTriggerKind =
   | 'usage-recorded'
   | 'attention-raised'
 
-/** Compile-time total map; adding an audit action forces a trigger decision. */
-export type TriggerKindForAction = {
-  readonly [A in AuditAction]: ResearchTriggerKind | null
+/** Explicit literal map: every action names its one trigger kind (or null). */
+export interface TriggerKindForAction {
+  readonly 'program.created': 'program-created'
+  readonly 'program.paused': 'program-paused'
+  readonly 'program.resumed': 'program-resumed'
+  readonly 'program.stopped': 'program-stopped'
+  readonly 'program.budget-paused': 'program-budget-paused'
+  readonly 'program.goal-changed': 'program-goal-changed'
+  readonly 'program.methodology-changed': 'program-methodology-changed'
+  readonly 'program.exploration-changed': 'program-exploration-changed'
+  readonly 'program.completed': 'program-completed'
+  readonly 'usage.recorded': 'usage-recorded'
+  readonly 'issue.created': 'issue-created'
+  readonly 'issue.claimed': 'issue-claimed'
+  readonly 'issue.commented': 'issue-commented'
+  readonly 'issue.closed': 'issue-closed'
+  readonly 'experiment.proposed': 'experiment-proposed'
+  readonly 'experiment.opened': 'experiment-opened'
+  readonly 'experiment.revised': 'experiment-revised'
+  readonly 'experiment.ready': 'experiment-ready'
+  readonly 'experiment.reviewed': 'experiment-reviewed'
+  readonly 'experiment.closed': 'experiment-closed'
+  readonly 'experiment.cancelled': 'experiment-cancelled'
+  readonly 'ci.requested': 'ci-requested'
+  readonly 'ci.started': 'ci-started'
+  readonly 'ci.passed': 'ci-passed'
+  readonly 'ci.failed': 'ci-failed'
+  readonly 'artifact.stored': 'artifact-stored'
+  readonly 'attention.raised': 'attention-raised'
+  readonly 'command.refused': null
 }
 
 export type ResearchThreadRef =
