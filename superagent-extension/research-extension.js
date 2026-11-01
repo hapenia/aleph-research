@@ -460,6 +460,7 @@ export function apply(ctx) {
         evaluationMarker: evaluation.marker,
         trigger: received,
         stdoutTail: evaluation.stdout.trim().split(/\r?\n/).slice(-8),
+        stderrTail: evaluation.stderr.trim().split(/\r?\n/).slice(-8),
       }
     },
   })))
