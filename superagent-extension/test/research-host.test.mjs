@@ -9,6 +9,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Readable } from 'node:stream'
+import { format } from 'node:util'
 
 import { apply, inject, name, VERSION } from '../research-host.js'
 
@@ -27,10 +28,15 @@ const PROGRAM_BODY = {
   budget: { maxExperiments: 3, maxComputeMinutes: 30, maxTokens: 1000 },
 }
 
-/** A fake Cordis context: routes are collected, effects are tracked and disposable. */
-function fakeContext() {
+/**
+ * A fake Cordis context: routes are collected, effects are tracked and disposable, and
+ * `get(name)` resolves the optional services a test provides. `getError` simulates a
+ * context whose lookup throws instead of returning `undefined`.
+ */
+function fakeContext({ services = new Map(), getError } = {}) {
   const routes = []
   const cleanups = []
+  const warnings = []
   const ctx = {
     webServer: {
       register(route, handler) {
@@ -40,6 +46,16 @@ function fakeContext() {
           const index = routes.indexOf(registered)
           if (index >= 0) routes.splice(index, 1)
         }
+      },
+    },
+    get(serviceName) {
+      if (getError !== undefined) throw getError
+      return services.get(serviceName)
+    },
+    logger: {
+      info() {},
+      warn(message, ...args) {
+        warnings.push(format(message, ...args))
       },
     },
     effect(setup) {
@@ -54,6 +70,7 @@ function fakeContext() {
   return {
     ctx,
     routes,
+    warnings,
     find(kind, path) {
       return routes.find((route) => route.kind === kind && route.path === path)
     },
@@ -115,6 +132,58 @@ function fakeHost(overrides = {}) {
   return { host, calls }
 }
 
+/**
+ * A minimal in-memory `DomainStore`: the exact port the compiled
+ * `createStorageDomainUnitOfWork` expects (`list`, `get`, `put`, `delete`). Each row keeps
+ * the version envelope the real DSH store persists, so the adapter's optimistic check and
+ * hydration run unchanged. The maps live outside any host instance, so two hosts that
+ * receive this store share one durable state.
+ */
+function fakeDomainStore() {
+  const tables = new Map()
+
+  const tableOf = (table) => {
+    const existing = tables.get(table)
+    if (existing !== undefined) return existing
+    const created = new Map()
+    tables.set(table, created)
+    return created
+  }
+
+  const rowOf = (key, record) => ({
+    key,
+    value: structuredClone(record.value),
+    version: record.version,
+    etag: `etag-${record.version}`,
+  })
+
+  return {
+    tables,
+    async list(table) {
+      return [...tableOf(table)].map(([key, record]) => rowOf(key, record))
+    },
+    async get(table, key) {
+      const record = tableOf(table).get(key)
+      return record === undefined ? undefined : rowOf(key, record)
+    },
+    async put(table, key, value, expected) {
+      const rows = tableOf(table)
+      const current = rows.get(key)
+      const actual = current === undefined ? 0 : current.version
+      if (actual !== expected) {
+        return { ok: false, error: { kind: 'version-conflict', expected, actual } }
+      }
+      const version = actual + 1
+      rows.set(key, { version, value: structuredClone(value) })
+      return { ok: true, value: { version, etag: `etag-${version}` } }
+    },
+    async delete(table, key) {
+      tableOf(table).delete(key)
+      return { ok: true, value: undefined }
+    },
+  }
+}
+
 test('the plugin declares the host identity and registers five research routes', async () => {
   const harness = fakeContext()
   await apply(harness.ctx, {})
@@ -138,7 +207,7 @@ test('health answers the version with a no-store JSON response', async () => {
 
   const health = await invoke(harness.find('exact', HEALTH_PATH))
   assert.equal(health.status, 200)
-  assert.deepEqual(health.body, { ok: true, version: VERSION })
+  assert.deepEqual(health.body, { ok: true, version: VERSION, persistent: false })
   assert.equal(health.headers['content-type'], 'application/json; charset=utf-8')
   assert.equal(health.headers['cache-control'], 'no-store')
 
@@ -288,4 +357,127 @@ test('an unsupported configured actor kind fails startup instead of registering 
   const harness = fakeContext()
   await assert.rejects(apply(harness.ctx, { actorKinds: ['implementer'] }), /config\.actorKinds/)
   assert.equal(harness.routes.length, 0)
+})
+
+test('a missing alephResearchStore service falls back to memory with a warning', async () => {
+  const harness = fakeContext()
+  await apply(harness.ctx, {})
+
+  const health = await invoke(harness.find('exact', HEALTH_PATH))
+  assert.deepEqual(health.body, { ok: true, version: VERSION, persistent: false })
+  assert.ok(
+    harness.warnings.some((warning) => warning.includes('alephResearchStore')),
+    `expected a persistence warning; got ${JSON.stringify(harness.warnings)}`,
+  )
+
+  const created = await invoke(harness.find('exact', REQUESTS_PATH), {
+    method: 'POST',
+    body: { path: '/aleph/api/programs', body: PROGRAM_BODY },
+  })
+  assert.equal(created.status, 201)
+  const listed = await invoke(harness.find('exact', PROGRAMS_PATH))
+  assert.equal(listed.body.count, 1)
+
+  await harness.dispose()
+})
+
+test('a throwing service lookup falls back to memory without failing startup', async () => {
+  const harness = fakeContext({ getError: new Error('service registry unavailable') })
+  await apply(harness.ctx, {})
+
+  assert.equal((await invoke(harness.find('exact', HEALTH_PATH))).body.persistent, false)
+  assert.ok(
+    harness.warnings.some((warning) => warning.includes('service registry unavailable')),
+    `expected the lookup failure to be warned; got ${JSON.stringify(harness.warnings)}`,
+  )
+  assert.equal(harness.routes.length, 5)
+
+  await harness.dispose()
+})
+
+test('an invalid alephResearchStore service falls back to memory with a warning', async () => {
+  const services = new Map([['alephResearchStore', { list: async () => [] }]])
+  const harness = fakeContext({ services })
+  await apply(harness.ctx, {})
+
+  const health = await invoke(harness.find('exact', HEALTH_PATH))
+  assert.equal(health.body.persistent, false)
+  assert.ok(
+    harness.warnings.some((warning) => warning.includes('not a DomainStore')),
+    `expected an invalid-store warning; got ${JSON.stringify(harness.warnings)}`,
+  )
+
+  const created = await invoke(harness.find('exact', REQUESTS_PATH), {
+    method: 'POST',
+    body: { path: '/aleph/api/programs', body: PROGRAM_BODY },
+  })
+  assert.equal(created.status, 201)
+  assert.equal((await invoke(harness.find('exact', PROGRAMS_PATH))).body.count, 1)
+
+  await harness.dispose()
+})
+
+test('a domain store service persists a Program across host instances', async () => {
+  const store = fakeDomainStore()
+  const services = new Map([['alephResearchStore', store]])
+
+  const first = fakeContext({ services })
+  await apply(first.ctx, {})
+  assert.equal((await invoke(first.find('exact', HEALTH_PATH))).body.persistent, true)
+
+  const created = await invoke(first.find('exact', REQUESTS_PATH), {
+    method: 'POST',
+    body: { path: '/aleph/api/programs', body: PROGRAM_BODY },
+  })
+  assert.equal(created.status, 201)
+  const programId = created.body.value.id
+  assert.equal(store.tables.get('programs')?.size, 1, 'the Program is written through the DomainStore')
+  assert.equal(first.warnings.length, 0, 'a usable store needs no fallback warning')
+
+  await first.dispose()
+
+  // A second host over the same DomainStore represents a process restart: only the
+  // persistent store can supply the Program created by the first instance.
+  const second = fakeContext({ services })
+  await apply(second.ctx, {})
+  assert.equal((await invoke(second.find('exact', HEALTH_PATH))).body.persistent, true)
+
+  const listed = await invoke(second.find('exact', PROGRAMS_PATH))
+  assert.equal(listed.status, 200)
+  assert.equal(listed.body.count, 1)
+  assert.equal(listed.body.programs[0].id, programId)
+  assert.equal(listed.body.programs[0].status, 'running')
+
+  const snapshot = await invoke(second.find('prefix', PROGRAMS_PATH), {
+    url: `/aleph/api/research/programs/${programId}`,
+  })
+  assert.equal(snapshot.status, 200)
+  assert.equal(snapshot.body.value.program.id, programId)
+  assert.deepEqual(snapshot.body.value.audit.map((entry) => entry.action), ['program.created'])
+
+  const attention = await invoke(second.find('prefix', ATTENTION_PATH), {
+    url: `/aleph/api/research/attention/${programId}`,
+  })
+  assert.equal(attention.status, 200)
+  assert.deepEqual(attention.body.attention, [])
+
+  await second.dispose()
+})
+
+test('config.domainStore composes the persistent store without the service', async () => {
+  const store = fakeDomainStore()
+  const harness = fakeContext()
+  await apply(harness.ctx, { domainStore: store })
+
+  assert.equal((await invoke(harness.find('exact', HEALTH_PATH))).body.persistent, true)
+
+  const created = await invoke(harness.find('exact', REQUESTS_PATH), {
+    method: 'POST',
+    body: { path: '/aleph/api/programs', body: PROGRAM_BODY },
+  })
+  assert.equal(created.status, 201)
+  assert.equal(store.tables.get('programs')?.size, 1)
+  assert.equal((await invoke(harness.find('exact', PROGRAMS_PATH))).body.count, 1)
+
+  await harness.dispose()
 })

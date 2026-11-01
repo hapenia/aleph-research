@@ -3,16 +3,30 @@
  *
  * The runtime composition root in `research-core` owns the domain; this module is the
  * transport adapter. It composes one `ResearchHost` (an in-memory store unless config
- * injects a store or a whole host), registers the browser-facing routes below, and
- * disposes both the routes and the host when the plugin fiber goes away.
+ * injects a store, a persistent `DomainStore` exists, or a whole host is injected),
+ * registers the browser-facing routes below, and disposes both the routes and the host
+ * when the plugin fiber goes away.
  *
  * Routes (all JSON, all `cache-control: no-store`):
  *
- *   GET  /aleph/api/research/health              -> { ok, version }
+ *   GET  /aleph/api/research/health              -> { ok, version, persistent }
  *   POST /aleph/api/research/requests            -> the runtime's HTTP response
  *   GET  /aleph/api/research/programs            -> { ok, count, programs }
  *   GET  /aleph/api/research/programs/:programId -> the runtime's ProgramSnapshot
  *   GET  /aleph/api/research/attention/:programId -> { ok, programId, attention }
+ *
+ * ## Persistence
+ *
+ * The plugin declares only `webServer` and reads the optional `alephResearchStore`
+ * service with `ctx.get` at apply time. `research-storage` provides that service as a
+ * `DomainStore` over the opened `aleph_research` DSH domain. When the service is present
+ * (or `config.domainStore` names one), the plugin builds the compiled
+ * `createStorageDomainUnitOfWork(domainStore, { transactionMode: 'snapshot' })` and passes
+ * that persistent UnitOfWork to `createResearchHost`, so programs and their records
+ * survive a host restart. An absent, throwing or malformed lookup never fails startup: it
+ * falls back to the in-memory store with a warning, and the health route then reports
+ * `persistent: false`. `config.host` bypasses composition entirely and reports
+ * `persistent: false` too, because the transport did not build the store.
  *
  * `POST /requests` is the only write surface. Its body is
  * `{ path, body, actorKind? }`; the adapter turns it into the runtime's HttpRequest
@@ -30,13 +44,21 @@
  *   `operator`, `researcher`, `watchdog`, `host`. `implementer` is refused because its
  *   principal carries a Host-minted Ticket binding that an HTTP body must never supply.
  * - `maxBodyBytes` — request body limit for `/requests`. Default 256 KiB.
+ * - `domainStore` — an explicit persistent `DomainStore` (the `research-core` adapter
+ *   port: `list`, `get`, `put`, `delete`). It takes precedence over the
+ *   `alephResearchStore` service and over `config.store`. A malformed value falls back
+ *   to memory with a warning, like a malformed service.
  * - `host` — an already composed ResearchHost; it is used as-is and disposed on cleanup.
+ *   A host bypasses composition, so neither `domainStore` nor the service is consulted.
  * - `store`, `clock`, `requestIds`, `hostContexts`, `sampler`, `triggerPort`, `random` —
- *   passed through to `createResearchHost`. An absent `store` gets the in-memory one.
+ *   passed through to `createResearchHost`. An absent `store` gets the in-memory one,
+ *   and a resolved `domainStore` replaces it with the persistent UnitOfWork.
  *
  * The dynamic import is the build boundary: `research-core` returns TypeScript, so this
  * adapter consumes `dist/`. A missing or broken `dist/` fails startup with the build
- * command to run instead of registering a half-working route table.
+ * command to run instead of registering a half-working route table. Only
+ * `dist/adapter/composition.js` is loaded when persistence is off;
+ * `dist/adapter/storage-domain.js` is loaded on demand when a `DomainStore` is used.
  *
  * `JSON.parse` is deliberately absent: the adapter's ESLint boundary confines it to the
  * designated format-parser modules, so the request body goes through the platform
@@ -70,7 +92,19 @@ const SUPPORTED_ACTOR_KINDS = ['operator', 'researcher', 'watchdog', 'host']
 /** Prefix of the stable Sessions the adapter mints; valid entity ids (colons allowed). */
 const SESSION_PREFIX = 'aleph-host'
 
+/**
+ * The optional service `research-storage` provides with the opened `DomainStore`.
+ *
+ * The literal matches `STORE_SERVICE_NAME` in `research-storage.js`; importing that module
+ * would make the optional store (and its zod/DSH wiring) a hard dependency of this one.
+ */
+const STORE_SERVICE_NAME = 'alephResearchStore'
+
+/** Methods a `DomainStore` must expose before the adapter treats a service as usable. */
+const DOMAIN_STORE_METHODS = ['list', 'get', 'put', 'delete']
+
 const COMPOSITION_URL = new URL('../research-core/dist/adapter/composition.js', import.meta.url)
+const STORAGE_DOMAIN_URL = new URL('../research-core/dist/adapter/storage-domain.js', import.meta.url)
 
 /** A refusal this transport understands; anything else becomes a generic 500. */
 class HttpError extends Error {
@@ -188,17 +222,111 @@ const actorKindFor = (requested, allowed) => {
   return requested
 }
 
-/** Load the built runtime; a missing dist is a startup error naming the fix. */
-const loadComposition = async () => {
+/** Import one compiled runtime module; a missing dist is a startup error naming the fix. */
+const importCompiled = async (url) => {
   try {
-    return await import(COMPOSITION_URL.href)
+    return await import(url.href)
   } catch (error) {
     const reason = String(error?.message ?? error)
     throw new Error(
-      `aleph-research-host: cannot load the compiled research runtime at ${COMPOSITION_URL.pathname} (${reason}). `
+      `aleph-research-host: cannot load the compiled research runtime at ${url.pathname} (${reason}). `
       + 'Run "npm run build" in research-core.',
       { cause: error },
     )
+  }
+}
+
+/**
+ * Load the compiled modules this fiber needs.
+ *
+ * The storage-domain adapter is imported only when a persistent store was resolved, so a
+ * host that runs in memory depends on `composition.js` alone.
+ */
+const loadRuntime = async (withStorageDomain) => {
+  const composition = await importCompiled(COMPOSITION_URL)
+  const storageDomain = withStorageDomain ? await importCompiled(STORAGE_DOMAIN_URL) : undefined
+  return { composition, storageDomain }
+}
+
+/** True when `value` exposes the four methods the storage-domain adapter calls. */
+const isDomainStore = (value) => {
+  if (typeof value !== 'object' || value === null) return false
+  for (const method of DOMAIN_STORE_METHODS) {
+    if (typeof value[method] !== 'function') return false
+  }
+  return true
+}
+
+/** Warn once about a missing or unusable optional store; the caller falls back to memory. */
+const warnMemoryFallback = (ctx, reason) => {
+  ctx.logger?.warn?.(
+    'aleph-research-host: %s; using the in-memory store (persistent: false). '
+    + 'Mount the aleph-research-storage plugin to persist research state.',
+    reason,
+  )
+}
+
+/**
+ * Resolve the optional persistent `DomainStore` for this fiber.
+ *
+ * `config.domainStore` wins when it is set; otherwise the `alephResearchStore` service is
+ * read with `ctx.get`, which needs no `inject` entry because the service is optional by
+ * design. Every refusal path warns and returns `undefined`; none throws, so a profile
+ * without the storage plugin still starts. The returned object is used to compose the
+ * persistent UnitOfWork.
+ */
+const resolveDomainStore = (ctx, settings) => {
+  if (settings.domainStore !== undefined) {
+    if (isDomainStore(settings.domainStore)) return settings.domainStore
+    warnMemoryFallback(ctx, 'config.domainStore is not a DomainStore (list/get/put/delete)')
+    return undefined
+  }
+  if (typeof ctx.get !== 'function') {
+    warnMemoryFallback(ctx, 'this context cannot resolve the alephResearchStore service')
+    return undefined
+  }
+  let provided
+  try {
+    provided = ctx.get(STORE_SERVICE_NAME)
+  } catch (error) {
+    const reason = String(error?.message ?? error)
+    warnMemoryFallback(ctx, `resolving the alephResearchStore service failed (${reason})`)
+    return undefined
+  }
+  if (provided === undefined) {
+    warnMemoryFallback(ctx, `no ${STORE_SERVICE_NAME} service is provided`)
+    return undefined
+  }
+  if (!isDomainStore(provided)) {
+    warnMemoryFallback(ctx, `the ${STORE_SERVICE_NAME} service is not a DomainStore (list/get/put/delete)`)
+    return undefined
+  }
+  return provided
+}
+
+/**
+ * Build the persistent UnitOfWork over one resolved `DomainStore`.
+ *
+ * `transactionMode: 'snapshot'` is explicit: DSH has no cross-table transaction (see
+ * `docs/notes/storage-domain-adapter.md`), so the adapter's snapshot/rollback compensation
+ * is the only transaction available. A compiled runtime without the factory is a stale
+ * `dist/`, which fails startup like a missing `composition.js`; a factory that rejects the
+ * store is reported as a fallback, because persistence is optional.
+ */
+const composePersistentStore = (ctx, storageDomain, domainStore) => {
+  const create = storageDomain?.createStorageDomainUnitOfWork
+  if (typeof create !== 'function') {
+    throw new Error(
+      'aleph-research-host: the compiled research runtime does not export createStorageDomainUnitOfWork. '
+      + 'Run "npm run build" in research-core.',
+    )
+  }
+  try {
+    return create(domainStore, { transactionMode: 'snapshot' })
+  } catch (error) {
+    const reason = String(error?.message ?? error)
+    warnMemoryFallback(ctx, `composing the persistent store failed (${reason})`)
+    return undefined
   }
 }
 
@@ -265,9 +393,11 @@ const tailOf = (url, prefix) => {
  *
  * A handler owns its whole response; the web server turns an escaping exception into a
  * 400 and a warning, so every handler catches and maps instead. The runtime's own
- * `status` is passed through untouched.
+ * `status` is passed through untouched. `persistent` is the health flag: it records
+ * whether this fiber composed the storage-domain UnitOfWork instead of the in-memory
+ * store, not whether the host currently has data.
  */
-const registerRoutes = (ctx, host, actorKinds, maxBodyBytes, disposers) => {
+const registerRoutes = (ctx, host, actorKinds, maxBodyBytes, persistent, disposers) => {
   const install = (route) => {
     const dispose = ctx.webServer.register(route)
     if (typeof dispose === 'function') disposers.push(dispose)
@@ -290,7 +420,7 @@ const registerRoutes = (ctx, host, actorKinds, maxBodyBytes, disposers) => {
     path: HEALTH_PATH,
     async handler(req, res) {
       if (req.method !== 'GET') return methodNotAllowed(res, 'GET')
-      sendJson(res, 200, { ok: true, version: VERSION })
+      sendJson(res, 200, { ok: true, version: VERSION, persistent })
     },
   })
 
@@ -387,8 +517,12 @@ export const apply = async (ctx, config) => {
   const settings = config ?? {}
   const actorKinds = actorKindsOf(settings.actorKinds)
   const maxBodyBytes = bodyLimitOf(settings.maxBodyBytes)
+  // An injected host owns its own store, so the optional service is not consulted: the
+  // health flag describes what this transport composed, not what the host may hold.
+  const domainStore = settings.host === undefined ? resolveDomainStore(ctx, settings) : undefined
 
   let host = null
+  let persistent = false
   let disposed = false
   const routeDisposers = []
   const releaseRoutes = () => {
@@ -419,15 +553,26 @@ export const apply = async (ctx, config) => {
   if (settings.host !== undefined) {
     composed = assertHost(settings.host, 'config.host')
   } else {
-    const runtime = await loadComposition()
+    const runtime = await loadRuntime(domainStore !== undefined)
     if (disposed) return
-    if (typeof runtime.createResearchHost !== 'function') {
+    if (typeof runtime.composition.createResearchHost !== 'function') {
       throw new Error(
         'aleph-research-host: the compiled research runtime does not export createResearchHost. '
         + 'Run "npm run build" in research-core.',
       )
     }
-    composed = assertHost(runtime.createResearchHost(hostOptionsOf(settings)), 'createResearchHost')
+    const options = hostOptionsOf(settings)
+    if (domainStore !== undefined) {
+      const store = composePersistentStore(ctx, runtime.storageDomain, domainStore)
+      if (store !== undefined) {
+        // The resolved DomainStore wins over an injected in-memory store: if the caller
+        // asked for persistence, silently ignoring it would lose exactly the state the
+        // option is meant to keep.
+        options.store = store
+        persistent = true
+      }
+    }
+    composed = assertHost(runtime.composition.createResearchHost(options), 'createResearchHost')
   }
   if (disposed) {
     await disposeHost(composed)
@@ -435,6 +580,10 @@ export const apply = async (ctx, config) => {
   }
   host = composed
 
-  registerRoutes(ctx, composed, actorKinds, maxBodyBytes, routeDisposers)
-  ctx.logger?.info?.('aleph-research-host ready: %d research routes', 5)
+  registerRoutes(ctx, composed, actorKinds, maxBodyBytes, persistent, routeDisposers)
+  ctx.logger?.info?.(
+    'aleph-research-host ready: %d research routes (persistent: %s)',
+    5,
+    String(persistent),
+  )
 }
