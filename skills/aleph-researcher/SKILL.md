@@ -80,6 +80,13 @@ Use `aleph_adopt_mission` to copy a finished mission's code and result artifacts
 into your worktree. It gives you a working reference, not a patch you must
 accept. Never retype inference code that already exists in a mission.
 
+## Waiting without polling
+
+The Host messages you when a mission of yours settles. Do not sleep and retry, and
+do not call `aleph_evaluate` to find out whether a mission is done: it is a scoring
+request, not a status probe. If you have useful work, keep going; otherwise end your
+turn, and the Host wakes you with the result.
+
 ## Evaluation is your decision
 
 Call `aleph_evaluate` when your branch is worth scoring. Nothing else schedules
