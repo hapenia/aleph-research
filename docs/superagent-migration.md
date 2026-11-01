@@ -163,8 +163,21 @@ reports the best score and commit next to the new score; `GET /aleph/api/results
 returns the brief, the best record and the recent evaluations for the panel and the
 Watchdog.
 
-Not yet done in Phase 2/3: wiring the budget decision into acceptance, the Watchdog
-Session itself, the panel, and retirement of the old plugin's roles.
+### Phase 4: the research panel
+
+`superagent-extension/client.js` is a Web client plugin registered by the same bundle:
+it adds an "AlephResearch" page and sidebar entry with the results summary (best score,
+commit, trajectory), the open tickets with their worktrees, and the orchestrator load
+and health. It polls the three routes every 10 s and disposes its timers with the page.
+
+The panel's "reload research extension" button POSTs `/aleph/api/reload`. The Host
+answers, then restarts the plugin fiber, so the Source kind, routes and settings are
+registered from scratch; module code that changed on disk still needs a host restart,
+configuration does not. `scripts/verify.sh` and CI now syntax-check both extension
+files.
+
+Not yet done: hot configuration versions and rollback, the Watchdog Session, budget
+wiring into acceptance, and retirement of the old plugin's roles.
 
 ## Next phases
 

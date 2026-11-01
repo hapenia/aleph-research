@@ -195,6 +195,24 @@ export function apply(ctx) {
         }
       },
     })
+    // The panel's "reload research extension": answer first, then restart the plugin
+    // fiber so the Source kind, routes and settings are registered from scratch. Module
+    // code that changed on disk still needs a host restart; configuration and route
+    // registration are hot.
+    child.webServer.register({
+      kind: 'exact',
+      path: '/aleph/api/reload',
+      async handler(req, res) {
+        if (req.method !== 'POST') return sendJson(res, 405, { ok: false })
+        const at = new Date().toISOString()
+        sendJson(res, 200, { ok: true, reloaded: true, at })
+        setTimeout(() => {
+          Promise.resolve(ctx.fiber?.restart?.()).catch((error) => {
+            ctx.logger.warn('dsh-aleph-superagent reload failed: %s', String(error?.message ?? error))
+          })
+        }, 50)
+      },
+    })
     child.webServer.register({
       kind: 'exact',
       path: '/aleph/api/state',
