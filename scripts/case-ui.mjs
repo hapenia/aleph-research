@@ -101,10 +101,19 @@ if (kickoff) {
   if (!box) {
     delivered = 'no-composer';
   } else {
-    for (const type of ['mousePressed', 'mouseReleased']) {
-      await send('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 });
+    // Focusing through the page is more reliable than clicking a coordinate that the
+    // panel may have moved; a real click is the fallback.
+    let focused = false;
+    for (let attempt = 0; attempt < 20 && !focused; attempt += 1) {
+      focused = await evaluate(`(() => { const element = document.querySelector('textarea,[contenteditable="true"]'); if (!element) return false; element.focus(); return true; })()`);
+      if (!focused) await new Promise((resolve) => setTimeout(resolve, 200));
     }
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    if (!focused) {
+      for (const type of ['mousePressed', 'mouseReleased']) {
+        await send('Input.dispatchMouseEvent', { type, x: box.x, y: box.y, button: 'left', clickCount: 1 });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
     for (let attempt = 0; attempt < 3 && delivered !== 'sent'; attempt += 1) {
       await send('Input.insertText', { text: kickoff });
       await new Promise((resolve) => setTimeout(resolve, 300));
