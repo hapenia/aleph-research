@@ -9,6 +9,8 @@ import test from 'node:test';
 
 import { ProjectService } from '../index-v2.js';
 
+const cleanup = (root) => rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 120 });
+
 const git = (repo, args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
 
 function table() {
@@ -70,7 +72,7 @@ test('a researcher completion settles only its own activation record', async () 
     assert.equal(firstRecord.status, 'running');
     assert.equal(firstRecord.summary, null);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -92,7 +94,7 @@ test('an activation without a child identity fails instead of writing a null rec
     const records = (service.get(project.id).agents ?? []).filter((item) => item.role === 'researcher');
     assert.equal(records.length, 0);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -129,7 +131,7 @@ test('an evaluation report stays attached to the commit it scored', async () => 
     assert.equal(git(research, ['rev-parse', evaluation.evaluationRef]), evaluation.researchCommit);
     assert.notEqual(git(research, ['rev-parse', 'main']), evaluation.researchCommit);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -172,7 +174,7 @@ test('result delivery refuses to overwrite commits pushed after batching', async
     assert.ok(mission.resultCommit === null || mission.resultCommit, 'mission keeps its recorded state');
     assert.equal(git(missionRepo, ['rev-parse', branch]), advanced, 'the later commit must survive');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -222,7 +224,7 @@ test('a Host restart resumes interrupted work instead of replacing it', async ()
     assert.equal(researcher.childId, 'child-1');
     assert.ok(Array.isArray(summary) && summary.length === 1);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -264,7 +266,7 @@ test('evaluations accumulate and the best result follows the highest score', asy
     assert.equal(service.get(project.id).best.score, 3);
     assert.equal(service.get(project.id).evaluations.length, 3);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -300,7 +302,7 @@ test('a prepared batch does not claim the machine until it runs', async () => {
     assert.equal(current.machines[0].status, 'idle');
     assert.equal(current.machines[0].batchId, null);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -333,7 +335,7 @@ test('machine load is an observed list, not a boolean', async () => {
     const normalised = await service.setMachineLoad({ projectId: project.id, loads: [{ id: 'x', kind: 'weird' }] });
     assert.equal(normalised.loads[0].kind, 'other');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -375,7 +377,7 @@ test('a researcher can adopt a finished mission code and results', async () => {
     assert.ok(existsSync(join(adopted.resultsDir, 'metrics.json')), 'mission results are copied');
     assert.ok(adopted.files.length > 0);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -400,7 +402,7 @@ test('project conventions come from the project, not from Aleph', async () => {
     const again = await service.init({ workspace });
     assert.match(again.conventions, /answer\.txt/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -419,7 +421,7 @@ test('a scaffold without explicit data uses the data the project offers', async 
     assert.ok(existsSync(join(project.researchRoot, 'data', 'well_01.txt')), 'offered data is copied into the scaffold');
     assert.equal(scaffolded.visibleData, join(project.researchRoot, 'data'));
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -471,7 +473,7 @@ test('a prepared batch may wait behind a running one', async () => {
     assert.equal(done.batches.find((b) => b.id === runningBatch.id).status, 'done');
     assert.equal(done.machines[0].status, 'idle', 'the machine frees when the running batch ends');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -511,7 +513,7 @@ test('a finished mission notifies its owner with the outcome', async () => {
     assert.match(notice.text, /failed/);
     assert.match(notice.text, /Result commit|No result commit/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -530,7 +532,7 @@ test('a Leader-facing action records the orchestrator session', async () => {
     const summary = await service.recoverAfterRestart();
     assert.ok(Array.isArray(summary));
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -564,7 +566,7 @@ test('initializing a project creates the Composer as the Leader child', async ()
     await service.scaffoldResearch({ projectId: project.id, agent: leader });
     assert.equal(composers().length, 1, 'restarting the project reuses the Composer');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -602,7 +604,7 @@ test('an agent starts a batch without waiting for it', async () => {
     }
     assert.ok(['done', 'failed'].includes(service.get(project.id).batches.find((b) => b.id === batch.id).status));
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -641,7 +643,7 @@ test('one call creates a mission that is immediately proposable', async () => {
     assert.equal(mission.kind, 'analysis');
     assert.equal(mission.title, 'Label structure and clipping floors');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -674,7 +676,7 @@ test('a malformed mission reports every problem at once', async () => {
       },
     );
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -692,7 +694,7 @@ test('tool results survive a JSON round trip even with unparsable telemetry', as
     assert.equal(JSON.parse(encoded).id, project.id);
     assert.ok(Number.isNaN(telemetry.gpus[0].utilization), 'fixture really has a NaN');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -720,7 +722,7 @@ test('listing missions returns the fields a researcher needs to reuse a result',
     assert.equal(listed.summary, 'Distributions and floors');
     assert.match(listed.resultPath, /^results\//);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -752,7 +754,7 @@ test('the machine stays free while InfraOptimizer edits a batch', async () => {
     service.checkProcesses();
     assert.ok(!service.hasProcessUnder(infraRoot), 'no lingering process under the infra worktree');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -810,7 +812,7 @@ test('one InfraOptimizer serves every batch of a machine and dispatch does not b
     assert.equal(activations.filter((preset) => preset === 'aleph-infra').length, 1, 'the optimizer is not respawned');
     assert.equal(infras().length, 1);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -841,7 +843,7 @@ test('the researcher contract lives in the persona and the Leader sends only an 
     assert.doesNotMatch(prompts[0], /has not been produced by any mission yet/, 'the contract is not repeated in the message');
     assert.match(prompts[0], /Host context for this session/, 'the Host still supplies coordinates');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -870,7 +872,7 @@ test('a cohort accepts one shared assignment or one per researcher', async () =>
     assert.match(prompts[1], /Explore calibration\./);
     assert.match(prompts[2], /Fallback assignment/, 'an empty per-researcher entry falls back to the shared assignment');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -918,7 +920,7 @@ test('the project opens with one researcher and starts the cohort after its eval
     const normalise = (text) => text.replace(/r-[0-9a-f]{8}/g, 'r-ID').replace(/research\/r-ID/g, 'research/r-ID');
     assert.equal(normalise(activations[0].prompt), normalise(activations[1].prompt), 'the opening instruction matches the cohort prompt');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -940,7 +942,7 @@ test('a researcher creating a mission does not steal the orchestrator role', asy
     await service.rememberOrchestrator(project.id, { id: 'researcher-2' });
     assert.equal(service.get(project.id).orchestratorSessionId, 'session-leader');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -974,7 +976,7 @@ test('a drained cohort is recorded for a later dispatch instead of disappearing'
     const retried = await service.maybeDispatchReplacement({ projectId: project.id });
     assert.equal(retried.dispatched, true, 'the replacement starts once a parent is live');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -1008,7 +1010,7 @@ test('an evaluation refuses uncommitted work and stops its own processes', async
     );
     assert.match(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'index-v2.js'), 'utf8'), /killByEnvMarker/, 'descendants are stopped by marker');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -1026,7 +1028,7 @@ test('selecting the best result refuses a checked-out branch', async () => {
     await service.mutate(project.id, (state) => ({ ...state, best: { score: 1, branch: 'research/r-sel', commit: bestCommit } }));
     await assert.rejects(() => service.selectBest({ projectId: project.id, branch: 'research/r-sel' }), /checked out/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
 
@@ -1069,6 +1071,6 @@ test('a paused project starts nothing and a cancelled batch releases the machine
     assert.equal(after.machines[0].status, 'idle', 'the machine is released');
     assert.equal(after.missions.find((mission) => mission.batchId === batch.id)?.status, 'cancelled');
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await cleanup(root);
   }
 });
