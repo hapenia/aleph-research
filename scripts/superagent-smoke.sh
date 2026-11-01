@@ -96,19 +96,24 @@ sessions_seen=0
 for session in "$run_root"/dsh/sessions/*/*/session.v4.jsonl.zstd; do
   [ -f "$session" ] || continue
   sessions_seen=$((sessions_seen + 1))
-  if zstd -dc "$session" 2>/dev/null | rg -q '"evaluationMarker"'; then
-    submitted=1
-  fi
-  if zstd -dc "$session" 2>/dev/null | rg -q '"stdoutTail".*score|"score": 80'; then
-    evaluated=1
-  fi
+  # Decode once and match with shell patterns: a zstd|rg pipeline fails under
+  # `set -o pipefail` when rg exits early after a match.
+  decoded="$(zstd -dc "$session" 2>/dev/null || true)"
+  # Session content is a JSON string inside JSON, so quotes are escaped; match the
+  # field names without relying on the escaping.
+  case "$decoded" in
+    *evaluationMarker*) submitted=1 ;;
+  esac
+  case "$decoded" in
+    *stdoutTail*) evaluated=1 ;;
+  esac
 done
 check "host evaluation ran" "$evaluated" "sessions=$sessions_seen score=80"
 check "worker submitted result" "$submitted" "sessions=$sessions_seen"
 
 results_log="$run_root/state/results/results.jsonl"
 recorded=0
-if [ -f "$results_log" ] && rg -q '"score": 80' "$results_log"; then recorded=1; fi
+if [ -f "$results_log" ] && rg -q '"score":\s*80' "$results_log"; then recorded=1; fi
 check "evaluation recorded" "$recorded" "$([ -f "$results_log" ] && wc -l <"$results_log" || echo 0) records"
 
 channel="$run_root/state/aleph-channel"
