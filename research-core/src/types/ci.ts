@@ -1,6 +1,6 @@
 /** CI runs: requested by a Researcher, executed by the Host in the PR environment. */
 import type { ArtifactRef } from './artifacts.js'
-import type { CIRunId, CommitSha, IsoTimestamp, ExperimentId, SessionId, Score } from './ids.js'
+import type { CIRunId, CommitSha, IsoTimestamp, ExperimentId, ResearcherSessionId, Score } from './ids.js'
 
 export type CIStatus = 'requested' | 'running' | 'passed' | 'failed'
 export type CIFailureReason =
@@ -14,10 +14,8 @@ interface CIRunBase {
   readonly id: CIRunId
   readonly experimentId: ExperimentId
   readonly commit: CommitSha
-  readonly requestedBy: SessionId
+  readonly requestedBy: ResearcherSessionId
   readonly requestedAt: IsoTimestamp
-  /** Digest of the environment the run used, so a result is reproducible. */
-  readonly environmentDigest?: string
 }
 
 export interface RequestedCIRun extends CIRunBase {
@@ -27,11 +25,14 @@ export interface RequestedCIRun extends CIRunBase {
 export interface RunningCIRun extends CIRunBase {
   readonly status: 'running'
   readonly startedAt: IsoTimestamp
+  /** Digest of the environment the run used; a started run always has one. */
+  readonly environmentDigest: string
 }
 
 export interface PassedCIRun extends CIRunBase {
   readonly status: 'passed'
   readonly startedAt: IsoTimestamp
+  readonly environmentDigest: string
   readonly finishedAt: IsoTimestamp
   readonly score: Score
   readonly checks: readonly CheckResult[]
@@ -43,7 +44,8 @@ export interface PassedCIRun extends CIRunBase {
 
 export interface FailedCIRun extends CIRunBase {
   readonly status: 'failed'
-  readonly startedAt?: IsoTimestamp
+  readonly startedAt: IsoTimestamp
+  readonly environmentDigest: string
   readonly finishedAt: IsoTimestamp
   readonly reason: CIFailureReason
   readonly detail: string
@@ -62,5 +64,5 @@ export interface CheckResult {
 export interface CIRequest {
   readonly experimentId: ExperimentId
   readonly commit: CommitSha
-  readonly requestedBy: SessionId
+  readonly requestedBy: ResearcherSessionId
 }

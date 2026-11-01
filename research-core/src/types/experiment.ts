@@ -1,13 +1,15 @@
 /** Experiments: one Implementer Ticket per experiment, reviewed by a Researcher. */
 import type {
   BranchName,
-  CommitSha,
   CIRunId,
   CommentId,
+  CommitSha,
+  ExperimentId,
+  ImplementerSessionId,
   IsoTimestamp,
   IssueId,
   ProgramId,
-  ExperimentId,
+  ResearcherSessionId,
   Score,
   SessionId,
 } from './ids.js'
@@ -36,14 +38,26 @@ export type ExperimentBaseRef = { readonly kind: 'best' } | { readonly kind: 'ma
  * Lineage is part of the Experiment, not a comment: the Host needs it to measure
  * diversity and to reproduce where a result came from.
  */
-export interface ExperimentLineage {
-  readonly base: ExperimentBaseRef
-  readonly baseCommit: CommitSha
-  readonly strategy: ExperimentStrategy
-  /** The base is always assigned by the Host from the operator's exploration level. */
-  readonly chosenBy: 'host-policy'
-  readonly rationale: string
-}
+/**
+ * Lineage is a discriminated pair: an exploit Experiment can only start from the best
+ * result, an explore Experiment only from the research mainline. The Host assigns both,
+ * so "explore from best" and "exploit from mainline" are unrepresentable.
+ */
+export type ExperimentLineage =
+  | {
+      readonly strategy: 'exploit'
+      readonly base: { readonly kind: 'best' }
+      readonly baseCommit: CommitSha
+      readonly chosenBy: 'host-policy'
+      readonly rationale: string
+    }
+  | {
+      readonly strategy: 'explore'
+      readonly base: { readonly kind: 'mainline' }
+      readonly baseCommit: CommitSha
+      readonly chosenBy: 'host-policy'
+      readonly rationale: string
+    }
 
 interface ExperimentBase {
   readonly id: ExperimentId
@@ -54,7 +68,7 @@ interface ExperimentBase {
   /** The commit CI reviewed last; a new commit invalidates an older CI verdict. */
   readonly head: CommitSha
   readonly environment: EnvironmentDeclaration
-  readonly createdBy: SessionId
+  readonly createdBy: ImplementerSessionId
   readonly createdAt: IsoTimestamp
 }
 
@@ -82,7 +96,7 @@ export interface CIPassedExperiment extends ExperimentBase {
   readonly status: 'ci-passed'
   readonly ciRunId: CIRunId
   readonly score: Score
-  readonly reviewedBy: SessionId
+  readonly reviewedBy: ResearcherSessionId
 }
 
 export interface CIFailedExperiment extends ExperimentBase {
@@ -109,8 +123,8 @@ export type Experiment =
 export interface ExperimentReview {
   readonly id: CommentId
   readonly experimentId: ExperimentId
-  readonly author: SessionId
+  readonly author: ResearcherSessionId
   readonly body: string
   readonly at: IsoTimestamp
-  readonly kind: 'review' | 'ci-request' | 'merge-request'
+  readonly kind: 'review' | 'ci-request'
 }

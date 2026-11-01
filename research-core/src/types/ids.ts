@@ -54,3 +54,13 @@ export type DurationMs = Brand<number, 'DurationMs'>
 
 /** An HTTP status chosen by the API mapping table, never invented per handler. */
 export type HttpStatus = 200 | 201 | 202 | 400 | 403 | 404 | 409 | 422 | 500
+
+
+/** A SessionId the adapter has verified belongs to a Researcher Session. */
+export type ResearcherSessionId = Brand<string, 'ResearcherSessionId'>
+
+/** A SessionId the adapter has verified belongs to an Implementer Session. */
+export type ImplementerSessionId = Brand<string, 'ImplementerSessionId'>
+
+/** A list that is statically known to hold at least one element. */
+export type NonEmptyArray<T> = readonly [T, ...T[]]

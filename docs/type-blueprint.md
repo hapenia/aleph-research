@@ -146,6 +146,34 @@ data:
 - artifact bytes, retention and disk space;
 - pause/stop cancellation reaching the relays and executor.
 
+## Unrepresentable error states
+
+The review asked that wrong states be impossible to construct rather than rejected at
+runtime. The following states have no type in the blueprint:
+
+| Wrong state | Why it cannot be written |
+| --- | --- |
+| a stopped Program without a reason, or a running Program carrying stop fields | `Program` is `RunningProgram | PausedProgram | StoppedProgram`; each variant owns its fields (`pausedAt`, `stopReason`, `stoppedAt`) |
+| an open Issue with an assignee, an assigned Issue without one, a closed Issue without resolution | `OpenIssue`, `AssignedIssue`, `InReviewIssue`, `ClosedIssue` are distinct interfaces |
+| an Experiment merged into a mainline, or a review requesting a merge | the state union has no `merged`; review kinds are `review | ci-request` |
+| "explore" starting from the best result, or "exploit" starting from the mainline | `ExperimentLineage` is a discriminated union: `{strategy:'exploit'; base:{kind:'best'}}` or `{strategy:'explore'; base:{kind:'mainline'}}` |
+| a passed CI run without a score, digest or artifact list; a running CI run without a digest | `PassedCIRun`/`RunningCIRun` carry those fields; `RequestedCIRun` has none of them |
+| merging after a failed CI run | no merge state exists; a best result is only updated from a `PassedCIRun` |
+| an Implementer submitting a result for a ticket it does not own | the tool input is `Omit<CommandOf<'implementation.submit'>, 'ticketId'>`; the Host injects the ticket id |
+| a CI pass recorded by a Researcher, or an issue claim whose subject is a CI run | `AuditEntry` is a mapped union: the action fixes both the allowed actor kinds and the subject kind |
+| a decision with no audit record | `Decision.audit` is `NonEmptyArray<AuditEntry>` |
+| a best result without stored artifacts | `BestResult.artifacts` is `NonEmptyArray<ArtifactRef>` |
+| empty goals, commands, score fields; zero budgets or timeouts; negative usage | `NonEmptyString`, `PositiveInt`, `NonNegativeInt`, `DurationMs` at boundaries |
+| a raw string where an id, commit or timestamp is required | branded ids and timestamps |
+| a command from a role that does not hold its capability | `CapabilityForCommand`/`CapabilityOfCommand<T>`; each role's tool set only exposes its own command literals |
+| a tool payload no command can execute | `ToolForCommand<K, Output, Input = CommandOf<K>>` |
+
+States that still depend on the world and therefore stay runtime checks: whether a real
+Session exists and holds the claimed role, whether the uv environment builds, whether the
+CI entry passes, whether branches and commits exist, the exploration quota over real
+history, artifact bytes and disk space, and whether pause/stop cancellation reaches the
+executor.
+
 ## Invariants
 
 Encoded in types:
@@ -371,5 +399,8 @@ controls in version 1; no event replay; no second source of truth outside Host s
 
 ## Status
 
-No open questions remain after the third review round. Approve the blueprint to start
-phase 1 (domain, storage, audit and management routes with tests).
+After the fourth review round the blueprint targets unrepresentable error states:
+status variants own their fields, lineage pairs strategy with its only legal base, CI
+evidence exists only on the runs that have it, audit actor and subject follow from the
+action, decisions always carry audit and best results always carry artifacts. Approve the
+blueprint to start phase 1 (domain, storage, audit and management routes with tests).

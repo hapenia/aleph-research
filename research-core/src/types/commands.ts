@@ -4,6 +4,7 @@ import type { IssueLabel } from './issue.js'
 
 import type { EnvironmentDeclaration } from './environment.js'
 import type { AuditEntry } from './audit.js'
+import type { NonEmptyArray } from './ids.js'
 import type { CommitSha, IssueId, ProgramId, ExperimentId, TicketId } from './ids.js'
 
 /** What the operator creates; the only command that carries the whole contract. */
@@ -171,7 +172,8 @@ export type RequiringCapability<K extends string> = {
 /** What executing one command returns: the read value plus the audit records it wrote. */
 export interface Decision<R> {
   readonly result: R
-  readonly audit: readonly AuditEntry[]
+  /** A command always records at least one decision fact. */
+  readonly audit: NonEmptyArray<AuditEntry>
 }
 
 export type AnyCommand = OperatorCommand | ResearcherCommand | ImplementerCommand | HostCommand

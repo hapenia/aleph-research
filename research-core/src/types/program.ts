@@ -1,6 +1,6 @@
 /** The Program: goal, evaluation contract, budget and best result. */
-import type { CIRunId, CommitSha, ExperimentId, IsoTimestamp, NonEmptyString, NonNegativeInt, PositiveInt, ProgramId, Score } from './ids.js'
 import type { ArtifactRef } from './artifacts.js'
+import type { CIRunId, CommitSha, DurationMs, ExperimentId, IsoTimestamp, NonEmptyArray, NonEmptyString, NonNegativeInt, PositiveInt, ProgramId, Score } from './ids.js'
 
 export type ProgramStatus = 'running' | 'paused' | 'stopped'
 
@@ -37,11 +37,11 @@ export interface BudgetUsage {
 /** The evaluation contract names the CI entry and how a score is read from it. */
 export interface EvaluationContract {
   /** Command run in the Experiment environment, for example `eval/ci.sh`. */
-  readonly ciEntry: string
-  /** Timeout for one CI run. */
-  readonly timeoutMs: number
+  readonly ciEntry: NonEmptyString
+  /** Timeout for one CI run; zero or negative values are unrepresentable. */
+  readonly timeoutMs: DurationMs
   /** The JSON score is read from this field of the entry's stdout. */
-  readonly scoreField: string
+  readonly scoreField: NonEmptyString
 }
 
 
@@ -52,19 +52,17 @@ export interface BestResult {
   readonly commit: CommitSha
   readonly ciRunId: CIRunId
   /** The persisted model weights or report this score belongs to. */
-  readonly artifacts: readonly ArtifactRef[]
+  readonly artifacts: NonEmptyArray<ArtifactRef>
   readonly at: IsoTimestamp
 }
 
-export interface Program {
+interface ProgramBase {
   readonly id: ProgramId
   readonly name: NonEmptyString
   /** The research goal in the operator's words; the only field the operator edits. */
   readonly goal: NonEmptyString
   readonly contract: EvaluationContract
   readonly budget: Budget
-  readonly status: ProgramStatus
-  readonly stopReason?: StopReason
   /** How the Workers of this Program are told to research; editable per Program. */
   readonly methodology: NonEmptyString
   /** How much diversity the Host requires across Experiments (operator-owned). */
@@ -72,6 +70,24 @@ export interface Program {
   readonly best: BestResult | null
   readonly createdAt: IsoTimestamp
 }
+
+export interface RunningProgram extends ProgramBase {
+  readonly status: 'running'
+}
+
+export interface PausedProgram extends ProgramBase {
+  readonly status: 'paused'
+  readonly pausedAt: IsoTimestamp
+}
+
+export interface StoppedProgram extends ProgramBase {
+  readonly status: 'stopped'
+  readonly stopReason: StopReason
+  readonly stoppedAt: IsoTimestamp
+}
+
+/** A Program is exactly one of the three statuses; a stopped Program must say why. */
+export type Program = RunningProgram | PausedProgram | StoppedProgram
 
 
 /** A page of a collection for Session tools and the read-only panel. */

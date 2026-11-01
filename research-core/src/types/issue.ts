@@ -1,5 +1,5 @@
 /** Issues: research questions claimed by one Researcher and worked to completion. */
-import type { CommitSha, IsoTimestamp, IssueId, ProgramId, ExperimentId, SessionId } from './ids.js'
+import type { CommitSha, IsoTimestamp, IssueId, ProgramId, ExperimentId, ResearcherSessionId, SessionId } from './ids.js'
 
 export type IssueStatus = 'open' | 'assigned' | 'in-review' | 'closed'
 export type IssueResolution = 'accepted' | 'rejected' | 'abandoned'
@@ -23,13 +23,13 @@ export interface OpenIssue extends IssueBase {
 
 export interface AssignedIssue extends IssueBase {
   readonly status: 'assigned'
-  readonly assignee: SessionId
+  readonly assignee: ResearcherSessionId
   readonly assignedAt: IsoTimestamp
 }
 
 export interface InReviewIssue extends IssueBase {
   readonly status: 'in-review'
-  readonly assignee: SessionId
+  readonly assignee: ResearcherSessionId
   readonly assignedAt: IsoTimestamp
   /** The Experiment whose CI is being reviewed. */
   readonly experimentId: ExperimentId
@@ -38,7 +38,7 @@ export interface InReviewIssue extends IssueBase {
 
 export interface ClosedIssue extends IssueBase {
   readonly status: 'closed'
-  readonly assignee: SessionId | null
+  readonly assignee: ResearcherSessionId | null
   readonly closedAt: IsoTimestamp
   readonly resolution: IssueResolution
 }
