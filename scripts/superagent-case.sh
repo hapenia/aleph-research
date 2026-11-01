@@ -89,8 +89,24 @@ jq -n \
   }' > "$run_root/project.json"
 
 echo "case run prepared at $run_root"
+
+# A uv-managed runtime's bin/python is a symlink into ~/.local/share/uv/python.
+# The sandbox only sees the read roots, so expose that interpreter directory too;
+# otherwise the worker cannot execute ALEPH_SUBMISSION_PYTHON and falls back to the
+# host system Python with a PYTHONPATH hack.
+uv_python_root=""
+real_runtime_python="$(readlink -f "$runtime/bin/python" 2>/dev/null || true)"
+case "$real_runtime_python" in
+  */.local/share/uv/python/*)
+    # The venv python is a symlink through the versioned uv directory (for example
+    # cpython-3.14-linux-x86_64-gnu -> cpython-3.14.10-...). Bind the parent so both
+    # the symlink path and the real interpreter resolve inside the sandbox.
+    uv_python_root="$(dirname "$(dirname "$(dirname "$real_runtime_python")")")"
+    ;;
+esac
+
 ALEPH_SUPERAGENT_PROJECT="$run_root/project.json" \
 ALEPH_SUPERAGENT_REUSE=1 \
 ALEPH_SUPERAGENT_SMOKE=1 \
-ALEPH_READ_ROOTS="${ALEPH_READ_ROOTS:-/usr:/bin:/sbin:/lib:/lib64:/etc:/opt:/run:/sys:$runtime}" \
+ALEPH_READ_ROOTS="${ALEPH_READ_ROOTS:-/usr:/bin:/sbin:/lib:/lib64:/etc:/opt:/run:/sys:$runtime${uv_python_root:+:$uv_python_root}}" \
   "$repo/scripts/superagent-lab.sh" "$run_name" ${port:+"$port"} | tee "$run_root/lab.out"
