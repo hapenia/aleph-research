@@ -118,6 +118,7 @@ window.__ModuleLoader__.load({
         'field.id': 'Project',
         'field.status': 'Status',
         'field.exploration': 'Exploration',
+        'field.paused': 'Paused',
         'field.budget': 'Budget',
         'field.spent': 'Spent',
         'field.workspace': 'Workspace',
@@ -247,6 +248,7 @@ window.__ModuleLoader__.load({
         'field.id': '项目',
         'field.status': '状态',
         'field.exploration': '探索度',
+        'field.paused': '已暂停',
         'field.budget': '预算',
         'field.spent': '已花费',
         'field.workspace': '工作区',
@@ -724,8 +726,8 @@ window.__ModuleLoader__.load({
     }
 
     /** Composer and InfraOptimizer agent runs. */
-    function agentSection(t, campaign) {
-      const agents = Array.isArray(campaign?.agents) ? campaign.agents : [];
+    function agentSection(t, snapshot) {
+      const agents = Array.isArray(snapshot?.agents) ? snapshot.agents : [];
       const roleName = (role) => t('role.' + role);
       const columns = [
         { label: t('field.role'), width: 'minmax(110px, 0.9fr)', primary: true, render: (agent) => roleName(agent.role) ?? agent.role ?? '—' },
@@ -841,6 +843,7 @@ window.__ModuleLoader__.load({
           metric(t('field.bestScore'), project.best && typeof project.best.score === 'number' ? project.best.score.toFixed(2) : t(MISSING)),
           metricNode(t('field.bestCommit'), h('span', { style: { ...styles.metricValue, ...styles.mono } }, project.best?.commit ? String(project.best.commit).slice(0, 8) : t(MISSING))),
           metric(t('field.evaluations'), String(Array.isArray(project.evaluations) ? project.evaluations.length : 0)),
+          metric(t('field.paused'), project.paused ? 'yes' : 'no'),
           metric(t('field.prepared'), project.prepared ? 'yes' : 'no'),
           metric(t('field.python'), project.python_path ?? t(MISSING)),
           metric(t('field.visibleData'), project.visible_data ?? t(MISSING)),
@@ -962,7 +965,7 @@ window.__ModuleLoader__.load({
         { style: styles.frame },
         projectCard,
         h('div', { style: styles.twoCards }, machineCard, countsCard),
-        agentSection(t, project),
+        agentSection(t, snapshot),
         batchCard,
         missionCard,
         evaluationCard,

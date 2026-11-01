@@ -50,7 +50,7 @@ const missionSchema = z.object({
 const batchSchema = z.object({
   id: z.string(),
   machineId: z.string(),
-  status: z.enum(['forming', 'running', 'done', 'failed', 'interrupted']),
+  status: z.enum(['forming', 'running', 'done', 'failed', 'interrupted', 'cancelled']),
   infra: z.any().optional(),
   missionIds: z.array(z.string()),
   branch: z.string(),
@@ -92,6 +92,8 @@ const projectSchema = z.object({
   brief: z.string().optional(),
   researcherCount: z.number().int().optional(),
   exploration: z.enum(['low', 'normal', 'high']).optional(),
+  paused: z.boolean().optional(),
+  pausedAt: z.string().nullable().optional(),
   pendingDispatch: z.object({ at: z.string(), running: z.number().optional(), target: z.number().optional() }).nullable().optional(),
   bootstrap: z.object({
     status: z.enum(['pending', 'running', 'done', 'skipped']),
@@ -451,6 +453,53 @@ class ProjectService {
   }
 
   /** Point a research branch at the best evaluated commit, so a later iteration starts from it. */
+  /** Stop dispatching new work; running work is left to finish. */
+  async pauseProject({ projectId, reason = null }) {
+    const project = this.get(projectId);
+    if (!project) throw new Error(`project not found: ${projectId}`);
+    const next = await this.mutate(projectId, (current) => ({ ...current, paused: true, pausedAt: now(), pauseReason: reason ?? null }));
+    await this.notifyComposer({ projectId, agent: null, event: 'project paused', detail: reason ?? 'paused by the operator' }).catch(() => undefined);
+    return { projectId, paused: true, runningBatches: (next.batches ?? []).filter((batch) => batch.status === 'running').length };
+  }
+
+  async resumeProject({ projectId }) {
+    const project = this.get(projectId);
+    if (!project) throw new Error(`project not found: ${projectId}`);
+    await this.mutate(projectId, (current) => ({ ...current, paused: false, pausedAt: null, pauseReason: null }));
+    await this.notifyComposer({ projectId, agent: null, event: 'project resumed', detail: 'dispatch may continue' }).catch(() => undefined);
+    return { projectId, paused: false };
+  }
+
+  /** Stop one batch: kill its runner tree, release the machine and mark its missions cancelled. */
+  async cancelBatch({ projectId, batchId, reason = 'cancelled by the operator' }) {
+    const project = this.get(projectId);
+    if (!project) throw new Error(`project not found: ${projectId}`);
+    const batch = (project.batches ?? []).find((item) => item.id === batchId);
+    if (!batch) throw new Error(`batch not found: ${batchId}`);
+    if (['done', 'failed', 'cancelled'].includes(batch.status)) throw new Error(`batch ${batchId} is already ${batch.status}`);
+    const worktree = join(project.workspace, '.aleph', 'batches', batchId);
+    const killed = this.killUnder(worktree);
+    await git(project.missionRoot, ['worktree', 'remove', '--force', worktree]).catch(() => undefined);
+    await rm(worktree, { recursive: true, force: true }).catch(() => undefined);
+    this.runningBatches?.delete?.(batchId);
+    const updated = await this.mutate(projectId, (current) => ({
+      ...current,
+      machines: current.machines.map((machine) => {
+        const loads = (machine.loads ?? []).filter((entry) => entry.id !== batchId);
+        if (machine.batchId !== batchId) return machine;
+        return { ...machine, status: loads.length === 0 ? 'idle' : 'busy', batchId: loads.length === 0 ? null : machine.batchId, loads, telemetry: this.sampleTelemetry() };
+      }),
+      batches: current.batches.map((item) => (item.id === batchId
+        ? { ...item, status: 'cancelled', finishedAt: now(), summary: { ...(item.summary ?? {}), cancelled: reason, killed } }
+        : item)),
+      missions: current.missions.map((mission) => (mission.batchId === batchId && ['batched', 'running', 'approved'].includes(mission.status)
+        ? { ...mission, status: 'cancelled', error: reason, finishedAt: now() }
+        : mission)),
+    }));
+    await this.notifyComposer({ projectId, agent: null, event: 'batch cancelled', detail: `${batchId}: ${reason} (${killed} process(es) stopped)` }).catch(() => undefined);
+    return { projectId, batchId, cancelled: true, killed, machine: updated.machines.find((machine) => machine.id === batch.machineId) ?? null };
+  }
+
   async selectBest({ projectId, branch = 'main' }) {
     const project = this.get(projectId);
     if (!project) throw new Error(`project not found: ${projectId}`);
@@ -459,6 +508,11 @@ class ProjectService {
     const ref = branch.startsWith('refs/') ? branch : `refs/heads/${branch}`;
     const current = (await git(project.researchRoot, ['rev-parse', '--verify', ref]).catch(() => ({ stdout: '' }))).stdout.trim();
     if (!current) throw new Error(`research branch not found: ${branch}`);
+    // A checked-out branch must keep matching its worktree, so refuse instead of moving the ref.
+    const checkedOut = (await git(project.researchRoot, ['worktree', 'list', '--porcelain'])).stdout
+      .split(/\r?\n/)
+      .some((line) => line.trim() === `branch ${ref}` || line.trim() === `branch ${branch}`);
+    if (checkedOut) throw new Error(`cannot move ${branch}: it is checked out in a worktree; ask the researcher to stop or use a different branch`);
     await git(project.researchRoot, ['update-ref', '-m', `select best ${best.commit}`, ref, best.commit, current]);
     return { projectId, branch, commit: best.commit, score: best.score, previous: current };
   }
@@ -859,6 +913,24 @@ class ProjectService {
     return agent;
   }
 
+  /** Kill processes that carry a marker in their environment, including grandchildren. */
+  killByEnvMarker(marker) {
+    if (!marker) return 0;
+    let killed = 0;
+    let entries = [];
+    try { entries = readdirSync('/proc'); } catch { return killed; }
+    for (const entry of entries) {
+      if (!/^\d+$/.test(entry)) continue;
+      const pid = Number(entry);
+      if (pid === process.pid) continue;
+      let environ = '';
+      try { environ = readFileSync(`/proc/${entry}/environ`).toString('utf8'); } catch { continue; }
+      if (!environ.includes(marker)) continue;
+      try { process.kill(pid, 'SIGKILL'); killed += 1; } catch { /* already gone */ }
+    }
+    return killed;
+  }
+
   killUnder(rootPath) {
     const root = resolve(rootPath);
     let killed = 0;
@@ -961,6 +1033,7 @@ class ProjectService {
     if (!project) throw new Error(`project not found: ${projectId}`);
     const batch = project.batches.find((item) => item.id === batchId);
     if (!batch) throw new Error(`batch not found: ${batchId}`);
+    if (project.paused) throw new Error('project is paused; resume it before starting work');
     if (batch.status !== 'forming' && batch.status !== 'interrupted') {
       throw new Error(`batch ${batchId} is not runnable (status ${batch.status})`);
     }
@@ -1223,12 +1296,19 @@ class ProjectService {
     let targetRef = null;
     let evaluatedCommit;
     if (!branch && agentRecord?.worktree && await pathExists(agentRecord.worktree)) {
-      // Evaluate the researcher's own worktree, but pin the commit so the report
-      // keeps pointing at the code that was actually scored.
-      worktree = agentRecord.worktree;
-      const symbolic = await git(worktree, ['symbolic-ref', '--quiet', 'HEAD']).catch(() => ({ stdout: '' }));
+      // Score the committed tree, never a worktree that is still being edited: a report
+      // must point at code that exists in the repository.
+      const dirty = (await git(agentRecord.worktree, ['status', '--porcelain']).catch(() => ({ stdout: '' }))).stdout.trim();
+      if (dirty) {
+        throw new Error(`cannot evaluate uncommitted changes in ${agentRecord.worktree}; commit them first so the report matches the scored code`);
+      }
+      const symbolic = await git(agentRecord.worktree, ['symbolic-ref', '--quiet', 'HEAD']).catch(() => ({ stdout: '' }));
       targetRef = symbolic.stdout.trim() || null;
-      evaluatedCommit = (await git(worktree, ['rev-parse', 'HEAD'])).stdout.trim();
+      evaluatedCommit = (await git(agentRecord.worktree, ['rev-parse', 'HEAD'])).stdout.trim();
+      await mkdir(worktreeRoot, { recursive: true });
+      worktree = join(worktreeRoot, evaluationId);
+      await git(project.researchRoot, ['worktree', 'add', '--detach', worktree, evaluatedCommit]);
+      temporary = true;
     } else {
       const rev = branch ?? 'HEAD';
       const exists = branch
@@ -1255,13 +1335,32 @@ class ProjectService {
     let score = null;
     let stdout = '';
     let stderr = '';
+    // Every process this evaluation starts carries the marker, so the Host can stop the
+    // whole tree instead of only the entry command.
+    const marker = `ALEPH_EVALUATION_ID=${evaluationId}`;
     try {
-      // The evaluator lives beside the project; it reads the scored branch through ALEPH_SOLUTION_DIR.
-      const result = await run('bash', ['-lc', project.evalCommand], { cwd: project.evalRoot || project.workspace, env, timeout: 600_000 });
+      // The evaluator lives beside the project; it reads the scored snapshot through ALEPH_SOLUTION_DIR.
+      const result = await run('bash', ['-lc', project.evalCommand], {
+        cwd: project.evalRoot || project.workspace,
+        env: { ...env, ALEPH_EVALUATION_ID: evaluationId },
+        timeout: 600_000,
+      });
       stdout = result.stdout;
       stderr = result.stderr;
       score = parseScore(stdout)?.score ?? null;
+    } catch (error) {
+      stdout = String(error?.stdout ?? '');
+      stderr = String(error?.stderr ?? '');
+      throw error;
     } finally {
+      // Kill scoring descendants before removing their input directory.
+      const killed = this.killByEnvMarker(marker);
+      if (killed > 0) {
+        await this.mutate(projectId, (current) => ({
+          ...current,
+          violations: [...(current.violations ?? []), `${now()} stopped ${killed} leftover evaluation process(es)`].slice(-50),
+        })).catch(() => undefined);
+      }
       if (temporary && worktree) {
         await git(project.researchRoot, ['worktree', 'remove', '--force', worktree]).catch(() => undefined);
         await rm(worktree, { recursive: true, force: true }).catch(() => undefined);
@@ -1655,6 +1754,13 @@ class ProjectService {
         .catch(() => undefined);
     }
     for (const project of projects) {
+      for (const batch of project.batches ?? []) {
+        if (batch.status !== 'running') continue;
+        const worktree = join(resolve(project.workspace), '.aleph', 'batches', batch.id);
+        if (this.hasProcessUnder(worktree)) continue;
+        // The runner is gone but the record still says running: settle it honestly.
+        this.finishDeadBatch({ projectId: project.id, batchId: batch.id }).catch(() => undefined);
+      }
       for (const batch of project.batches ?? []) {
         if (batch.infra?.status !== 'requested') continue;
         const requestedAt = Date.parse(batch.infra.requestedAt ?? '') || 0;
@@ -2071,6 +2177,30 @@ class ProjectService {
     return { projectId, batchId, machineId: batch.machineId ?? 'local', childId: infra.childId, worktree, dispatched: true, delivery: sent?.delivered ? 'sent' : 'queued' };
   }
 
+  /** Settle a batch whose runner exited without reporting. */
+  async finishDeadBatch({ projectId, batchId, reason = 'the batch runner exited without reporting' }) {
+    const project = this.get(projectId);
+    const batch = (project?.batches ?? []).find((item) => item.id === batchId);
+    if (!batch || batch.status !== 'running') return { settled: false };
+    const worktree = join(project.workspace, '.aleph', 'batches', batchId);
+    const orphans = this.killUnder(worktree);
+    await git(project.missionRoot, ['worktree', 'remove', '--force', worktree]).catch(() => undefined);
+    await rm(worktree, { recursive: true, force: true }).catch(() => undefined);
+    await this.mutate(projectId, (current) => ({
+      ...current,
+      machines: current.machines.map((machine) => {
+        if (machine.id !== batch.machineId) return machine;
+        const loads = (machine.loads ?? []).filter((entry) => entry.id !== batchId);
+        return { ...machine, status: loads.length === 0 ? 'idle' : 'busy', batchId: loads.length === 0 ? null : machine.batchId, loads, telemetry: this.sampleTelemetry() };
+      }),
+      batches: current.batches.map((item) => (item.id === batchId
+        ? { ...item, status: 'failed', finishedAt: now(), summary: { ...(item.summary ?? {}), runnerError: reason } }
+        : item)),
+    }));
+    await this.notifyComposer({ projectId, agent: null, event: 'batch runner exited', detail: `${batchId}: ${reason}` }).catch(() => undefined);
+    return { settled: true, orphans };
+  }
+
   /** Release a batch whose optimizer never reported back. */
   async releaseStalledInfra({ projectId, batchId, reason = 'the optimizer never reported back' }) {
     const project = this.get(projectId);
@@ -2249,6 +2379,7 @@ function snapshot(project, options = {}) {
       brief: project.brief ?? '',
       researcher_count: project.researcherCount ?? 4,
       exploration: project.exploration ?? 'normal',
+      paused: Boolean(project.paused),
       bootstrap: project.bootstrap ?? null,
       prepared: project.prepared === true,
       python_path: project.pythonPath ?? null,
@@ -2477,6 +2608,24 @@ export async function apply(ctx) {
       { ...projectIdParam, mission_id: { type: 'string', required: true }, dir: { type: 'string', description: 'Destination directory inside the worktree, default adopted' } },
       async (args, exec) => service.adoptMission({ projectId: args.project_id, missionId: args.mission_id, agent: exec.agent, dir: args.dir ?? null }),
     ), { when: ({ agent }) => isAleph(agent) }),
+    ctx.tools.register(tool(
+      'aleph_pause_project',
+      'Stop dispatching new work. Running batches and researchers are left to finish.',
+      { ...projectIdParam, reason: { type: 'string', description: 'Why the project is paused' } },
+      async (args) => service.pauseProject({ projectId: args.project_id, reason: args.reason ?? null }),
+    ), { when: ({ agent }) => isLeader(agent) || isComposer(agent) }),
+    ctx.tools.register(tool(
+      'aleph_resume_project',
+      'Allow dispatching again after a pause.',
+      { ...projectIdParam },
+      async (args) => service.resumeProject({ projectId: args.project_id }),
+    ), { when: ({ agent }) => isLeader(agent) || isComposer(agent) }),
+    ctx.tools.register(tool(
+      'aleph_cancel_batch',
+      'Cancel one batch: stop its processes, release the machine and mark its missions cancelled.',
+      { ...projectIdParam, batch_id: { type: 'string', required: true }, reason: { type: 'string' } },
+      async (args) => service.cancelBatch({ projectId: args.project_id, batchId: args.batch_id, reason: args.reason ?? 'cancelled by the operator' }),
+    ), { when: ({ agent }) => isLeader(agent) || isComposer(agent) }),
     ctx.tools.register(tool(
       'aleph_evaluate',
       'Evaluate the research branch after all missions owned by this researcher are done; Host writes the report into the research commit message.',
@@ -2721,6 +2870,51 @@ export async function apply(ctx) {
         return sendJson(res, 200, { ok: true, ...result });
       } catch (error) {
         return sendJson(res, 500, { ok: false, error: { code: 'aleph/select-best-failed', message: String(error?.message ?? error) } });
+      }
+    },
+  });
+  ctx.webServer.register({
+    kind: 'exact',
+    path: '/api/aleph/pause',
+    async handler(req, res) {
+      if (req.method !== 'POST') return sendJson(res, 405, { ok: false });
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const args = body ? JSON.parse(body) : {};
+        return sendJson(res, 200, { ok: true, ...(await service.pauseProject({ projectId: args.projectId ?? args.project_id, reason: args.reason ?? null })) });
+      } catch (error) {
+        return sendJson(res, 400, { ok: false, error: { code: 'aleph/pause-failed', message: String(error?.message ?? error) } });
+      }
+    },
+  });
+  ctx.webServer.register({
+    kind: 'exact',
+    path: '/api/aleph/resume',
+    async handler(req, res) {
+      if (req.method !== 'POST') return sendJson(res, 405, { ok: false });
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const args = body ? JSON.parse(body) : {};
+        return sendJson(res, 200, { ok: true, ...(await service.resumeProject({ projectId: args.projectId ?? args.project_id })) });
+      } catch (error) {
+        return sendJson(res, 400, { ok: false, error: { code: 'aleph/resume-failed', message: String(error?.message ?? error) } });
+      }
+    },
+  });
+  ctx.webServer.register({
+    kind: 'exact',
+    path: '/api/aleph/cancel',
+    async handler(req, res) {
+      if (req.method !== 'POST') return sendJson(res, 405, { ok: false });
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      try {
+        const args = body ? JSON.parse(body) : {};
+        return sendJson(res, 200, { ok: true, ...(await service.cancelBatch({ projectId: args.projectId ?? args.project_id, batchId: args.batchId ?? args.batch_id, reason: args.reason ?? 'cancelled by the operator' })) });
+      } catch (error) {
+        return sendJson(res, 400, { ok: false, error: { code: 'aleph/cancel-failed', message: String(error?.message ?? error) } });
       }
     },
   });

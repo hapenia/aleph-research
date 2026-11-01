@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import { ProjectService } from '../index-v2.js';
@@ -934,6 +935,101 @@ test('a drained cohort is recorded for a later dispatch instead of disappearing'
     };
     const retried = await service.maybeDispatchReplacement({ projectId: project.id });
     assert.equal(retried.dispatched, true, 'the replacement starts once a parent is live');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('console agent table reads the top-level snapshot list', async () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const client = readFileSync(join(here, '..', 'client.js'), 'utf8');
+  assert.match(client, /agentSection\(t, snapshot\)/, 'the section gets the snapshot, not the project');
+  assert.doesNotMatch(client, /agentSection\(t, project\)/);
+  assert.match(client, /snapshot\?\.agents/, 'the section reads the top-level agents list');
+});
+
+test('an evaluation refuses uncommitted work and stops its own processes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-eval-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    await service.scaffoldResearch({ projectId: project.id });
+    // A researcher worktree with an uncommitted change must not be scored.
+    const worktree = join(workspace, '.aleph', 'researchers', 'r-test');
+    git(project.researchRoot, ['worktree', 'add', '-b', 'research/r-test', worktree, 'HEAD']);
+    await writeFile(join(worktree, 'predict.py'), 'print("draft")\n');
+    await service.mutate(project.id, (state) => ({
+      ...state,
+      agents: [{ role: 'researcher', childId: 'child-eval', status: 'running', branch: 'research/r-test', worktree, updatedAt: new Date().toISOString() }],
+    }));
+    await assert.rejects(
+      () => service.evaluate({ projectId: project.id, agent: { id: 'child-eval' } }),
+      /uncommitted changes/,
+    );
+    assert.match(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'index-v2.js'), 'utf8'), /killByEnvMarker/, 'descendants are stopped by marker');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('selecting the best result refuses a checked-out branch', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-select-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    await service.scaffoldResearch({ projectId: project.id });
+    const worktree = join(workspace, '.aleph', 'researchers', 'r-sel');
+    git(project.researchRoot, ['worktree', 'add', '-b', 'research/r-sel', worktree, 'HEAD']);
+    const bestCommit = execFileSync('git', ['-C', worktree, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    await service.mutate(project.id, (state) => ({ ...state, best: { score: 1, branch: 'research/r-sel', commit: bestCommit } }));
+    await assert.rejects(() => service.selectBest({ projectId: project.id, branch: 'research/r-sel' }), /checked out/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a paused project starts nothing and a cancelled batch releases the machine', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-controls-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    const repo = project.missionRoot;
+    const branch = 'missions/stoppable';
+    git(repo, ['switch', '-c', branch, 'template']);
+    await mkdir(join(repo, 'missions', 'stoppable'), { recursive: true });
+    await writeFile(join(repo, 'missions', 'stoppable', 'mission.json'), JSON.stringify({ id: 'stoppable', entrypoint: 'run.sh', kind: 'training', title: 'stoppable', summary: 'test' }));
+    await writeFile(join(repo, 'missions', 'stoppable', 'run.sh'), '#!/usr/bin/env bash\nset -e\nsleep 3\nprintf \'{}\' > "$ALEPH_OUTPUT_DIR/result.json"\n');
+    git(repo, ['add', '-A']);
+    git(repo, [...identity(repo), 'commit', '-m', 'stoppable mission']);
+    git(repo, ['switch', 'template']);
+    await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
+    const batch = (await service.formBatch({ projectId: project.id })).batches[0];
+
+    // Paused: starting is refused, resuming allows it again.
+    await service.pauseProject({ projectId: project.id, reason: 'operator' });
+    assert.equal(service.get(project.id).paused, true);
+    await assert.rejects(async () => { service.startBatch({ projectId: project.id, batchId: batch.id }); }, /paused/);
+    await service.resumeProject({ projectId: project.id });
+    assert.equal(service.get(project.id).paused, false);
+
+    // Running: cancelling stops it and frees the machine.
+    service.startBatch({ projectId: project.id, batchId: batch.id });
+    for (let i = 0; i < 100; i += 1) {
+      if (service.get(project.id).batches.find((item) => item.id === batch.id).status === 'running') break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const cancelled = await service.cancelBatch({ projectId: project.id, batchId: batch.id });
+    assert.equal(cancelled.cancelled, true);
+    const after = service.get(project.id);
+    assert.equal(after.batches.find((item) => item.id === batch.id).status, 'cancelled');
+    assert.equal(after.machines[0].status, 'idle', 'the machine is released');
+    assert.equal(after.missions.find((mission) => mission.batchId === batch.id)?.status, 'cancelled');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
