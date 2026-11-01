@@ -24,6 +24,18 @@ if [ -z "$port" ]; then
   while ss -ltn 2>/dev/null | grep -q ":$port "; do port=$((port + 1)); done
 fi
 
+# A tiny research fixture: one repository with a template branch plus a data
+# directory, so a ticket can create a worktree and analyse something real.
+fixtures="$run_root/fixtures"
+if [ ! -d "$fixtures/research/.git" ]; then
+  mkdir -p "$fixtures/research" "$fixtures/data"
+  git -C "$fixtures/research" init -q -b main
+  printf '# Research repository\n\nTicket worktrees start from this branch.\n' > "$fixtures/research/README.md"
+  git -C "$fixtures/research" -c user.name=AlephResearch -c user.email=aleph@localhost add -A >/dev/null 2>&1
+  git -C "$fixtures/research" -c user.name=AlephResearch -c user.email=aleph@localhost commit -qm "research fixture" >/dev/null 2>&1
+  printf 'well,por,perm,sw\nw1,0.10,0.01,99.9\nw1,0.18,12.5,45.2\nw2,0.10,0.01,99.9\nw2,0.22,88.0,31.7\n' > "$fixtures/data/labels.csv"
+fi
+
 if [ ! -f "$vendor/lib/index.js" ]; then
   echo "building vendored prototype"
   (cd "$vendor" && pnpm install --frozen-lockfile >/dev/null && pnpm build >/dev/null)
@@ -149,6 +161,82 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 [ -n "$master" ] || { echo "main Session did not start; see $run_root/host.log" >&2; exit 1; }
+
+# Point the research Source at the fixture, give the Executor its prepare command,
+# and enable one research rule with automatic acceptance. Everything here is a
+# setting: changing it later needs no restart.
+api="http://127.0.0.1:$port/orchestrator/api"
+python3 - "$api" "$fixtures" "$repo" <<'PYSEED'
+import json, sys, urllib.error, urllib.request
+
+api, fixtures, repo = sys.argv[1:4]
+
+def call(method, path, body=None):
+    data = json.dumps(body).encode() if body is not None else None
+    request = urllib.request.Request(api + path, data=data, method=method,
+        headers={'x-orchestrator-request': '1', 'content-type': 'application/json'})
+    try:
+        with urllib.request.urlopen(request) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        return {'http_error': error.code, 'body': error.read().decode()[:400]}
+
+settings = call('GET', '/settings')
+revision = {source['id']: source['revision'] for source in settings['sources']}
+aleph = next(source for source in settings['sources'] if source['id'] == 'aleph')
+config = {
+    'project': 'fixture',
+    'repository': f'{fixtures}/research',
+    'templateBranch': 'main',
+    'dataDir': f'{fixtures}/data',
+    'python': sys.executable,
+    'conventions': 'Analyse data/ and write findings as Markdown files in this worktree.',
+}
+def saved(label, result):
+    print(label + ':', result)
+    if result.get('http_error'):
+        raise SystemExit(f'{label} was refused')
+
+saved('source aleph', call('PUT', '/settings/source:aleph', {
+    'value': {'enabled': True, 'config': {**aleph.get('value', {}).get('config', {}), **config}},
+    'revision': revision['aleph'],
+}))
+
+executor = settings['blocks']['executor']
+value = dict(executor['value'])
+value['prepare'] = f'sh {repo}/scripts/superagent-prepare.sh'
+# gh, git and lark-cli are reserved by the prototype and cannot be blocked;
+# the research instructions forbid pushing and the Channel never pushes.
+value['blockedCommands'] = ['sudo', 'podman', 'docker']
+saved('executor', call('PUT', '/settings/executor', {'value': value, 'revision': executor['revision']}))
+
+policy = settings['blocks']['policy']
+value = dict(policy['value'])
+value['rules'] = [{
+    'id': 'research',
+    'name': 'Research work',
+    'enabled': True,
+    'instruction': 'Requests to measure, analyse, model or report on the research project data. Accept when the requested direction and target are settled.',
+}]
+sources = dict(value.get('sources') or {})
+sources['aleph'] = {'allowed': [{'id': 'operator', 'name': 'operator'}]}
+sources['github'] = sources.get('github') or {'allowed': [{'id': 'hapenia'}]}
+value['sources'] = sources
+saved('policy', call('PUT', '/settings/policy', {'value': value, 'revision': policy['revision']}))
+
+eval_block = settings['blocks']['eval']
+value = dict(eval_block['value'])
+value['mode'] = 'auto'
+saved('eval', call('PUT', '/settings/eval', {'value': value, 'revision': eval_block['revision']}))
+PYSEED
+
+if [ "${ALEPH_SUPERAGENT_SMOKE:-0}" = "1" ]; then
+  echo "smoke: sending one research request"
+  curl -sS -X POST -H 'content-type: application/json' \
+    -d '{"project":"fixture","ticket":"fixture-smoke","requestId":"smoke-1","text":"Read data/labels.csv, count rows per well and the clipped floor of por, and write the result to findings.md."}' \
+    "http://127.0.0.1:$port/aleph/api/trigger" || true
+  echo
+fi
 
 python3 - "$run_root" "$port" "$token" "$url" "$master" <<'PY'
 import json, sys

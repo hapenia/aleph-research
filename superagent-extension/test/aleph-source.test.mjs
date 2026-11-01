@@ -35,3 +35,27 @@ test('a result trigger carries its score on the same thread', () => {
   assert.equal(trigger.meta.score, 80.5)
   assert.equal(trigger.threads[0].id, 'research:p:ticket:main')
 })
+
+test('the source carries the research project settings into the execution environment', () => {
+  const parsed = alephKind.schema.parse({
+    project: 'fixture',
+    repository: '/tmp/research',
+    templateBranch: 'main',
+    dataDir: '/tmp/data',
+    python: '/usr/bin/python3',
+    conventions: 'Analyse data/.',
+  })
+  assert.equal(parsed.repository, '/tmp/research')
+  const values = alephKind.environment.values({ deployment: {}, config: parsed })
+  assert.equal(values.ALEPH_RESEARCH_REPO, '/tmp/research')
+  assert.equal(values.ALEPH_TEMPLATE_BRANCH, 'main')
+  assert.equal(values.ALEPH_DATA_DIR, '/tmp/data')
+  assert.equal(values.ALEPH_PYTHON, '/usr/bin/python3')
+  assert.match(values.ALEPH_CONVENTIONS, /Analyse data/)
+
+  const defaults = alephKind.schema.parse({})
+  assert.equal(defaults.templateBranch, 'main')
+  assert.equal(defaults.repository, '')
+  const fallback = alephKind.environment.values({ deployment: {}, config: defaults })
+  assert.equal(fallback.ALEPH_TEMPLATE_BRANCH, 'main')
+})

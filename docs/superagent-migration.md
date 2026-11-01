@@ -74,9 +74,25 @@ rule and `eval.mode = auto`, a request produced a Ticket with an **explicit** Ma
 directory `state/work/well-data-profile-…` appeared. The Source reports `ready` and
 one `received` event.
 
-Not yet done in Phase 1: the prepare command does not create a git worktree, the
-Worker preset has no research tools yet, and the old plugin's roles are still in the
-tree.
+### Phase 1: prepared ticket worktrees
+
+`scripts/superagent-prepare.sh` is the Executor prepare command. It creates one worktree
+from the research repository's template branch (`ticket/<name>`), copies only the data
+directory named by the Source configuration, and writes `AGENTS.md` with the data
+policy, the runtime and the project conventions. `ALEPH_*` execution variables come
+from the Source kind, so the panel edits them and no restart is needed.
+
+Verified in lab `sa7` (port 40208) with a fixture repository and a two-row CSV:
+
+- a request produced a Ticket, an Assignment and a prepared worktree
+  `state/work/count-well-por-floor-…` on branch `ticket/count-well-por-floor-…`;
+- the worktree contains `AGENTS.md`, the copied `data/labels.csv`, and a prepare commit;
+- the Worker read the data, wrote `analyze.py` and `findings.md`, ran the analysis and
+  committed the result, staying inside the worktree.
+
+Not yet done in Phase 1: shell-level read confinement (the bwrap provider that hides
+host paths), the evaluation tool, the reply Channel, and retirement of the old plugin's
+roles.
 
 ## Next phases
 
