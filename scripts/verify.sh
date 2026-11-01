@@ -17,6 +17,8 @@ docs=0
 echo "== syntax: plugin sources"
 node --check dsh-plugin/index-v2.js
 node --check dsh-plugin/client.js
+node --check superagent-extension/index.js
+node --check superagent-extension/client.js
 
 echo "== syntax: shell scripts"
 for script in scripts/*.sh; do

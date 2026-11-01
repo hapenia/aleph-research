@@ -163,8 +163,62 @@ reports the best score and commit next to the new score; `GET /aleph/api/results
 returns the brief, the best record and the recent evaluations for the panel and the
 Watchdog.
 
-Not yet done in Phase 2/3: wiring the budget decision into acceptance, the Watchdog
-Session itself, the panel, and retirement of the old plugin's roles.
+### Phase 4: the research panel
+
+`superagent-extension/client.js` is a Web client plugin registered by the same bundle:
+it adds an "AlephResearch" page and sidebar entry with the results summary (best score,
+commit, trajectory), the open tickets with their worktrees, and the orchestrator load
+and health. It polls the three routes every 10 s and disposes its timers with the page.
+
+The panel's "reload research extension" button POSTs `/aleph/api/reload`. The Host
+answers, then restarts the plugin fiber, so the Source kind, routes and settings are
+registered from scratch; module code that changed on disk still needs a host restart,
+configuration does not. `scripts/verify.sh` and CI now syntax-check both extension
+files.
+
+### Phase 4: versioned hot configuration
+
+`GET /aleph/api/config` returns the live research configuration with its history and
+audit origins; `POST /aleph/api/config` saves a new revision and applies it to the
+running Source through the prototype's own settings API, so no restart happens;
+`POST /aleph/api/config/rollback` (and `{revision}` for a specific version) restores an
+older value as a new revision. The store is `ConfigStore` (atomic writes, 50-entry
+history, validator) and the apply step is `applySourceSettings`.
+
+Verified in lab `cfg-test` (port 40341):
+
+```text
+GET  config                     -> revision 0, null value
+POST config {project, conventions:"hot v1"} -> revision 1, applied revision 2
+GET  orchestrator settings      -> source aleph project = fixture (live)
+POST config {conventions:"hot v2"} -> revision 2
+POST config/rollback            -> revision 3, conventions "hot v1"
+GET  orchestrator settings      -> source aleph conventions = "hot v1" (live)
+history                         -> revisions 3,2,1 with origin "panel"
+```
+
+### Phase 3: the resident Watchdog Session
+
+`ALEPH_WATCHDOG_INTERVAL_MS` enables a resident Watchdog: the extension creates one DSH
+session with the `aleph-watchdog` preset (added to the bundle patch) and wakes it with a
+brief on the interval. The brief lists open tickets, stalls (`watchdog.js`), and the
+result log. The session acts through `aleph_watchdog_brief`, `aleph_watchdog_stop` and
+`aleph_watchdog_retry`; the last two post the prototype's documented management actions
+(`watchdog-actions.js`). The watchdog only wakes the model when something is stalled or
+the state signature changed, so an idle loop costs nothing.
+
+Verified in lab `wd-test8` (port 40349, interval 10 s):
+
+```text
+status: enabled=true intervalMs=10000 sessionId=aleph-watchdog-…
+        tickCount=5 lastBriefAt=…19 lastSkippedAt=…59 lastError=null
+sessions: <dsh>/sessions/--…-state-watchdog--/aleph-watchdog-…/session.v4.jsonl.zstd
+session header agentPreset: aleph-watchdog
+first brief: "Watchdog brief …"; model answered "no stalled tickets, no action"
+```
+
+Not yet done: budget wiring into acceptance, extension code hot reload beyond the fiber
+restart, and retirement of the old plugin's roles.
 
 ## Next phases
 
