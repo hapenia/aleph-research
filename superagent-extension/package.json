@@ -11,13 +11,15 @@
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./request-tool": "./request-tool.js"
   },
   "files": [
     "index.js",
     "client.js",
     "cordis.patch.yml",
-    "research-extension.js"
+    "research-extension.js",
+    "request-tool.js"
   ],
   "dsh": {
     "bundle": {

@@ -20,11 +20,14 @@ fi
 # reversed, so a dirty vendor directory is never committed and a rebuild is repeatable.
 applied=()
 restore() {
-  local patch
-  for patch in "${applied[@]}"; do
+  # Reverse in the opposite order of application, or overlapping patches conflict.
+  local index patch
+  for ((index = ${#applied[@]} - 1; index >= 0; index--)); do
+    patch="${applied[$index]}"
     (cd "$vendor" && patch -R -p1 --no-backup-if-mismatch --silent <"$patch" >/dev/null 2>&1) || true
   done
   find "$vendor" -name '*.orig' -delete 2>/dev/null || true
+  find "$vendor" -name '*.rej' -delete 2>/dev/null || true
 }
 trap restore EXIT
 
