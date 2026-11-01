@@ -300,3 +300,20 @@ testset and private state off limits.
 
 Verified in the panel: a search from the Leader returned three real sources with
 descriptions, and a researcher session lists both tools.
+
+## Researcher contract and Leader assignment
+
+The researcher prompt used to be a long Host-built message that repeated the whole
+contract: environment, data access, prohibitions, mission packaging, evaluation
+timing. It now lives where it belongs:
+
+- the researcher preset persona carries the contract, so every researcher reads the
+  same rules before its first step;
+- the Host message carries only session coordinates, project conventions, and an
+  `Assignment from the Leader` block;
+- `aleph_start_project` and `aleph_run_researchers` accept that assignment, either
+  as a shared `instruction` or as `instructions` with one entry per researcher.
+
+A live run confirmed the split: the researcher's system message begins with the
+persona contract, the Host message names the worktree, branch, mission repo, data
+directory and conventions, and the Leader's opening assignment appears verbatim.
