@@ -197,8 +197,28 @@ GET  orchestrator settings      -> source aleph conventions = "hot v1" (live)
 history                         -> revisions 3,2,1 with origin "panel"
 ```
 
-Not yet done: the Watchdog Session, budget wiring into acceptance, extension code hot
-reload beyond the fiber restart, and retirement of the old plugin's roles.
+### Phase 3: the resident Watchdog Session
+
+`ALEPH_WATCHDOG_INTERVAL_MS` enables a resident Watchdog: the extension creates one DSH
+session with the `aleph-watchdog` preset (added to the bundle patch) and wakes it with a
+brief on the interval. The brief lists open tickets, stalls (`watchdog.js`), and the
+result log. The session acts through `aleph_watchdog_brief`, `aleph_watchdog_stop` and
+`aleph_watchdog_retry`; the last two post the prototype's documented management actions
+(`watchdog-actions.js`). The watchdog only wakes the model when something is stalled or
+the state signature changed, so an idle loop costs nothing.
+
+Verified in lab `wd-test8` (port 40349, interval 10 s):
+
+```text
+status: enabled=true intervalMs=10000 sessionId=aleph-watchdog-…
+        tickCount=5 lastBriefAt=…19 lastSkippedAt=…59 lastError=null
+sessions: <dsh>/sessions/--…-state-watchdog--/aleph-watchdog-…/session.v4.jsonl.zstd
+session header agentPreset: aleph-watchdog
+first brief: "Watchdog brief …"; model answered "no stalled tickets, no action"
+```
+
+Not yet done: budget wiring into acceptance, extension code hot reload beyond the fiber
+restart, and retirement of the old plugin's roles.
 
 ## Next phases
 
