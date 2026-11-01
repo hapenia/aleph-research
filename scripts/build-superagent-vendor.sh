@@ -16,14 +16,31 @@ if [ ! -d "$vendor/node_modules" ]; then
   (cd "$vendor" && pnpm install --frozen-lockfile)
 fi
 
+# The vendored tree stays pristine in git: patches are applied for the build and then
+# reversed, so a dirty vendor directory is never committed and a rebuild is repeatable.
+applied=()
+restore() {
+  local patch
+  for patch in "${applied[@]}"; do
+    (cd "$vendor" && patch -R -p1 --no-backup-if-mismatch --silent <"$patch" >/dev/null 2>&1) || true
+  done
+  find "$vendor" -name '*.orig' -delete 2>/dev/null || true
+}
+trap restore EXIT
+
 if [ -d "$patches" ]; then
   while IFS= read -r patch; do
     [ -n "$patch" ] || continue
     if (cd "$vendor" && patch -p1 --dry-run --silent <"$patch" >/dev/null 2>&1); then
-      (cd "$vendor" && patch -p1 --silent <"$patch" >/dev/null)
+      (cd "$vendor" && patch -p1 --no-backup-if-mismatch --silent <"$patch" >/dev/null)
+      applied+=("$patch")
       echo "applied $(basename "$patch")"
     elif (cd "$vendor" && patch -p1 --reverse --dry-run --silent <"$patch" >/dev/null 2>&1); then
-      echo "already applied $(basename "$patch")"
+      # Left over from an interrupted build: reverse it too, so this run starts clean.
+      (cd "$vendor" && patch -R -p1 --no-backup-if-mismatch --silent <"$patch" >/dev/null)
+      (cd "$vendor" && patch -p1 --no-backup-if-mismatch --silent <"$patch" >/dev/null)
+      applied+=("$patch")
+      echo "reapplied $(basename "$patch")"
     else
       echo "cannot apply $(basename "$patch") to the vendored tree" >&2
       exit 1
