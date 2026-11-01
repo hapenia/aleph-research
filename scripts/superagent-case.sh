@@ -92,5 +92,5 @@ echo "case run prepared at $run_root"
 ALEPH_SUPERAGENT_PROJECT="$run_root/project.json" \
 ALEPH_SUPERAGENT_REUSE=1 \
 ALEPH_SUPERAGENT_SMOKE=1 \
-ALEPH_READ_ROOTS="${ALEPH_READ_ROOTS:-/usr:/bin:/sbin:/lib:/lib64:/etc:/opt:/run:$runtime}" \
+ALEPH_READ_ROOTS="${ALEPH_READ_ROOTS:-/usr:/bin:/sbin:/lib:/lib64:/etc:/opt:/run:/sys:$runtime}" \
   "$repo/scripts/superagent-lab.sh" "$run_name" ${port:+"$port"} | tee "$run_root/lab.out"
