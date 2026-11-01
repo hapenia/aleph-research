@@ -39,10 +39,13 @@ PY
 
 read -r last_issue last_pr <<<"$(read_cursor)"
 
+# Items this login authored are the repository's own workflow, not outside activity.
+self_login="$(gh api user --jq .login 2>/dev/null || echo '')"
+
 issues_json="$(gh issue list --state all --limit 100 --json number,title,state,author,updatedAt)"
 prs_json="$(gh pr list --state all --limit 100 --json number,title,state,author,updatedAt)"
 
-python3 - "$last_issue" "$last_pr" "$issues_json" "$prs_json" "$cursor" "$mode" <<'PY'
+python3 - "$last_issue" "$last_pr" "$issues_json" "$prs_json" "$cursor" "$mode" "$self_login" <<'PY'
 import json, sys
 
 last_issue = int(sys.argv[1])
@@ -51,9 +54,13 @@ issues = json.loads(sys.argv[3] or '[]')
 prs = json.loads(sys.argv[4] or '[]')
 cursor_path = sys.argv[5]
 peek = sys.argv[6] == '--peek'
+self_login = sys.argv[7] if len(sys.argv) > 7 else ''
 
-new_issues = sorted((i for i in issues if i['number'] > last_issue), key=lambda i: i['number'])
-new_prs = sorted((p for p in prs if p['number'] > last_pr), key=lambda p: p['number'])
+def authored_by_self(item):
+    return self_login != '' and ((item.get('author') or {}).get('login') == self_login)
+
+new_issues = sorted((i for i in issues if i['number'] > last_issue and not authored_by_self(i)), key=lambda i: i['number'])
+new_prs = sorted((p for p in prs if p['number'] > last_pr and not authored_by_self(p)), key=lambda p: p['number'])
 
 def line(item):
     author = (item.get('author') or {}).get('login', '?')
