@@ -1245,3 +1245,36 @@ test('the Host dispatches queued work when the queue owner cannot be woken', asy
     await cleanup(root);
   }
 });
+
+test('the Host starts a prepared batch when the Composer cannot be woken', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-prepared-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    const repo = project.missionRoot;
+    const branch = 'missions/prepared';
+    git(repo, ['switch', '-c', branch, 'template']);
+    await mkdir(join(repo, 'missions', 'prepared'), { recursive: true });
+    await writeFile(join(repo, 'missions', 'prepared', 'mission.json'), JSON.stringify({ id: 'prepared', entrypoint: 'run.sh', kind: 'training', title: 'prepared', summary: 'test' }));
+    await writeFile(join(repo, 'missions', 'prepared', 'run.sh'), '#!/usr/bin/env bash\nset -e\nsleep 2\nprintf \'{}\' > "$ALEPH_OUTPUT_DIR/result.json"\n');
+    git(repo, ['add', '-A']);
+    git(repo, [...identity(repo), 'commit', '-m', 'prepared mission']);
+    git(repo, ['switch', 'template']);
+    await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
+    const batch = (await service.formBatch({ projectId: project.id })).batches[0];
+    assert.equal(service.get(project.id).machines[0].status, 'idle', 'the prepared batch holds no machine');
+
+    const outcome = await service.mechanicalDispatch(service.get(project.id));
+    assert.equal(outcome.dispatched, true, `the Host starts the prepared batch (${JSON.stringify(outcome)})`);
+    assert.equal(outcome.batchId, batch.id);
+    assert.match((service.get(project.id).violations ?? []).join('\n'), /prepared batch/);
+    for (let i = 0; i < 400; i += 1) {
+      if (!service.get(project.id).batches.some((item) => ['forming', 'running'].includes(item.status))) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  } finally {
+    await cleanup(root);
+  }
+});

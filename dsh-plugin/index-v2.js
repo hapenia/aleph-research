@@ -2273,13 +2273,27 @@ class ProjectService {
    * the Composer's policy prescribes, so the Host does it and records why.
    */
   async mechanicalDispatch(project) {
-    const queued = (project.missions ?? []).filter((mission) => mission.status === 'approved');
-    if (queued.length === 0) return { dispatched: false, reason: 'nothing queued' };
     const machine = (project.machines ?? []).find((item) => item.id === 'local');
     if (!machine || machine.status !== 'idle') return { dispatched: false, reason: 'machine is not idle' };
-    if ((project.batches ?? []).some((batch) => ['forming', 'running'].includes(batch.status))) {
-      return { dispatched: false, reason: 'a batch is already open' };
+    const running = (project.batches ?? []).find((batch) => batch.status === 'running');
+    if (running) return { dispatched: false, reason: 'a batch is already running' };
+    // A batch prepared by an earlier Composer turn may be waiting for a start nobody can issue.
+    const prepared = (project.batches ?? []).find((batch) => batch.status === 'forming');
+    if (prepared) {
+      if (prepared.infra?.status === 'requested') return { dispatched: false, reason: 'the prepared batch is still with InfraOptimizer' };
+      try {
+        this.startBatch({ projectId: project.id, batchId: prepared.id });
+        await this.mutate(project.id, (current) => ({
+          ...current,
+          violations: [...(current.violations ?? []), `${now()} the Host started prepared batch ${prepared.id}: the Composer could not be woken`].slice(-50),
+        })).catch(() => undefined);
+        return { dispatched: true, batchId: prepared.id, started: true };
+      } catch (error) {
+        return { dispatched: false, reason: String(error?.message ?? error) };
+      }
     }
+    const queued = (project.missions ?? []).filter((mission) => mission.status === 'approved');
+    if (queued.length === 0) return { dispatched: false, reason: 'nothing queued' };
     try {
       const formed = await this.formBatch({ projectId: project.id, machineId: machine.id });
       const batch = formed.batches[formed.batches.length - 1];
