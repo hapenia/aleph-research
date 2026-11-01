@@ -95,11 +95,13 @@ const projectSchema = z.object({
   paused: z.boolean().optional(),
   pausedAt: z.string().nullable().optional(),
   dispatchSignature: z.string().nullable().optional(),
+  pendingNotices: z.array(z.object({ sessionId: z.string(), text: z.string(), at: z.string() })).optional(),
   pendingDispatch: z.object({ at: z.string(), running: z.number().optional(), target: z.number().optional() }).nullable().optional(),
   bootstrap: z.object({
     status: z.enum(['pending', 'running', 'done', 'skipped']),
     childId: z.string().nullable().optional(),
     branch: z.string().nullable().optional(),
+    instruction: z.string().nullable().optional(),
     startedAt: z.string().nullable().optional(),
     finishedAt: z.string().nullable().optional(),
     evaluatedCommit: z.string().nullable().optional(),
@@ -904,6 +906,40 @@ class ProjectService {
     await this.mutate(projectId, (current) => ({ ...current, orchestratorSessionId: agent.id })).catch(() => undefined);
   }
 
+  /**
+   * Deliver a notice to a child session, or park it until its parent is live again.
+   * A researcher that ends its turn must still learn that its mission settled.
+   */
+  async deliverOrQueue({ projectId, sessionId, text }) {
+    const sent = await this.notifySession({ sessionId, text }).catch(() => ({ delivered: false }));
+    if (sent?.delivered) return { delivered: true };
+    const project = this.get(projectId);
+    const queued = project?.pendingNotices ?? [];
+    if (queued.some((entry) => entry.sessionId === sessionId && entry.text === text)) return { delivered: false, queued: true };
+    await this.mutate(projectId, (current) => ({
+      ...current,
+      pendingNotices: [...(current.pendingNotices ?? []), { sessionId, text, at: now() }].slice(-50),
+    })).catch(() => undefined);
+    return { delivered: false, queued: true };
+  }
+
+  /** Retry parked notices once their parent session is available. */
+  async flushPendingNotices(project) {
+    const queued = project.pendingNotices ?? [];
+    if (queued.length === 0) return 0;
+    let delivered = 0;
+    const remaining = [];
+    for (const entry of queued) {
+      const sent = await this.notifySession({ sessionId: entry.sessionId, text: entry.text }).catch(() => ({ delivered: false }));
+      if (sent?.delivered) delivered += 1;
+      else if (Date.now() - Date.parse(entry.at) < 6 * 60 * 60 * 1000) remaining.push(entry);
+    }
+    if (delivered > 0 || remaining.length !== queued.length) {
+      await this.mutate(project.id, (current) => ({ ...current, pendingNotices: remaining })).catch(() => undefined);
+    }
+    return delivered;
+  }
+
   /** A live Agent that may parent subagents, or null when the owning session is gone. */
   liveOrchestrator(project) {
     if (!project?.orchestratorSessionId) return null;
@@ -1224,7 +1260,7 @@ class ProjectService {
             ? 'Adopt it with aleph_adopt_mission when you want to use it, then commit and evaluate when you decide.'
             : 'Fix what the log shows in a new mission branch; do not rerun the same failing mission.',
         ];
-        this.notifySession({ sessionId: mission.ownerSession, text: lines.join('\n') }).catch(() => undefined);
+        this.deliverOrQueue({ projectId, sessionId: mission.ownerSession, text: lines.join('\n') }).catch(() => undefined);
       }
     }
 
@@ -1460,7 +1496,7 @@ class ProjectService {
     await this.mutate(projectId, (current) => ({
       ...current,
       agents: [...(current.agents ?? []), { role: 'researcher', phase, childId, status: 'running', summary: null, branch, worktree, updatedAt: now() }],
-      ...(bootstrap ? { bootstrap: { status: 'running', childId, branch, startedAt: now() } } : {}),
+      ...(bootstrap ? { bootstrap: { status: 'running', childId, branch, instruction: instruction ?? null, startedAt: now() } } : {}),
     }));
     this.parentAgents ??= new Map();
     if (agent) this.parentAgents.set(childId, agent);
@@ -1570,7 +1606,8 @@ class ProjectService {
     }));
     const parent = bootstrap.childId ? (this.parentAgents?.get(bootstrap.childId) ?? (project.orchestratorSessionId ? this.ctx?.agents?.get?.(project.orchestratorSessionId) : null)) : null;
     if (!parent) return { completed: true, cohort: null, reason: 'no live parent to start the cohort' };
-    const cohort = await this.startResearchers({ projectId, agent: parent }).catch((error) => ({ error: String(error?.message ?? error) }));
+    // The cohort inherits the Leader's opening direction; the Host has no other channel to it.
+    const cohort = await this.startResearchers({ projectId, agent: parent, instruction: bootstrap.instruction ?? null }).catch((error) => ({ error: String(error?.message ?? error) }));
     return { completed: true, cohort };
   }
 
@@ -1750,6 +1787,9 @@ class ProjectService {
     };
     const projects = this.list();
     const nowMs = Date.now();
+    for (const project of projects) {
+      if ((project.pendingNotices ?? []).length > 0) this.flushPendingNotices(project).catch(() => undefined);
+    }
     // A cohort that drained while the Leader session was cold resumes here.
     for (const project of projects) {
       if (!project.pendingDispatch || !this.liveOrchestrator(project)) continue;

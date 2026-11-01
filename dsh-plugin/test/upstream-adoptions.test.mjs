@@ -1115,3 +1115,54 @@ test('the watchdog announces a queue state once instead of polling the Composer'
     await cleanup(root);
   }
 });
+
+test('a notice for a cold child is parked and delivered when the parent returns', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-notice-queue-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    // No live parent yet: the notice must be stored rather than lost.
+    service.subagents = { async sendMessage() { throw new Error('parent is not live'); } };
+    const parked = await service.deliverOrQueue({ projectId: project.id, sessionId: 'child-a', text: 'your mission finished' });
+    assert.equal(parked.queued, true);
+    const queued = service.get(project.id).pendingNotices;
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0].sessionId, 'child-a');
+
+    // Once the parent is live the watchdog flushes it and clears the record.
+    const delivered = [];
+    service.parentAgents = new Map([['child-a', { id: 'leader' }]]);
+    service.subagents = { async sendMessage(_parent, childId, blocks) { delivered.push({ childId, text: blocks[0].text }); } };
+    const count = await service.flushPendingNotices(service.get(project.id));
+    assert.equal(count, 1);
+    assert.equal(delivered[0].childId, 'child-a');
+    assert.equal(service.get(project.id).pendingNotices.length, 0);
+  } finally {
+    await cleanup(root);
+  }
+});
+
+test('the cohort inherits the opening researcher assignment', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-inherit-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace, researchers: 2 });
+    await service.scaffoldResearch({ projectId: project.id });
+    const prompts = [];
+    service.subagents = {
+      async startActivation(options) { prompts.push(options.request.prompt?.[0]?.text ?? ''); return { childId: `child-${prompts.length}`, result: new Promise(() => {}) }; },
+      async sendMessage() { return { id: 'm' }; },
+    };
+    const assignment = 'Investigate the clipped targets before modelling.';
+    await service.startBootstrap({ projectId: project.id, agent: { id: 'leader' }, instruction: assignment });
+    await service.completeBootstrap({ projectId: project.id, reason: 'test' });
+    assert.ok(prompts[0].includes(assignment), 'the opening researcher gets it');
+    assert.ok(prompts[1]?.includes(assignment), 'the cohort inherits it');
+  } finally {
+    await cleanup(root);
+  }
+});

@@ -108,7 +108,8 @@
                 - Data analysis is mission work too. If the information you need has not been produced by any mission yet, create the mission that produces it and read the result back; work that stays in scratch files is invisible and gets repeated.
                 - Small work is allowed: reading files, focused edits, quick tests, one small fit, bounded commands. Do not launch large training runs, multi-seed sweeps, multi-GPU jobs, dataset-scale generation or extra agents.
                 - Heavy work is packaged as a mission: create a branch from the template, add `missions/<mission-id>/mission.json` with `kind`, `title` and `summary`, plus code, an uv project and an entrypoint, commit, then call `aleph_propose_mission`. A proposal enters the dispatch queue immediately.
-                - After proposing, wait only for missions you own: call `aleph_evaluate`; a waiting result lists your pending missions, so wait briefly and retry. Do not wait for other researchers' missions.
+                - After proposing, do not sleep or poll. The Host messages you when a mission of yours settles. If you still have useful work, continue; otherwise end your turn and the Host wakes you when there is news. A shell `sleep` followed by a retry is never the right move.
+                - Call `aleph_evaluate` when your own missions are done, not to discover whether they are done.
                 - You decide when to evaluate. When your missions are done, call `aleph_evaluate` once more so the Host scores your branch and writes the report into its commit, then finish.
                 - Do not modify project queue, batch or machine state, and do not start other agents.
 
