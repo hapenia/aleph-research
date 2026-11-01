@@ -1,12 +1,13 @@
-# Research mechanism v4: experiments without code merges
+# Research mechanism v5: experiments without code merges
 
-This revision follows the adversarial type review. The v3 document borrowed GitHub's
-Issue / PR / CI shape, but several parts were still software-engineering thinking and
-several behaviours were underspecified. v4 keeps the useful collaboration shape, removes
-every merge semantic, and fixes the lifecycle questions the type review exposed.
+This document follows two review rounds. v3 borrowed GitHub's Issue / PR / CI shape, but
+several parts were still software-engineering thinking. v5 keeps the useful collaboration
+shape, removes every merge semantic, replaces best/quota with Boltzmann sampling and raw
+metrics, and records the lifecycle decisions the reviews forced.
 
-The TypeScript blueprint is paused until this mechanism is agreed; `research-core/` still
-describes v3 and will be rewritten afterwards.
+`research-core/` holds the v2 TypeScript blueprint rewritten against this mechanism; it
+was rejected by the second independent adversarial review and is being revised. The
+mechanism text below is the authority for that revision.
 
 ## Actors and powers
 
@@ -15,14 +16,14 @@ describes v3 and will be rewritten afterwards.
 | Operator | create Program, set goal and methodology, set exploration level, set budget, pause/stop (cancels in-flight work), handle attention | run experiments, edit code |
 | Researcher (several Sessions) | claim Issues, comment, propose Experiment plans, request CI, review CI results, close Issues, propose merges of knowledge into the Issue body | implement code, choose exploit/explore or the base |
 | Implementer (one Worker Session per Experiment Ticket) | write experiment code and environment declaration, commit, mark ready for review | choose strategy, request CI, close Issues |
-| Host | own all state, assign exploration strategy and base, run CI in the declared environment, store artifacts, update best, cancel work, audit every decision | decide research direction |
+| Host | own all state, sample the exploration base, run CI in the declared environment, store raw metrics and artifacts, cancel work, audit every decision | decide research direction |
 | Watchdog | raise attention for stalls, failing CI and unattended Issues | mutate state |
 | Main Session | route attention, answer people | do research |
 
 ## Objects
 
 - **Program**: goal, methodology, evaluation contract (CI entry, timeout, score field),
-  exploration level, budget, best result, status.
+  exploration level, budget and status.
 - **Issue**: research question with acceptance criteria; one assignee Researcher; comments;
   linked Experiments.
 - **Experiment**: one attempt at an Issue. Carries lineage (strategy, base, base commit),
@@ -67,7 +68,7 @@ Issue opened (Operator or Researcher)
   -> Researcher claims it
   -> Researcher writes the plan as Issue comments and proposes an Experiment
        (hypothesis, steps, expected outcome, environment declaration, artifact inputs)
-  -> Host assigns strategy and base from the Program's exploration level and quota,
+  -> Host samples the base with the Boltzmann sampler, records the lineage,
      creates the Experiment record (status open) and opens an Implementer Ticket
   -> Implementer prepares the ticket: branch from the assigned base commit, writes code,
      declares the uv environment, commits, marks the Experiment ready
@@ -75,11 +76,11 @@ Issue opened (Operator or Researcher)
   -> Host builds the environment with uv, runs the Program's CI entry inside it,
      records the CI run, score and artifacts
   -> Researcher reviews the CI result:
-       pass: close the Experiment as concluded; Host updates best when the score improves;
+       pass: Host records the metrics and artifacts; close the Experiment as concluded;
              close the Issue when its acceptance is met, otherwise propose the next Experiment
        fail: comment and either ask for another commit on the same Experiment (new CI later)
              or close the Experiment and propose a different approach
-  -> best and audit are updated; the loop continues with the next Issue or Experiment
+  -> metrics and audit are updated; the loop continues with the next Issue or Experiment
 ```
 
 The Program is not a merge target; closing the last Issue ends it, or the Operator stops
@@ -106,7 +107,7 @@ Fixed levels, no per-Program override:
 - Fresh start (branch from the scaffold) is chosen with the table's probability; with an
   empty population it is the only choice.
 - Iterating on the same Experiment does not sample a new base and does not change the
-  population; only a new Experiment adds a candidate.
+  sampler population; only a new Experiment adds a candidate.
 - There is no quota counter.
 
 ## Review and iteration

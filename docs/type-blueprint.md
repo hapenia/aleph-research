@@ -1,8 +1,16 @@
 # Type blueprint v2: nominal research domain in TypeScript
 
-Status: **review first, implementation later.** `research-core/src/types/` is the
-blueprint; the package contains types plus compile-time negative tests only. The
-JavaScript extension stays the runtime until the phased rewrite reaches parity.
+Status: **v2 rejected by the second adversarial review; v3 revision in progress.**
+`research-core/src/types/` is the v2 blueprint; the package contains types plus
+compile-time negative tests only. The JavaScript extension stays the runtime until the
+phased rewrite reaches parity.
+
+The second review (independent, adversarial) found that the executor actor guarantee is
+defeated by widening, that nominal classes have no declared factory or trust boundary and
+can still be forced with ordinary assertions, that cancellation and failed-CI persistence
+are not representable, that ownership and Ticket/Experiment binding are unchecked, and
+that the mechanism document was internally inconsistent. The smallest defensible v3
+change set is being worked through next; do not implement v2.
 
 This version replaces the first blueprint after an independent adversarial review. The
 review is responded to item by item below. The research mechanism it implements is
