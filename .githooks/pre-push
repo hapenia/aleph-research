@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# The full gate before anything reaches the remote.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+exec scripts/verify.sh
