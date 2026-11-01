@@ -8,6 +8,20 @@ semantic versioning: `0.x` minor versions carry behaviour, patch versions carry 
 
 ### Added
 
+- Migration to the DeepSeek Harness Super-agent composition: the `aleph` Source,
+  prepare-generated ticket repositories, bwrap read confinement, Host-authoritative
+  evaluation with a results log, budget-tiered admission, a resident Watchdog
+  Session, an AlephResearch Web panel, versioned hot configuration and extension
+  code hot reload.
+- `scripts/superagent-*.sh`: lab, case, smoke, soak, prepare and case stop.
+- 108 extension tests, run locally by `scripts/verify.sh` and in CI.
+
+### Removed
+
+- The old Leader / Composer / Researcher / Batch plugin, its operator skills and its
+  driving scripts; they are archived under `archive/` and no longer part of the
+  runtime, configuration or CI.
+
 - Operator skills for the Leader, researchers, the Composer and InfraOptimizer.
 - Web search and fetch for the Leader and for researchers, through the account-backed
   DeepSeek search and fetch providers.
