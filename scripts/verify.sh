@@ -24,6 +24,11 @@ for script in scripts/*.sh; do
   bash -n "$script"
 done
 
+if [ -f research-core/package.json ]; then
+  echo "== typecheck: research core blueprint"
+  (cd research-core && npm install --no-audit --no-fund --silent && npm run -s typecheck)
+fi
+
 if [ -f superagent-extension/package.json ]; then
   echo "== tests: superagent extension"
   (cd superagent-extension && npm install --no-audit --no-fund --silent && npm test --silent)
