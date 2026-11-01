@@ -26,6 +26,11 @@ done
 echo "== tests: plugin"
 (cd dsh-plugin && npm test)
 
+if [ -f superagent-extension/package.json ]; then
+  echo "== tests: superagent extension"
+  (cd superagent-extension && npm install --no-audit --no-fund --silent && npm test --silent)
+fi
+
 if [ "$docs" = "1" ]; then
   lint="${ALEPH_DOC_LINT:-$HOME/.dsh/skills/chinese-writing-standard/scripts/lint_chinese_writing.py}"
   if [ -f "$lint" ]; then
