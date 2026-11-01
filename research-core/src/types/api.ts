@@ -10,6 +10,7 @@ import type { Issue, IssueComment } from './issue.js'
 import type { Program, Paginated } from './program.js'
 import type { PullRequest, ReviewComment } from './pull-request.js'
 import type { Attention } from './attention.js'
+import type { AuditEntry } from './audit.js'
 import type { DomainError } from './errors.js'
 import type { ProgramId } from './ids.js'
 
@@ -36,6 +37,7 @@ export interface ProgramSnapshot {
   readonly ciRuns: Paginated<CIRun>
   readonly attention: readonly Attention[]
   readonly artifacts: Paginated<ArtifactMetadata>
+  readonly audit: readonly AuditEntry[]
 }
 
 /** Operator routes; the panel stays read-only until the mechanism is proven. */
@@ -47,6 +49,7 @@ export interface CreateProgramRequest {
     readonly scoreField: string
   }
   readonly budget: { readonly maxPullRequests: number; readonly maxComputeMinutes: number; readonly maxTokens: number }
+  readonly methodology: string
 }
 
 export interface CreateIssueRequest {

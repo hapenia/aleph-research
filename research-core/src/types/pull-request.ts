@@ -19,10 +19,9 @@ export type PullRequestStatus =
   | 'ci-running'
   | 'ci-passed'
   | 'ci-failed'
-  | 'merged'
   | 'closed'
 
-export type CloseReason = 'superseded' | 'abandoned' | 'rejected'
+export type CloseReason = 'superseded' | 'abandoned' | 'rejected' | 'concluded'
 
 interface PullRequestBase {
   readonly id: PullRequestId
@@ -37,8 +36,9 @@ interface PullRequestBase {
 }
 
 /**
- * A Pull request in `merged` must carry the evidence the Host checked: the merge
- * gate reads `ciRunId` and `acceptedBy`, so "merged without CI" cannot be constructed.
+ * A Pull request is an experiment snapshot, not a branch to merge into a mainline:
+ * research does not need git merge semantics. It ends by closing with a reason;
+ * the best result is tracked separately on the Program.
  */
 export type PullRequest =
   | (PullRequestBase & { readonly status: 'open' })
@@ -58,13 +58,6 @@ export type PullRequest =
       readonly status: 'ci-failed'
       readonly ciRunId: CIRunId
       readonly reason: string
-    })
-  | (PullRequestBase & {
-      readonly status: 'merged'
-      readonly ciRunId: CIRunId
-      readonly score: Score
-      readonly mergeCommit: CommitSha
-      readonly mergedAt: IsoTimestamp
     })
   | (PullRequestBase & {
       readonly status: 'closed'

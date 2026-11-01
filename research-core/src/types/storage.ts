@@ -9,10 +9,12 @@ import type { Program } from './program.js'
 import type { Issue, IssueComment } from './issue.js'
 import type { PullRequest, ReviewComment } from './pull-request.js'
 import type { CIRun } from './ci.js'
-import type { ProgramEvent, ProgramState, EventEnvelope, Decider } from './events.js'
-import type { DomainError, Result, StoreError } from './errors.js'
-import type { ProgramId, Version } from './ids.js'
-import type { DecisionContext } from './events.js'
+import type { AuditLog } from './audit.js'
+import type { DomainError, Result } from './errors.js'
+import type { ProgramId } from './ids.js'
+import type { SessionIdentity } from './roles.js'
+import type { IsoTimestamp } from './ids.js'
+import type { Decision } from './commands.js'
 
 export interface ProgramRepository {
   get(id: ProgramId): Promise<Program | undefined>
@@ -39,28 +41,33 @@ export interface CIRunRepository {
   listByPullRequest(pullRequestId: string): Promise<readonly CIRun[]>
 }
 
-/** Append-only event log with optimistic concurrency per Program. */
-export interface EventStore {
-  load(programId: ProgramId): Promise<readonly EventEnvelope<ProgramEvent>[]>
-  append(programId: ProgramId, expected: Version, events: readonly ProgramEvent[]): Promise<Result<readonly EventEnvelope<ProgramEvent>[], StoreError>>
+/** Who executes a command, and when; deciders and handlers receive this, not raw sessions. */
+export interface CommandContext {
+  readonly identity: SessionIdentity
+  readonly at: IsoTimestamp
+  readonly requestId: string
 }
 
-/** One transactional unit so a command's events and projections land together. */
+/** Repositories are the source of truth; state is updated in place, audited separately. */
 export interface UnitOfWork {
   readonly programs: ProgramRepository
   readonly issues: IssueRepository
   readonly pullRequests: PullRequestRepository
   readonly ciRuns: CIRunRepository
-  readonly events: EventStore
+  readonly audit: AuditLog
   transaction<T>(work: (uow: UnitOfWork) => Promise<T>): Promise<T>
 }
 
-/** Executes one command through its decider and appends the produced events. */
+/**
+ * Executes one command against current state, records the audit entries in the same
+ * transaction and returns the refreshed read model pieces. There is no replay engine:
+ * the audit log is for people, not for rebuilding state.
+ */
 export interface CommandExecutor {
-  execute<C>(decider: Decider<C>, command: C, context: DecisionContext): Promise<Result<readonly ProgramEvent[], DomainError>>
+  execute<C, R>(command: C, context: CommandContext): Promise<Result<Decision<R>, DomainError>>
 }
 
-/** Read-side folding used by the panel and Session tools. */
+/** Read model assembled from the repositories for the panel and Session tools. */
 export interface ReadModel {
-  loadProgramState(programId: ProgramId): Promise<ProgramState>
+  snapshot(programId: ProgramId): Promise<import('./api.js').ProgramSnapshot>
 }

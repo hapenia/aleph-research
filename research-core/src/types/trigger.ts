@@ -1,11 +1,13 @@
 /**
- * Mapping research events to SuperAgent Triggers.
+ * Mapping research facts to SuperAgent Triggers.
  *
- * The prototype owns Eval, Mandate, Ticket and routing. The rewrite does not replace
- * that machinery: it turns its own domain events into Triggers on the Program Thread,
- * so authorization and Worker launch keep using the prototype's decision path.
+ * The prototype owns Eval, Mandate, Ticket and routing; the rewrite turns its own audit
+ * facts into Triggers on a Program Thread so authorization and Worker launch keep using
+ * the prototype's decision path. State is not replayed: the snapshot is the current
+ * read model.
  */
-import type { ProgramState, ProgramEvent, EventEnvelope } from './events.js'
+import type { AuditEntry } from './audit.js'
+import type { ProgramSnapshot } from './api.js'
 import type { IsoTimestamp, ProgramId, SessionId } from './ids.js'
 
 export type ResearchTriggerKind =
@@ -25,7 +27,7 @@ export interface ResearchThreadRef {
   readonly kind: 'program' | 'issue' | 'pull-request' | 'ci-run'
 }
 
-/** What the factory produces; the prototype adds its own ids, channel and policy. */
+/** What the factory produces; the prototype adds ids, channel and policy. */
 export interface ResearchTriggerDraft {
   readonly kind: ResearchTriggerKind
   readonly programId: ProgramId
@@ -33,7 +35,7 @@ export interface ResearchTriggerDraft {
   readonly pullRequestId?: string
   readonly ciRunId?: string
   readonly threads: readonly ResearchThreadRef[]
-  /** Who caused the event; the prototype's Policy checks the actor. */
+  /** Who caused the fact; the prototype's Policy checks the actor. */
   readonly actor: { readonly source: 'aleph'; readonly id: SessionId | 'host' }
   readonly human: boolean
   readonly at: IsoTimestamp
@@ -43,11 +45,8 @@ export interface ResearchTriggerDraft {
 }
 
 /**
- * Pure mapping: an appended event plus the folded state becomes one Trigger draft,
- * or null when the event must not wake anyone (for example a CI run that is already
- * superseded by a newer head).
+ * Pure mapping: one audit fact plus the current snapshot becomes a Trigger draft, or
+ * null when the fact must not wake anyone (for example a CI result for a superseded
+ * head commit).
  */
-export type TriggerFactory = (
-  envelope: EventEnvelope<ProgramEvent>,
-  state: ProgramState,
-) => ResearchTriggerDraft | null
+export type TriggerFactory = (entry: AuditEntry, snapshot: ProgramSnapshot) => ResearchTriggerDraft | null

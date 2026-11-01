@@ -4,8 +4,8 @@
  */
 import type { CIRun, CheckResult, CIRequest } from './ci.js'
 import type { BuiltEnvironment, EnvironmentDeclaration, RepositorySnapshot } from './environment.js'
-import type { EvaluationContract, Program } from './program.js'
-import type { PullRequest } from './pull-request.js'
+import type { EvaluationContract } from './program.js'
+
 import type { DomainError, Result } from './errors.js'
 import type { BranchName, CommitSha, IsoTimestamp, SessionId } from './ids.js'
 import type { Attention } from './attention.js'
@@ -32,6 +32,8 @@ export type CIExecutionResult =
       readonly status: 'passed'
       readonly score: number
       readonly checks: readonly CheckResult[]
+      /** Where the entry left the results the Host must persist. */
+      readonly artifacts: readonly ArtifactCandidate[]
       readonly logPath: string
       readonly durationMs: number
     }
@@ -47,26 +49,11 @@ export interface EnvironmentBuilder {
   build(declaration: EnvironmentDeclaration): Promise<Result<BuiltEnvironment, DomainError>>
 }
 
-export interface GitService {
+/** The Host never merges branches: research keeps experiments as snapshots. */
+export interface RepositoryService {
   head(branch: BranchName): Promise<CommitSha>
-  merge(input: {
-    readonly branch: BranchName
-    readonly into: BranchName
-    readonly message: string
-  }): Promise<Result<{ readonly mergeCommit: CommitSha }, DomainError>>
-}
-
-/** Result of applying the Program's auto-merge policy to a Pull request. */
-export interface MergeDecision {
-  readonly allowed: boolean
-  /** Why: the CI evidence and the score comparison the Host checked. */
-  readonly evidence: readonly string[]
-  readonly reason: string
-}
-
-/** The Host decides merges from CI evidence; a model only proposes them. */
-export interface MergeGate {
-  decide(program: Program, pullRequest: PullRequest, ciRun: CIRun): MergeDecision
+  /** Copies one branch at a commit into a workspace for CI. */
+  snapshot(input: { readonly branch: BranchName; readonly commit: CommitSha }): Promise<RepositorySnapshot>
 }
 
 /** Pause/stop immediately cancel the Implementer work already running. */
@@ -86,4 +73,12 @@ export interface SessionPool {
 
 export interface AttentionSink {
   raise(attention: Attention): Promise<void>
+}
+
+
+/** A result file a CI entry produced; the Host copies it into ArtifactStore. */
+export interface ArtifactCandidate {
+  readonly kind: 'model-weights' | 'report' | 'figure' | 'dataset' | 'log' | 'other'
+  readonly path: string
+  readonly retention: 'keep-best' | 'keep-forever' | 'discard-after-merge' | 'temporary'
 }

@@ -1,36 +1,30 @@
 # Type blueprint: AlephResearch rewrite in TypeScript
 
-Status: **review first, implementation later.** This document and
-`research-core/src/types/` are the agreed starting point; no runtime code exists in the
-new package. The existing JavaScript extension stays in place until the phased rewrite
-reaches parity.
+Status: **review first, implementation later.** `research-core/src/types/` is the agreed
+starting point; the package contains types only. The JavaScript extension stays the
+runtime until the phased rewrite reaches parity.
 
 ## Why type-driven
 
-The research mechanism is a state machine with several actors, a Host that is the only
-writer, external effects (git, CI, Sessions) and untrusted input from HTTP and models.
-The rewrite puts the illegal states into the type system before writing behaviour:
+The research mechanism has several actors, one authoritative writer (the Host), external
+effects (git, uv environments, CI, Sessions) and untrusted input from HTTP and models.
+The rewrite fixes the shape before writing behaviour:
 
 - **Parse, do not validate later.** Boundary parsers turn untrusted bodies into branded
-  ids, timestamps and commands; inside the domain every value already satisfies its
-  invariants.
+  ids, timestamps and commands; inside the domain every value satisfies its invariants.
 - **Branded identities.** A `ProgramId` cannot be passed where an `IssueId` is expected.
-  Humans read an Issue's title, not its id; ids stay opaque generated strings.
-- **Discriminated state machines.** An Issue is `open | assigned | in-review | closed`;
-  a Pull request is `open | ci-requested | ci-running | ci-passed | ci-failed | merged |
-  closed`. Fields that only make sense in one state exist only in that variant, so
-  "merged without a CI run" or "reviewing without a Pull request" cannot be constructed.
-- **Results, not exceptions.** Command deciders return `Result<Event[], DomainError>`;
-  refusals are values with closed codes mapped to HTTP statuses.
-- **Event sourcing with a pure decider and reducer.** `Decider<C>` and `Reducer` are
-  total functions; the Host appends events with an expected version and folds read
-  models from the same stream. Whether the system keeps the full event history or only
-  a current-state record is a review question (see the end).
-- **Capabilities.** Each Session role has an explicit `Capability[]`; commands are
-  authorized against the role and, for Researchers, against the Issue assignee.
-- **Ports for effects.** git, CI execution, environment building, Session wake-up,
-  attention and merge policy are interfaces implemented in later phases, so the domain
-  stays testable without a Host.
+  Humans read an Issue's title; ids stay opaque generated strings.
+- **Discriminated state machines.** Issue, Pull request and CI run are unions where
+  only-state fields exist only in that state.
+- **Results, not exceptions.** Command execution returns `Result<Decision<R>, DomainError>`
+  with a closed error-code set.
+- **Current state plus an audit log.** The review rejected event replay: state lives in
+  repositories and is updated in place; an append-only audit log records who changed
+  what, why and what the Host checked. The log is for people, not for rebuilding states.
+- **Capabilities.** Each Session role has an explicit `Capability[]`; Researcher commands
+  are additionally checked against the Issue assignee.
+- **Ports for effects.** uv environment building, CI execution, repository snapshots,
+  Session wake-up, attention and cancellation are interfaces implemented in later phases.
 
 ## Package layout
 
@@ -38,29 +32,31 @@ The rewrite puts the illegal states into the type system before writing behaviou
 research-core/
   src/types/
     ids.ts            branded ids, timestamps, versions, scores
-    errors.ts         Result and DomainError, StoreError
-    program.ts        Program, Budget, EvaluationContract, AcceptanceRule, BestResult
+    errors.ts         Result, DomainError, StoreError
+    program.ts        Program, Budget, EvaluationContract, methodology, BestResult
     issue.ts          Issue state machine, IssueComment, labels
-    pull-request.ts   Pull request state machine, ReviewComment, merge evidence
+    pull-request.ts   Pull request state machine, ReviewComment
     ci.ts             CI run state machine, checks, request
-    environment.ts    environment declaration, built environment, snapshot
-    artifacts.ts      stored results: model weights, reports, retention
+    environment.ts    uv environment declaration, built environment, snapshot
+    artifacts.ts      stored results (model weights, reports), retention, ArtifactStore
+    audit.ts          AuditEntry, AuditLog
+    transitions.ts    legal transition tables for Issue, Pull request, CI
     roles.ts          SessionRole, Capability, identities
     session.ts        Researcher pool config, wake reasons, assignments
     attention.ts      Attention and its subjects
-    events.ts         ProgramEvent, envelope, ProgramState, Decider, Reducer
-    commands.ts       command unions per role, ExperimentPlan
-    tools.ts          typed tool contracts for Researcher/Implementer/Operator/Watchdog
-    storage.ts        repositories, event store, unit of work, executor, read model
-    services.ts       Clock, CIRunner, EnvironmentBuilder, GitService, MergeGate, SessionPool
+    commands.ts       command unions per role, ExperimentPlan, Decision
+    tools.ts          typed tool contracts per role
+    storage.ts        repositories, audit log, unit of work, command executor
+    services.ts       Clock, CIRunner, EnvironmentBuilder, RepositoryService,
+                      RunCanceller, SessionPool, AttentionSink
     api.ts            management API and read-only panel DTOs
-    trigger.ts        research event to SuperAgent Trigger mapping
+    trigger.ts        audit fact plus snapshot to SuperAgent Trigger
   src/index.ts        type re-exports only
 ```
 
 ## Core shapes
 
-Program:
+Program (research Program; no auto-merge and no acceptance-rule language):
 
 ```ts
 interface Program {
@@ -68,151 +64,123 @@ interface Program {
   name: string
   goal: string                      // operator-owned
   contract: EvaluationContract      // CI entry and score field
+  methodology: string               // per-Program research instructions
   budget: Budget
   status: 'running' | 'paused' | 'stopped'
   best: BestResult | null
-  autoMerge: AutoMergePolicy        // decided by the Host, never by a model
   createdAt: IsoTimestamp
 }
 ```
 
-The review rejected a general acceptance-rule language as meaningless. The blueprint
-replaces it with one explicit `AutoMergePolicy` value on the Program
-(`never | when-ci-passes | when-ci-passes-and-score-not-worse`); the exact value for the
-first Program is a review question. `MergeGate` returns the evidence it checked, so the
-Host decision is auditable without a rule engine.
+Issue and Pull request states: an Issue is `open | assigned | in-review | closed`; a
+Pull request is `open | ci-requested | ci-running | ci-passed | ci-failed | closed`.
+A Pull request is an **experiment snapshot**, not a branch to merge into a mainline;
+research does not copy software-engineering merge semantics. The best result is tracked
+on the Program and points at the artifacts it produced.
 
-Results are stored, not discarded: a passed CI run carries `ArtifactRef[]` (model
-weights, reports, figures) and `BestResult` points at the artifacts of the best score.
+CI runs are `requested | running | passed | failed`; a passed run carries checks, a
+score, the stored artifacts and the log.
 
-Pull request merge evidence is part of the state, so the merge state cannot exist
-without the CI run and score it was merged on:
-
-```ts
-PullRequest & { status: 'merged'; ciRunId: CIRunId; score: Score; mergeCommit: CommitSha }
-```
-
-Commands and events are unions; deciders are pure:
+Commands and decisions:
 
 ```ts
-type Decider<Command> = (
-  state: ProgramState,
-  command: Command,
-  context: DecisionContext,
-) => Result<readonly ProgramEvent[], DomainError>
+type Decision<R> = { result: R; audit: readonly AuditEntry[] }
 ```
+
+Command execution is a Host service (`CommandExecutor`) that applies the transition,
+writes the audit entries in one transaction and returns a `Result`.
 
 ## Invariants
 
 Encoded in types:
 
-- identities are nominal; timestamp and score are branded;
-- Issue and Pull request states carry only their own fields;
-- merged Pull request carries CI run, score and merge commit;
-- a passed CI run carries checks, score, log and duration;
-- a command's payload names the Program; operational context (who, when) is separate;
-- every event names its Program, sequence and time.
+- identities are nominal; timestamps and scores are branded;
+- Issue/Pull request/CI states carry only their own fields;
+- a passed CI run carries checks, score, artifacts and log;
+- an Issue assignee is a `SessionId` (a Researcher is its Session);
+- every audit entry names the Program, actor, action, subject and the facts checked;
+- every Trigger draft names its Thread kind and the actor Policy will see.
 
 Checked at runtime in the phases that follow:
 
-- transition legality (deciders) and version monotonicity (event store);
-- one assignee per Issue and only that Researcher may act on it;
-- CI only runs on an explicit request and only for the current head commit;
-- environment declarations are buildable with uv;
-- the merge rule holds and the merge has no conflicts;
-- budgets are not exceeded.
+- transition legality (tables in `transitions.ts`) and one assignee per Issue;
+- CI only on explicit request and only for the current head commit;
+- every Pull request declares a uv environment that the Host can build;
+- pause/stop cancels in-flight Implementer work;
+- artifact retention and budget limits.
 
-## Roles and capabilities
+## Roles
 
-`capabilitiesOf` in `roles.ts` is a data table, not logic. Operator creates the Program,
-issues and stops it; Researcher claims, comments, proposes experiments, requests CI,
-reviews, merges by request; Implementer only submits; Watchdog only raises attention;
-Router has no research capabilities.
+`capabilitiesOf` is a data table. Operator creates the Program, Issues, pauses, stops and
+handles anomalies; Researcher claims, comments, proposes experiments, requests CI and
+closes Issues; Implementer only implements and submits; Watchdog raises attention; the
+Main Session routes attention. A Researcher is its Session: a restart is a new
+Researcher, and the Issue assignee is that Session.
 
-A Researcher is identified by its Session (review decision): there is no separate
-ResearcherId. A restart creates a new Session and therefore a new Researcher, and the
-Issue assignee is a `SessionId`.
+## Environment and CI
 
-## From research events to SuperAgent Triggers
+uv is a fixed capability of the extension image, not per-Program configuration. Every
+Pull request declares `environment/uv.lock` or `environment/requirements.txt` and the
+Program contract names the CI entry and score field. The Host builds the environment
+with uv, runs the entry inside it with `ALEPH_SUBMISSION_PYTHON`, and stores the artifacts
+the entry produced. Research methodology text is per Program so rules can change
+without a deploy.
 
-The rewrite does not reimplement Eval or execution. `trigger.ts` maps an appended event
-plus the folded state to a Trigger draft (`issue-claimed`, `ci-completed`, ...); the
-prototype's Eval, Mandate, Ticket and Worker machinery authorizes and runs the work.
-`TriggerFactory` is pure and may return `null` (for example a CI result for a superseded
-head must not wake anyone).
+## Artifacts
 
-## Host services
-
-`storage.ts` makes the Host the only writer: repositories, an append-only event store
-with optimistic concurrency, a unit of work and a command executor. `services.ts`
-declares the effect ports: CI runner, environment builder, git merge, merge gate,
-Session pool and attention sink. Phase 1 implements the store and deciders in memory
-with tests; phase 2 swaps in SQLite and wires the services.
+Model weights, reports, figures and datasets are persisted instead of discarded: a
+passed CI run returns `ArtifactCandidate`s, the Host copies them into an
+`ArtifactStore` on its filesystem and records `ArtifactRef`s; the best result points at
+its artifacts. Retention is `keep-best | keep-forever | discard-after-merge |
+temporary`, and only artifacts whose retention allows it are pruned.
 
 ## API
 
-The panel is read-only in version 1: `GET /aleph/api/programs` and
-`GET /aleph/api/programs/:id` return summaries and one `ProgramSnapshot` (program,
-issues, comments, Pull requests, reviews, CI runs, attention). Operator routes create
-programs and issues; Researcher capabilities are exposed as Session tools, not panel
-buttons.
+The panel is read-only: `GET /aleph/api/programs` and
+`GET /aleph/api/programs/:id` return a `ProgramSnapshot` (program, issues, comments,
+Pull requests, reviews, CI runs, artifacts, audit). Operator routes create programs and
+issues; Researcher capabilities are Session tools.
 
 ## Phases
 
-1. **Store and domain**: tsconfig already in place; implement `ProgramState` fold,
-   deciders, event store (in memory and SQLite), command executor, management routes;
-   tests for every transition and refusal.
+1. **Domain**: branded parsers, transition tables, command handlers, repositories in
+   memory and SQLite, audit log, `CommandExecutor`, management routes; tests for every
+   transition and refusal.
 2. **Researcher pool**: preset, pool, assignee claiming, Researcher tools, wake-ups from
-   issue and CI events; the router/session wiring stays on the prototype.
-3. **Implementer flow**: Pull request Tickets, environment declaration, on-demand CI in
-   the declared environment with uv, review comments.
-4. **Merge and panel**: MergeGate, merge, best update, read-only Program view.
-5. **Case migration**: kunlungpt as a Program with Issues and Pull requests; 24-hour run;
-   retirement of the superseded soak loop and the old extension.
-
-Artifact persistence (port plus filesystem store) belongs to phase 3; pause/stop
-cancellation belongs to phase 2 with the Session pool and Ticket cancellation.
+   Issue and CI facts; pause/stop cancellation of Implementer work.
+3. **Implementer flow**: Pull request Tickets, uv environment declaration and build,
+   on-demand CI, artifact storage, review comments.
+4. **Panel**: read-only Program view.
+5. **Case migration**: kunlungpt as a Program with Issues and experiment snapshots;
+   24-hour run; retirement of the superseded soak loop and the old extension.
 
 ## Deliberate non-goals
 
-No missions, machine registry, batch composition or InfraOptimizer; no scheduling of
-compute (declarations stay descriptive); no GitHub issue/PR mirroring; no panel controls
-in version 1; no second source of truth for research state outside Host storage.
+No missions, machine registry, batch composition or InfraOptimizer; no compute
+scheduling; no GitHub issue/PR mirroring; no merge-to-mainline semantics; no panel
+controls in version 1; no event replay; no second source of truth outside Host storage.
 
-## Review questions
+## Resolved in review
 
-Answered in this revision:
-
-- Issue ids stay opaque; humans read the title.
-- A Researcher is the Session; no separate ResearcherId, and an Issue assignee is a
-  `SessionId`.
+- Keep an audit log; do not build a replay engine.
+- Remove the acceptance-rule language and auto-merge: research is not software
+  engineering and does not copy merge semantics.
+- A Researcher is identified by its Session; Issue assignee is a SessionId.
 - Experiment plans live in Issue comments.
-- Every Pull request builds its own uv environment; no Program-runtime fallback.
-- Pause and stop cancel in-flight Implementer work.
-- Artifacts (model weights, reports) are stored and referenced from CI runs and the best
-  result.
+- Every Pull request builds its own uv environment; no shared runtime fallback.
+- Pause/stop cancel in-flight Implementer work.
+- Artifacts are stored (Host filesystem plus retention), not discarded after CI.
+- uv is fixed in the extension image; methodology text is per Program.
 
-Still open:
+## Open questions for review
 
-1. **State storage.** The blueprint currently describes both an event log and read
-   models. Should the system permanently keep every change as an event history that can
-   be replayed and audited (more storage and code), or only keep the current state of
-   each record, overwritten in place (simpler, loses history)? Recommended: keep a small
-   event history for Program-level decisions and current-state records for Issues and
-   Pull requests.
-2. **When does the Host auto-merge a passed Pull request?** The previous rule language
-   was rejected. Options: merge as soon as CI passes; merge only when the score is at
-   least the current best (never regress the mainline); never auto-merge (a Researcher
-   must request the merge). Recommended: merge only when CI passes and the score is at
-   least the best.
-3. **Who owns the uv runtime and the methodology instructions?** Two separate things:
-   the case runtime with uv (technical prerequisite for CI) and the research
-   methodology text (how a Worker should work). Options: both fixed in the extension
-   image; both declared per Program and editable; uv fixed but methodology per Program.
-   Recommended: uv fixed, methodology per Program so the operating rules can change
-   without a deploy.
-4. **Artifact location and retention.** Model weights can be large. Options: Host
-   filesystem store with references in Host state (recommended); inside the research
-   repository (git history grows, needs LFS); keep only the best result's artifacts and
-   discard the rest. Recommended: Host store, keep the best result and recent
-   experiments, prune temporary artifacts.
+1. **Naming and lifecycle of the experiment artifact.** With no merge semantics, is the
+   `Pull request` record still the right concept (a branch snapshot plus CI evidence), or
+   should it be renamed to `Experiment` / `Submission`? The types currently keep the name
+   but no longer carry merge states.
+2. **Branch base for the next experiment.** Should each new experiment branch start from
+   the commit of the current best result, from a fixed research mainline, or does the
+   Researcher choose the base explicitly along with the plan?
+3. **Artifact consumption.** Does a later Worker need a typed way to reference an earlier
+   Experiment's artifacts (for example `best.model` as an input), or is reading the
+   `BestResult` reference enough?

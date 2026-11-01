@@ -28,12 +28,7 @@ export interface EvaluationContract {
   readonly scoreField: string
 }
 
-/**
- * When the Host merges a passed Pull request without a person. The final choice is an
- * open review question; the blueprint keeps the value explicit on the Program instead
- * of hiding it in a rule language.
- */
-export type AutoMergePolicy = 'never' | 'when-ci-passes' | 'when-ci-passes-and-score-not-worse'
+
 
 export interface BestResult {
   readonly score: Score
@@ -54,8 +49,9 @@ export interface Program {
   readonly budget: Budget
   readonly status: ProgramStatus
   readonly stopReason?: StopReason
+  /** How the Workers of this Program are told to research; editable per Program. */
+  readonly methodology: string
   readonly best: BestResult | null
-  readonly autoMerge: AutoMergePolicy
   readonly createdAt: IsoTimestamp
 }
 

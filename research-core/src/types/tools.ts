@@ -18,7 +18,6 @@ import type {
   CreateProgramCommand,
   ProposeExperimentCommand,
   RequestCICommand,
-  RequestMergeCommand,
 } from './commands.js'
 
 /** A tool declares only its name, purpose and payload types; schemas come later. */
@@ -44,7 +43,6 @@ export interface ResearcherTools {
   readonly commentOnIssue: ToolContract<CommentOnIssueCommand, ToolResult<Issue>>
   readonly proposeExperiment: ToolContract<ProposeExperimentCommand, ToolResult<PullRequest>>
   readonly requestCI: ToolContract<RequestCICommand, ToolResult<CIRun>>
-  readonly requestMerge: ToolContract<RequestMergeCommand, ToolResult<PullRequest>>
   readonly closeIssue: ToolContract<CloseIssueCommand, ToolResult<Issue>>
   readonly createIssue: ToolContract<CreateIssueCommand, ToolResult<Issue>>
 }

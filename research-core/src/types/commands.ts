@@ -2,6 +2,7 @@
 import type { Budget, EvaluationContract } from './program.js'
 import type { IssueLabel } from './issue.js'
 import type { EnvironmentDeclaration } from './environment.js'
+import type { AuditEntry } from './audit.js'
 import type { CommitSha, IssueId, ProgramId, PullRequestId, TicketId } from './ids.js'
 
 /** What the operator creates; the only command that carries the whole contract. */
@@ -82,12 +83,6 @@ export interface RequestCICommand {
   readonly commit: CommitSha
 }
 
-export interface RequestMergeCommand {
-  readonly type: 'pull-request.merge'
-  readonly programId: ProgramId
-  readonly pullRequestId: PullRequestId
-}
-
 export interface CloseIssueCommand {
   readonly type: 'issue.close'
   readonly programId: ProgramId
@@ -109,7 +104,6 @@ export interface SubmitImplementationCommand {
 export type HostCommand =
   | { readonly type: 'ci.start'; readonly ciRunId: string }
   | { readonly type: 'ci.finish'; readonly ciRunId: string }
-  | { readonly type: 'pull-request.merge-finalize'; readonly pullRequestId: PullRequestId }
 
 export type OperatorCommand = CreateProgramCommand | PauseProgramCommand | StopProgramCommand | CreateIssueCommand
 export type ResearcherCommand =
@@ -118,7 +112,12 @@ export type ResearcherCommand =
   | ProposeExperimentCommand
   | RequestPullRequestCommand
   | RequestCICommand
-  | RequestMergeCommand
   | CloseIssueCommand
 export type ImplementerCommand = SubmitImplementationCommand
+/** What executing one command returns: the read value plus the audit records it wrote. */
+export interface Decision<R> {
+  readonly result: R
+  readonly audit: readonly AuditEntry[]
+}
+
 export type AnyCommand = OperatorCommand | ResearcherCommand | ImplementerCommand | HostCommand
