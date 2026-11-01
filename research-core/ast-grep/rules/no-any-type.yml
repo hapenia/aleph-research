@@ -1,0 +1,13 @@
+id: no-any-type
+language: TypeScript
+severity: error
+message: '`any` erases the domain guarantees; use a typed boundary or `unknown` plus a parser.'
+files:
+  - 'src/**/*.ts'
+ignores:
+  - 'src/type-tests.ts'
+  - 'src/factories.ts'
+  - 'src/hydration.ts'
+rule:
+  kind: predefined_type
+  regex: '^any$'

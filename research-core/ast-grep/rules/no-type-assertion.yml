@@ -1,0 +1,14 @@
+id: no-type-assertion
+language: TypeScript
+severity: error
+message: Type assertions are only allowed in the factory/hydration boundary or the type tests.
+files:
+  - 'src/**/*.ts'
+ignores:
+  - 'src/type-tests.ts'
+  - 'src/factories.ts'
+  - 'src/hydration.ts'
+rule:
+  any:
+    - kind: as_expression
+    - kind: type_assertion

@@ -41,3 +41,11 @@ jobs:
       - name: Run extension tests
         working-directory: superagent-extension
         run: npm test
+
+      - name: Typecheck and lint research core blueprint
+        working-directory: research-core
+        run: |
+          npm install --no-audit --no-fund
+          npm run typecheck
+          npm run lint
+          npm run test:mutation

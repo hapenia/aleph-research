@@ -1,0 +1,17 @@
+id: no-json-parse
+language: TypeScript
+severity: error
+message: Hydration goes through the boundary parser, not JSON.
+files:
+  - 'src/**/*.ts'
+ignores:
+  - 'src/type-tests.ts'
+  - 'src/factories.ts'
+  - 'src/hydration.ts'
+  - 'src/parsers.ts'
+rule:
+  any:
+    - pattern: JSON.parse($ARG)
+    - pattern: globalThis.JSON.parse($ARG)
+    - pattern: const { parse } = JSON
+    - pattern: const $L = JSON
