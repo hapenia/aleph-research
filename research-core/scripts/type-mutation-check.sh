@@ -34,7 +34,7 @@ PY
     failed=1
     return
   fi
-  if ! printf '%s\n' "$out" | rg -q "$expect"; then
+  if ! printf '%s\n' "$out" | grep -Eq "$expect"; then
     echo "MUTATION KILLED FOR THE WRONG REASON: $name" >&2
     printf '%s\n' "$out" | head -3 >&2
     failed=1
