@@ -94,12 +94,12 @@ commit your work on this branch with a clear message.
 ## Long computations
 
 Start a long command in the background and then end your turn: the job's completion
-wakes you with its result. Do not poll a running job with repeated `job_output`
+wakes you with its result. Do not poll a running job with repeated \`job_output\`
 waits, and do not re-run a training job that is already running.
 
-The sandbox uses its own PID namespace. `ps` inside the workspace may therefore show
-no process for a background job that is still running. Trust the `job_output` status
-instead of `ps`; a running job is not a dead job.
+The sandbox uses its own PID namespace. \`ps\` inside the workspace may therefore show
+no process for a background job that is still running. Trust the \`job_output\` status
+instead of \`ps\`; a running job is not a dead job.
 
 ## Environment limits
 
