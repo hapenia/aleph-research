@@ -59,3 +59,11 @@ test('the source carries the research project settings into the execution enviro
   const fallback = alephKind.environment.values({ deployment: {}, config: defaults })
   assert.equal(fallback.ALEPH_TEMPLATE_BRANCH, 'main')
 })
+
+
+test('declared resources travel on the trigger meta', () => {
+  const trigger = alephTrigger({ project: 'p', requestId: 'r-2', text: 'run a sweep', resources: { gpu: true, cpu: 4, timeoutMs: 60000 } })
+  assert.deepEqual(trigger.meta.resources, { gpu: true, cpu: 4, timeoutMs: 60000 })
+  const plain = alephTrigger({ project: 'p', requestId: 'r-3', text: 'count rows' })
+  assert.equal(plain.meta.resources, undefined)
+})

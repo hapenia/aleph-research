@@ -308,6 +308,7 @@ project_file = os.environ.get('ALEPH_SUPERAGENT_PROJECT', '')
 if project_file:
     spec = json.loads(open(project_file, encoding='utf-8').read())
     config = spec['config']
+    config.setdefault('methodologyPath', os.environ.get('ALEPH_METHODOLOGY', ''))
 else:
     config = {
         'project': 'fixture',
@@ -318,6 +319,7 @@ else:
         'conventions': 'Analyse data/ and write findings as Markdown files in this worktree.',
         'evalCommand': f'sh {fixtures}/eval.sh',
         'evalTimeoutMs': 120000,
+        'methodologyPath': f'{repo}/superagent-extension/skills/aleph-research-methodology.md',
     }
 def saved(label, result):
     print(label + ':', result)

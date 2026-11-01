@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { admitRequest, admissionText } from '../admission.js'
+import { admitRequest, admissionText, tierForResources } from '../admission.js'
 
 const budget = { autoTiers: ['explore', 'analysis'], attentionTiers: ['training', 'design'], maxAutoPerHour: 2 }
 
@@ -39,4 +39,22 @@ test('malformed input never throws and lands on the conservative side', () => {
   assert.equal(result.tier, 'explore')
   assert.equal(result.accepted, false)
   assert.equal(admissionText({ accepted: false, tier: 'explore', reason: 'x', auto: false }), 'waiting for a person (explore): x')
+})
+
+
+test('declared GPU or heavy CPU resources escalate to a person', () => {
+  assert.equal(tierForResources({ gpu: true }), 'training')
+  assert.equal(tierForResources({ cpu: 8 }), 'training')
+  assert.equal(tierForResources({ memoryGb: 64 }), 'training')
+  assert.equal(tierForResources({ cpu: 2, gpu: false }), null)
+
+  const gpu = admitRequest({ text: 'count rows', budget, resources: { gpu: true } })
+  assert.equal(gpu.tier, 'training')
+  assert.equal(gpu.accepted, false)
+  const confirmed = admitRequest({ text: 'count rows', budget, resources: { gpu: true }, confirmed: true })
+  assert.equal(confirmed.accepted, true)
+  assert.match(confirmed.reason, /confirmed by a person/)
+
+  const small = admitRequest({ text: 'count rows', budget, resources: { cpu: 2 } })
+  assert.equal(small.accepted, true)
 })

@@ -7,6 +7,7 @@
  * same domain as GitHub or Feishu events without a remote service.
  */
 import { randomUUID } from 'node:crypto'
+import { dirname } from 'node:path'
 import { execFile } from 'node:child_process'
 import { mkdir } from 'node:fs/promises'
 import { promisify } from 'node:util'
@@ -127,6 +128,8 @@ const AlephConfigSchema = z.object({
   evalCommand: z.string().trim().default(''),
   /** Evaluation timeout in milliseconds. */
   evalTimeoutMs: z.number().int().default(600000),
+  /** Optional methodology file appended to every ticket's AGENTS.md. */
+  methodologyPath: z.string().trim().default(''),
 }).strict()
 
 /** The `aleph` Source kind: local research threads and triggers. */
@@ -159,13 +162,19 @@ export const alephKind = {
       { key: 'ALEPH_DATA_DIR', description: { zh: '只应提供给工单的数据目录。', en: 'The only data directory a ticket should receive.' } },
       { key: 'ALEPH_PYTHON', description: { zh: '项目运行时解释器。', en: 'Project runtime interpreter.' } },
       { key: 'ALEPH_CONVENTIONS', description: { zh: '项目约定文件的内容。', en: 'Project conventions text.' } },
+      { key: 'ALEPH_UV', description: { zh: '项目运行时自带的 uv。', en: 'The uv bundled with the project runtime.' } },
+      { key: 'ALEPH_METHODOLOGY_PATH', description: { zh: '研究方法论文件路径，会追加到工单 AGENTS.md。', en: 'Methodology file appended to the ticket AGENTS.md.' } },
+      { key: 'ALEPH_RESOURCES', description: { zh: '本次请求声明的资源（JSON）。', en: 'Resources declared by the request (JSON).' } },
     ],
-    values: ({ config }) => ({
+    values: ({ config, trigger }) => ({
       ALEPH_RESEARCH_REPO: config.repository ?? '',
       ALEPH_TEMPLATE_BRANCH: config.templateBranch ?? 'main',
       ALEPH_DATA_DIR: config.dataDir ?? '',
       ALEPH_PYTHON: config.python ?? '',
       ALEPH_CONVENTIONS: config.conventions ?? '',
+      ALEPH_UV: config.python ? `${dirname(String(config.python))}/uv` : '',
+      ALEPH_METHODOLOGY_PATH: config.methodologyPath ?? '',
+      ALEPH_RESOURCES: JSON.stringify(trigger?.meta?.resources ?? null),
     }),
   },
   health: ['aleph'],
@@ -196,7 +205,7 @@ export const alephKind = {
 const threadId = (project, ticket) => `research:${project}:ticket:${ticket || 'main'}`
 
 /** Build the Trigger of one local research request. Ids are stable per request id. */
-export function alephTrigger({ project, ticket = 'main', requestId, text, actor = 'operator', kind = 'request', score = null }) {
+export function alephTrigger({ project, ticket = 'main', requestId, text, actor = 'operator', kind = 'request', score = null, resources = null }) {
   const thread = threadId(project, ticket)
   const id = `aleph:${kind}:${requestId}`
   return {
@@ -209,7 +218,7 @@ export function alephTrigger({ project, ticket = 'main', requestId, text, actor 
     at: new Date().toISOString(),
     text,
     channel: { source: 'aleph', thread: `aleph:${thread}`, address: { project, ticket } },
-    meta: { project, ticket, kind, ...(score === null ? {} : { score }) },
+    meta: { project, ticket, kind, ...(score === null ? {} : { score }), ...(resources ? { resources } : {}) },
   }
 }
 
@@ -223,6 +232,13 @@ const TriggerBody = z.object({
   score: z.number().nullable().optional(),
   /** The operator already confirmed work the budget gate would otherwise hold. */
   confirmed: z.boolean().optional(),
+  /** Declared compute: a GPU request or many CPUs escalates to a person. */
+  resources: z.object({
+    cpu: z.number().int().nonnegative().optional(),
+    gpu: z.boolean().optional(),
+    memoryGb: z.number().nonnegative().optional(),
+    timeoutMs: z.number().int().positive().optional(),
+  }).strict().optional(),
 }).strict()
 
 const readBody = async (req) => {
@@ -307,6 +323,7 @@ export function apply(ctx) {
           const admission = admitRequest({
             text: input.text,
             confirmed: body?.confirmed === true,
+            resources: input.resources,
             budget,
             usage: { autoAcceptedLastHour: await autoAcceptedLastHour() },
           })
@@ -319,7 +336,7 @@ export function apply(ctx) {
             })
           }
           const requestId = input.requestId ?? randomUUID()
-          const trigger = alephTrigger({ ...input, requestId })
+          const trigger = alephTrigger({ ...input, requestId, resources: input.resources ?? null })
           const result = await ctx.orchestrator.context(alephKind).receive(trigger)
           return sendJson(res, 200, { ok: true, accepted: true, admission, trigger: trigger.id, thread: trigger.threads[0].id, result })
         } catch (error) {

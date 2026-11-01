@@ -277,6 +277,27 @@ under `$ALEPH_WORKSPACE/.aleph` and the new wrapper did not create it; after the
 same commit scored through the Host. `scripts/superagent-soak.sh` is sampling the run
 every five minutes and drives further improvement tickets when the queue is idle.
 
+### Restored after the gap review
+
+A feature-by-feature comparison with the retired design chose a deliberate subset to
+restore; the rest stays retired by decision:
+
+- **uv in the runtime**: the case runtime now bundles uv (`uv pip install ... uv`), and
+  prepare tells every ticket where it is (`ALEPH_UV`) so the Worker can create a
+  ticket-local environment for extra dependencies without touching the shared runtime.
+- **Resource declaration**: a request may declare `resources` (CPU, GPU, memory,
+  timeout). A GPU or a large CPU/memory request escalates to a person even when the
+  text classifies as cheap, and the declaration is written into the ticket AGENTS.md.
+- **Research methodology skill**: the retired researcher rules (data policy,
+  dependencies, long jobs, evaluation honesty) live in
+  `superagent-extension/skills/aleph-research-methodology.md` and are appended to every
+  ticket's AGENTS.md, so the rules are versioned and reviewable again.
+
+Kept from the current design, by decision: ticket-only execution with a single
+Router/Worker model (no missions, machine registry or batch composition); results log
+plus `result` Trigger instead of a Host report commit; read-only research panel; local
+workflow without GitHub collaboration.
+
 ### Retirement
 
 The old plugin, its skills and its scripts are archived and no longer take part in the

@@ -64,6 +64,7 @@ jq -n \
   --arg python "$runtime/bin/python" \
   --arg conventions "$conventions" \
   --arg eval "sh $run_root/case-eval.sh" \
+  --arg methodology "$repo/superagent-extension/skills/aleph-research-methodology.md" \
   --arg brief "$brief" \
   --arg ticket "case-$case_name" \
   '{
@@ -75,7 +76,8 @@ jq -n \
       python: $python,
       conventions: $conventions,
       evalCommand: $eval,
-      evalTimeoutMs: 900000
+      evalTimeoutMs: 900000,
+      methodologyPath: $methodology
     },
     request: {
       project: $project,

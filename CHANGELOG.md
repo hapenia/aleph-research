@@ -15,6 +15,9 @@ semantic versioning: `0.x` minor versions carry behaviour, patch versions carry 
   code hot reload.
 - `scripts/superagent-*.sh`: lab, case, smoke, soak, prepare and case stop.
 - 108 extension tests, run locally by `scripts/verify.sh` and in CI.
+- uv bundled in the case runtime plus ticket-level dependency guidance (`ALEPH_UV`),
+  declared compute resources on requests (GPU/heavy CPU escalates to a person), and a
+  versioned research methodology appended to every ticket AGENTS.md.
 
 ### Removed
 
