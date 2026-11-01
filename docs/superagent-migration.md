@@ -277,6 +277,16 @@ under `$ALEPH_WORKSPACE/.aleph` and the new wrapper did not create it; after the
 same commit scored through the Host. `scripts/superagent-soak.sh` is sampling the run
 every five minutes and drives further improvement tickets when the queue is idle.
 
+### Mechanism v3 supersedes the gap restoration
+
+The gap review restored uv in the runtime, resource declarations and the research
+methodology. The review then concluded that a ticket-per-request loop is not an
+automated research mechanism. `docs/research-mechanism.md` defines the replacement:
+Host-held Program, Issue, Pull request and CI objects, several Researchers claiming
+Issues, Implementers working Pull request Tickets, on-demand CI in the Pull request
+environment, and a Host auto-merge rule. The uv runtime and the methodology skill stay;
+resource declarations remain descriptive only, as decided.
+
 ### Restored after the gap review
 
 A feature-by-feature comparison with the retired design chose a deliberate subset to

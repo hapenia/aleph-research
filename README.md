@@ -57,8 +57,8 @@ by `GET /aleph/api/results`, `GET /aleph/api/state` and the prototype's
   (`/aleph/api/config`, rollback included); extension code reloads from the panel
   through `POST /aleph/api/reload`.
 
-See `docs/architecture.md` for the full picture and `docs/superagent-migration.md`
-for the phase-by-phase evidence.
+See `docs/research-mechanism.md` for the current research mechanism, `docs/architecture.md`
+for the composition and `docs/superagent-migration.md` for the phase evidence.
 
 ## Repository layout
 
