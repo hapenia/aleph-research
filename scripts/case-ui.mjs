@@ -86,6 +86,18 @@ const preset = await evaluate(`(async () => {
 
 let delivered = null;
 if (kickoff) {
+  // Onboarding dialogs steal focus and swallow the typing; close them first.
+  await evaluate(`(async () => {
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    for (let round = 0; round < 4; round += 1) {
+      const dismiss = [...document.querySelectorAll('button,[role="button"]')].find((el) => /^(继续|Continue|知道了|Got it|关闭|Close)$/.test((el.textContent || '').trim()));
+      if (!dismiss) break;
+      dismiss.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window, button: 0 }));
+      await sleep(600);
+    }
+    return true;
+  })()`);
+
   // The editor mounts after navigation and only accepts real input events, so click into it
   // first, then type, and retry once before giving up.
   let box = null;
