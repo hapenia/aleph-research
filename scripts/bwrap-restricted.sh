@@ -9,7 +9,11 @@
 #
 # Configuration:
 #   ALEPH_READ_ROOTS  colon-separated absolute roots to expose read-only
-#                     (default: /usr /bin /sbin /lib /lib64 /etc /opt /run)
+#                     (default: /usr /bin /sbin /lib /lib64 /etc /opt /run /sys)
+#
+# Host GPU devices (/dev/nvidia*, /dev/nvidia-caps, /dev/dri) are re-exposed after
+# bubblewrap's `--dev /dev`; /sys is included because NVML/CUDA needs it to enumerate
+# the GPU. Without both, a Worker sees no GPU even though the host has one.
 #
 # Every other argument from the sandbox profile is forwarded unchanged; bubblewrap
 # stays the enforcement point, so a denied read fails normally.
@@ -20,7 +24,7 @@ if [ "$#" -eq 0 ]; then
   exit 97
 fi
 
-read_roots="${ALEPH_READ_ROOTS:-/usr:/bin:/sbin:/lib:/lib64:/etc:/opt:/run}"
+read_roots="${ALEPH_READ_ROOTS:-/usr:/bin:/sbin:/lib:/lib64:/etc:/opt:/run:/sys}"
 
 prefix=()
 IFS=':' read -r -a roots <<<"$read_roots"
@@ -30,7 +34,10 @@ for root in "${roots[@]}"; do
   prefix+=(--ro-bind "$root" "$root")
 done
 
-# Forward the profile without its whole-host read-only bind.
+# Forward the profile without its whole-host read-only bind. Bubblewrap's own
+# `--dev /dev` creates a minimal devtmpfs with no GPU nodes, so re-expose the host
+# NVIDIA/DRI devices immediately after that mount. Without this a CUDA/torch probe
+# inside the sandbox reports no GPU even though the host has one.
 args=("$@")
 forwarded=()
 index=0
@@ -41,6 +48,15 @@ while [ "$index" -lt "${#args[@]}" ]; do
     continue
   fi
   forwarded+=("$current")
+  if [ "$current" = "--dev" ] && [ "${args[$((index + 1))]:-}" = "/dev" ]; then
+    forwarded+=("/dev")
+    for dev in /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools /dev/nvidia-modeset; do
+      [ -e "$dev" ] && forwarded+=(--dev-bind "$dev" "$dev")
+    done
+    [ -d /dev/nvidia-caps ] && forwarded+=(--dev-bind /dev/nvidia-caps /dev/nvidia-caps)
+    [ -d /dev/dri ] && forwarded+=(--dev-bind /dev/dri /dev/dri)
+    index=$((index + 1))
+  fi
   index=$((index + 1))
 done
 
