@@ -14,10 +14,14 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 
 import { evaluateSubmission } from './evaluation.js'
 import { createResearchChannel } from './research-channel.js'
+import { bestResult, readResults, recordResult, resultsBrief } from './results.js'
 import { findTicketForDirectory, resultTrigger } from './submit-result.js'
 
 export const name = 'dsh-aleph-superagent'
 export const inject = ['orchestrator', 'tools']
+
+/** Where evaluation records live; the lab points this at the run state directory. */
+const resultsDir = () => process.env.ALEPH_RESULTS_DIR ?? `${process.cwd()}/.aleph-results`
 
 /** Source configuration: one research project per Source instance. */
 const AlephConfigSchema = z.object({
@@ -171,6 +175,28 @@ export function apply(ctx) {
     })
     child.webServer.register({
       kind: 'exact',
+      path: '/aleph/api/results',
+      async handler(req, res) {
+        if (req.method !== 'GET') return sendJson(res, 405, { ok: false })
+        try {
+          const records = await readResults(resultsDir())
+          const project = new URL(req.url ?? '/', 'http://localhost').searchParams.get('project') ?? undefined
+          const filter = project ? { project } : {}
+          const best = bestResult(records, filter)
+          return sendJson(res, 200, {
+            ok: true,
+            count: records.length,
+            best,
+            brief: resultsBrief(records, filter),
+            recent: records.slice(-20),
+          })
+        } catch (error) {
+          return sendJson(res, 500, { ok: false, error: String(error?.message ?? error) })
+        }
+      },
+    })
+    child.webServer.register({
+      kind: 'exact',
       path: '/aleph/api/state',
       async handler(req, res) {
         if (req.method !== 'GET') return sendJson(res, 405, { ok: false })
@@ -239,11 +265,25 @@ export function apply(ctx) {
         text: [`Evaluation finished: ${evaluation.score ?? 'no score'}.`, `Commit: ${commit}.`, args?.summary ?? ''].join(' ').trim(),
       })
       const received = await source.receive(trigger)
+      const record = await recordResult(resultsDir(), {
+        evaluationId: evaluation.marker,
+        project,
+        ticketId: ticket.id,
+        thread: trigger.threads[0].id,
+        score: evaluation.score,
+        commit,
+        at: new Date().toISOString(),
+      })
+      const history = await readResults(resultsDir())
+      const best = bestResult(history, { project })
       return {
         ok: true,
         ticket: ticket.id,
         thread: trigger.threads[0].id,
         score: evaluation.score,
+        best: best?.score ?? evaluation.score,
+        bestCommit: best?.commit ?? commit,
+        evaluated: record.evaluationId,
         exitCode: evaluation.exitCode,
         timedOut: evaluation.timedOut,
         commit,
