@@ -1,5 +1,5 @@
 /** The Program: goal, evaluation contract, budget and best result. */
-import type { CIRunId, CommitSha, IsoTimestamp, ProgramId, ExperimentId, Score } from './ids.js'
+import type { CIRunId, CommitSha, ExperimentId, IsoTimestamp, NonEmptyString, NonNegativeInt, PositiveInt, ProgramId, Score } from './ids.js'
 import type { ArtifactRef } from './artifacts.js'
 
 export type ProgramStatus = 'running' | 'paused' | 'stopped'
@@ -58,15 +58,15 @@ export interface BestResult {
 
 export interface Program {
   readonly id: ProgramId
-  readonly name: string
+  readonly name: NonEmptyString
   /** The research goal in the operator's words; the only field the operator edits. */
-  readonly goal: string
+  readonly goal: NonEmptyString
   readonly contract: EvaluationContract
   readonly budget: Budget
   readonly status: ProgramStatus
   readonly stopReason?: StopReason
   /** How the Workers of this Program are told to research; editable per Program. */
-  readonly methodology: string
+  readonly methodology: NonEmptyString
   /** How much diversity the Host requires across Experiments (operator-owned). */
   readonly exploration: ExplorationLevel
   readonly best: BestResult | null

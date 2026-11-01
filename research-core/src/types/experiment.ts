@@ -63,33 +63,50 @@ interface ExperimentBase {
  * research does not need git merge semantics. It ends by closing with a reason;
  * the best result is tracked separately on the Program.
  */
+export interface OpenExperiment extends ExperimentBase {
+  readonly status: 'open'
+}
+
+export interface CIRequestedExperiment extends ExperimentBase {
+  readonly status: 'ci-requested'
+  readonly ciRunId: CIRunId
+  readonly requestedAt: IsoTimestamp
+}
+
+export interface CIRunningExperiment extends ExperimentBase {
+  readonly status: 'ci-running'
+  readonly ciRunId: CIRunId
+}
+
+export interface CIPassedExperiment extends ExperimentBase {
+  readonly status: 'ci-passed'
+  readonly ciRunId: CIRunId
+  readonly score: Score
+  readonly reviewedBy: SessionId
+}
+
+export interface CIFailedExperiment extends ExperimentBase {
+  readonly status: 'ci-failed'
+  readonly ciRunId: CIRunId
+  readonly reason: string
+}
+
+export interface ClosedExperiment extends ExperimentBase {
+  readonly status: 'closed'
+  readonly closedAt: IsoTimestamp
+  readonly reason: CloseReason
+}
+
 export type Experiment =
-  | (ExperimentBase & { readonly status: 'open' })
-  | (ExperimentBase & {
-      readonly status: 'ci-requested'
-      readonly ciRunId: CIRunId
-      readonly requestedAt: IsoTimestamp
-    })
-  | (ExperimentBase & { readonly status: 'ci-running'; readonly ciRunId: CIRunId })
-  | (ExperimentBase & {
-      readonly status: 'ci-passed'
-      readonly ciRunId: CIRunId
-      readonly score: Score
-      readonly reviewedBy: SessionId
-    })
-  | (ExperimentBase & {
-      readonly status: 'ci-failed'
-      readonly ciRunId: CIRunId
-      readonly reason: string
-    })
-  | (ExperimentBase & {
-      readonly status: 'closed'
-      readonly closedAt: IsoTimestamp
-      readonly reason: CloseReason
-    })
+  | OpenExperiment
+  | CIRequestedExperiment
+  | CIRunningExperiment
+  | CIPassedExperiment
+  | CIFailedExperiment
+  | ClosedExperiment
 
 /** Review comments are the Researcher's judgement, separate from CI output. */
-export interface ReviewComment {
+export interface ExperimentReview {
   readonly id: CommentId
   readonly experimentId: ExperimentId
   readonly author: SessionId

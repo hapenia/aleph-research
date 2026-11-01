@@ -20,28 +20,37 @@ interface CIRunBase {
   readonly environmentDigest?: string
 }
 
-export type CIRun =
-  | (CIRunBase & { readonly status: 'requested' })
-  | (CIRunBase & { readonly status: 'running'; readonly startedAt: IsoTimestamp })
-  | (CIRunBase & {
-      readonly status: 'passed'
-      readonly startedAt: IsoTimestamp
-      readonly finishedAt: IsoTimestamp
-      readonly score: Score
-      readonly checks: readonly CheckResult[]
-      /** Persisted results such as model weights and reports. */
-      readonly artifacts: readonly ArtifactRef[]
-      readonly logPath: string
-      readonly durationMs: number
-    })
-  | (CIRunBase & {
-      readonly status: 'failed'
-      readonly startedAt?: IsoTimestamp
-      readonly finishedAt: IsoTimestamp
-      readonly reason: CIFailureReason
-      readonly detail: string
-      readonly logPath: string
-    })
+export interface RequestedCIRun extends CIRunBase {
+  readonly status: 'requested'
+}
+
+export interface RunningCIRun extends CIRunBase {
+  readonly status: 'running'
+  readonly startedAt: IsoTimestamp
+}
+
+export interface PassedCIRun extends CIRunBase {
+  readonly status: 'passed'
+  readonly startedAt: IsoTimestamp
+  readonly finishedAt: IsoTimestamp
+  readonly score: Score
+  readonly checks: readonly CheckResult[]
+  /** Persisted results such as model weights and reports. */
+  readonly artifacts: readonly ArtifactRef[]
+  readonly logPath: string
+  readonly durationMs: number
+}
+
+export interface FailedCIRun extends CIRunBase {
+  readonly status: 'failed'
+  readonly startedAt?: IsoTimestamp
+  readonly finishedAt: IsoTimestamp
+  readonly reason: CIFailureReason
+  readonly detail: string
+  readonly logPath: string
+}
+
+export type CIRun = RequestedCIRun | RunningCIRun | PassedCIRun | FailedCIRun
 
 /** One check inside a CI run; the Program contract may require several. */
 export interface CheckResult {

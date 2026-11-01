@@ -38,3 +38,19 @@ export type Score = Brand<number, 'Score'>
 
 /** Marks every value that came from an untrusted boundary (HTTP, model output). */
 export type Untrusted<T> = T & { readonly untrusted: true }
+
+
+/** Text that a boundary parser has checked to be non-empty and trimmed. */
+export type NonEmptyString = Brand<string, 'NonEmptyString'>
+
+/** A count or size that is greater than zero. */
+export type PositiveInt = Brand<number, 'PositiveInt'>
+
+/** A count that may be zero (usage counters). */
+export type NonNegativeInt = Brand<number, 'NonNegativeInt'>
+
+/** Duration in milliseconds, greater than zero. */
+export type DurationMs = Brand<number, 'DurationMs'>
+
+/** An HTTP status chosen by the API mapping table, never invented per handler. */
+export type HttpStatus = 200 | 201 | 202 | 400 | 403 | 404 | 409 | 422 | 500

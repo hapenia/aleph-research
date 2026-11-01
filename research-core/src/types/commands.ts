@@ -138,6 +138,36 @@ export type ResearcherCommand =
   | RequestCICommand
   | CloseIssueCommand
 export type ImplementerCommand = SubmitImplementationCommand
+/** Every command type literal, the key of the compile-time maps below. */
+export type CommandType = AnyCommand['type']
+
+/** The payload type of one command literal. */
+export type CommandOf<T extends CommandType> = Extract<AnyCommand, { readonly type: T }>
+
+/** Which capability a command requires; a command in no map is Host-internal. */
+export type CapabilityForCommand = {
+  readonly 'program.create': 'program:create'
+  readonly 'program.pause': 'program:pause'
+  readonly 'program.stop': 'program:stop'
+  readonly 'program.set-exploration': 'program:exploration'
+  readonly 'issue.create': 'issue:create'
+  readonly 'issue.claim': 'issue:claim'
+  readonly 'issue.comment': 'issue:comment'
+  readonly 'issue.close': 'issue:close'
+  readonly 'experiment.propose': 'experiment:propose'
+  readonly 'ci.request': 'ci:request'
+  readonly 'implementation.submit': 'ticket:submit'
+}
+
+/** The capability is known at compile time from the command literal. */
+export type CapabilityOfCommand<T extends CommandType> =
+  T extends keyof CapabilityForCommand ? CapabilityForCommand[T] : never
+
+/** A command whose type is statically known to require this capability. */
+export type RequiringCapability<K extends string> = {
+  readonly [T in keyof CapabilityForCommand]: CapabilityForCommand[T] extends K ? T : never
+}[keyof CapabilityForCommand]
+
 /** What executing one command returns: the read value plus the audit records it wrote. */
 export interface Decision<R> {
   readonly result: R

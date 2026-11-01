@@ -7,7 +7,7 @@
  */
 import type { Program } from './program.js'
 import type { Issue, IssueComment } from './issue.js'
-import type { Experiment, ReviewComment } from './experiment.js'
+import type { Experiment, ExperimentReview } from './experiment.js'
 import type { CIRun } from './ci.js'
 import type { AuditLog } from './audit.js'
 import type { DomainError, Result } from './errors.js'
@@ -33,7 +33,7 @@ export interface ExperimentRepository {
   get(id: string): Promise<Experiment | undefined>
   listByProgram(programId: ProgramId): Promise<readonly Experiment[]>
   listByIssue(issueId: string): Promise<readonly Experiment[]>
-  reviews(experimentId: string): Promise<readonly ReviewComment[]>
+  reviews(experimentId: string): Promise<readonly ExperimentReview[]>
 }
 
 export interface CIRunRepository {

@@ -35,9 +35,9 @@ research-core/
     ids.ts            branded ids, timestamps, versions, scores
     errors.ts         Result, DomainError, StoreError
     program.ts        Program, Budget, EvaluationContract, methodology, exploration, BestResult
-    issue.ts          Issue state machine, IssueComment, labels
-    experiment.ts     Experiment state machine, lineage, strategy, reviews
-    ci.ts             CI run state machine, checks, request
+    issue.ts          Issue variants (open/assigned/in-review/closed), comment, labels
+    experiment.ts     Experiment variants, lineage, strategy, reviews
+    ci.ts             CI run variants, checks, request
     environment.ts    uv environment declaration, built environment, snapshot
     artifacts.ts      stored results (model weights, reports), retention, ArtifactStore
     audit.ts          AuditEntry, AuditLog
@@ -116,6 +116,35 @@ type Decision<R> = { result: R; audit: readonly AuditEntry[] }
 
 Command execution is a Host service (`CommandExecutor`) that applies the transition,
 writes the audit entries in one transaction and returns a `Result`.
+
+## Compile-time guarantees
+
+The review asked to move statically verifiable rules out of runtime checks. These are
+the guarantees the blueprint now encodes; the table below maps every rule to its type
+mechanism and the mistake it prevents.
+
+| Guarantee | Type mechanism | Mistake prevented |
+| --- | --- | --- |
+| Only legal Issue/Experiment/CI moves compile | named variants (`OpenIssue`, `AssignedIssue`, ...) plus `Transition<From, Command, To, Actor>` in `transitions.ts` | calling `claim` on an already assigned Issue, closing a CI run, moving a passed Experiment back to `ci-requested` |
+| A transition returns exactly its target state | `Transition` return type `Result<TransitionOutcome<To>, DomainError>` | a handler returning a state that the next step cannot consume |
+| Only an authorized role can issue a command | `CapabilityForCommand` map plus `CapabilityOfCommand<T>`; role tool sets only expose their own command literals | a Researcher calling an operator-only command, a Watchdog proposing an Experiment |
+| The Host injects fields the model must not choose | `ImplementerTools.submitImplementation` input is `Omit<CommandOf<'implementation.submit'>, 'ticketId'>` | submitting a result for another ticket |
+| Audit action follows from the command | `AuditActionForCommand` map, `AuditActionOf<T>` | writing a decision without its required audit record, or mislabelling it |
+| HTTP status follows from the refusal code | `HttpStatusForError`, `DomainFailure` | inventing a status in a route handler |
+| Boundary values are refined | `NonEmptyString`, `PositiveInt`, `NonNegativeInt`, `DurationMs`, branded ids and timestamps | empty goals, zero budgets, negative usage, raw strings where ids belong |
+| Tool payloads are command payloads | `ToolForCommand<K, Output, Input = CommandOf<K>>` | a tool that accepts a shape no command can execute |
+| Closed unions are handled exhaustively | per-variant interfaces and the `Never` helper | forgotten states after a union grows |
+| A merged/experiment result carries evidence | state variants carry their own fields only (`PassedCIRun` carries score, checks, artifacts) | a best result without artifacts or a passed CI run without a score |
+
+What stays a runtime check, because it depends on the world rather than the shape of the
+data:
+
+- the calling Session really has the claimed role, and the Issue assignee matches it;
+- the declared uv environment actually builds, and the CI entry actually passes;
+- git branches and commits exist as referenced;
+- counters and the exploration quota over real history;
+- artifact bytes, retention and disk space;
+- pause/stop cancellation reaching the relays and executor.
 
 ## Invariants
 
@@ -216,16 +245,16 @@ DSH host process
 | `ctx.agentPresets` | select the `aleph-researcher` preset for Researcher Sessions | `session.ts` |
 | `ctx.orchestrator` | register the `aleph` Source; `context(alephKind).receive(trigger)`; read tickets | `TriggerFactory` to `SourceContext.receive` |
 | prototype settings | executor `prepare`, blocked commands, executor model | ticket lifecycle (unchanged) |
-| DSH storage domain or SQLite | Programs, Issues, Experiments, CI runs, artifacts metadata, audit | `storage.ts` repositories |
+| DSH storage domain (`aleph_research`, chosen) | Programs, Issues, Experiments, CI runs, artifacts metadata, audit | `storage.ts` repositories |
 | `ctx.subprocess` / shell | uv environment build and CI entry execution | `EnvironmentBuilder`, `CIRunner` |
 | `ctx.effects` / notify | attention to the Main Session | `AttentionSink` |
 | filesystem + git | artifact bytes and repository snapshots | `ArtifactStore`, `RepositoryService` |
 | `ctx.fiber` | restart on panel reload | bootstrap |
 
-Storage is a DSH storage domain (registering `aleph_research`) so it lives with the rest
-of the harness state and is backed up the same way; artifact bytes stay on the
-filesystem. The exact domain tables are an adapter-phase decision, hidden behind the
-repository interfaces.
+Storage is a DSH storage domain (registering `aleph_research`), as agreed in review, so
+it lives with the rest of the harness state and is backed up the same way; artifact
+bytes stay on the filesystem. The exact domain tables are an adapter-phase decision,
+hidden behind the repository interfaces.
 
 ### End-to-end flow across the seam
 

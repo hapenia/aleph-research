@@ -8,7 +8,7 @@ import type { CIRun } from './ci.js'
 import type { ArtifactMetadata } from './artifacts.js'
 import type { Issue, IssueComment } from './issue.js'
 import type { Program, Paginated } from './program.js'
-import type { Experiment, ReviewComment } from './experiment.js'
+import type { Experiment, ExperimentReview } from './experiment.js'
 import type { Attention } from './attention.js'
 import type { AuditEntry } from './audit.js'
 import type { DomainError } from './errors.js'
@@ -33,7 +33,7 @@ export interface ProgramSnapshot {
   readonly issues: Paginated<Issue>
   readonly issueComments: Readonly<Record<string, readonly IssueComment[]>>
   readonly experiments: Paginated<Experiment>
-  readonly reviews: Readonly<Record<string, readonly ReviewComment[]>>
+  readonly reviews: Readonly<Record<string, readonly ExperimentReview[]>>
   readonly ciRuns: Paginated<CIRun>
   readonly attention: readonly Attention[]
   readonly artifacts: Paginated<ArtifactMetadata>

@@ -1,5 +1,5 @@
 /** Domain results and errors. Commands return a Result; they never throw for domain refusals. */
-import type { Version } from './ids.js'
+import type { HttpStatus, Version } from './ids.js'
 
 export type Ok<T> = { readonly ok: true; readonly value: T }
 export type Err<E> = { readonly ok: false; readonly error: E }
@@ -40,3 +40,32 @@ export type StoreError =
   | { readonly kind: 'version-conflict'; readonly conflict: VersionConflict }
   | { readonly kind: 'io'; readonly message: string }
   | { readonly kind: 'corrupt'; readonly message: string }
+
+
+/** Compile-time mapping from domain refusal to HTTP status; handlers cannot invent one. */
+export type HttpStatusForError = {
+  readonly 'not-found': 404
+  readonly conflict: 409
+  readonly 'version-conflict': 409
+  readonly forbidden: 403
+  readonly 'invalid-state': 409
+  readonly 'invalid-input': 400
+  readonly 'budget-exhausted': 422
+  readonly 'acceptance-not-met': 422
+  readonly 'ci-not-passed': 422
+  readonly 'merge-conflict': 409
+  readonly 'environment-invalid': 422
+}
+
+export type StatusOf<E extends DomainErrorCode> = HttpStatusForError[E] extends HttpStatus
+  ? HttpStatusForError[E]
+  : never
+
+/** The API answer for a refusal; the status follows from the code. */
+export type DomainFailure = {
+  readonly [E in DomainErrorCode]: {
+    readonly ok: false
+    readonly status: StatusOf<E>
+    readonly error: Extract<DomainError, { readonly code: E }>
+  }
+}[DomainErrorCode]

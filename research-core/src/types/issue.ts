@@ -17,27 +17,33 @@ interface IssueBase {
 }
 
 /** One state per discriminant; illegal field combinations do not typecheck. */
-export type Issue =
-  | (IssueBase & { readonly status: 'open' })
-  | (IssueBase & {
-      readonly status: 'assigned'
-      readonly assignee: SessionId
-      readonly assignedAt: IsoTimestamp
-    })
-  | (IssueBase & {
-      readonly status: 'in-review'
-      readonly assignee: SessionId
-      readonly assignedAt: IsoTimestamp
-      /** The Experiment whose CI is being reviewed. */
-      readonly experimentId: ExperimentId
-      readonly head: CommitSha
-    })
-  | (IssueBase & {
-      readonly status: 'closed'
-      readonly assignee: SessionId | null
-      readonly closedAt: IsoTimestamp
-      readonly resolution: IssueResolution
-    })
+export interface OpenIssue extends IssueBase {
+  readonly status: 'open'
+}
+
+export interface AssignedIssue extends IssueBase {
+  readonly status: 'assigned'
+  readonly assignee: SessionId
+  readonly assignedAt: IsoTimestamp
+}
+
+export interface InReviewIssue extends IssueBase {
+  readonly status: 'in-review'
+  readonly assignee: SessionId
+  readonly assignedAt: IsoTimestamp
+  /** The Experiment whose CI is being reviewed. */
+  readonly experimentId: ExperimentId
+  readonly head: CommitSha
+}
+
+export interface ClosedIssue extends IssueBase {
+  readonly status: 'closed'
+  readonly assignee: SessionId | null
+  readonly closedAt: IsoTimestamp
+  readonly resolution: IssueResolution
+}
+
+export type Issue = OpenIssue | AssignedIssue | InReviewIssue | ClosedIssue
 
 /** Comments are the discussion of an Issue; the experiment plan lives here. */
 export interface IssueComment {

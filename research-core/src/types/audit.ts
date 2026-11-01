@@ -52,3 +52,22 @@ export interface AuditLog {
   append(entries: readonly AuditEntry[]): Promise<void>
   list(programId: ProgramId, limit: number): Promise<readonly AuditEntry[]>
 }
+
+
+/** Compile-time map: a command type records exactly one audit action. */
+export type AuditActionForCommand = {
+  readonly 'program.create': 'program.created'
+  readonly 'program.pause': 'program.paused'
+  readonly 'program.stop': 'program.stopped'
+  readonly 'program.set-exploration': 'program.exploration-changed'
+  readonly 'issue.create': 'issue.created'
+  readonly 'issue.claim': 'issue.claimed'
+  readonly 'issue.comment': 'issue.commented'
+  readonly 'issue.close': 'issue.closed'
+  readonly 'experiment.propose': 'experiment.proposed'
+  readonly 'ci.request': 'ci.requested'
+  readonly 'implementation.submit': 'experiment.opened'
+}
+
+/** The audit action is derived from the command type, not chosen by the caller. */
+export type AuditActionOf<T extends keyof AuditActionForCommand> = AuditActionForCommand[T]
