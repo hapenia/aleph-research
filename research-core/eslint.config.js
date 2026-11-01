@@ -74,7 +74,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/type-tests.ts', 'src/factories.ts', 'src/hydration.ts', 'src/parsers.ts'],
+    files: ['src/type-tests.ts', 'src/factories.ts', 'src/hydration.ts', 'src/parsers.ts', 'src/parsers-commands.ts'],
     rules: {
       '@typescript-eslint/consistent-type-assertions': 'off',
       'no-restricted-syntax': 'off',

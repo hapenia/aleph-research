@@ -1,6 +1,6 @@
 /** Experiments: one attempt at an Issue; a snapshot, never merged. */
 import type { HostPrincipal, ImplementerPrincipal, IssueAssignment, ResearcherPrincipal, TicketBinding } from './actors.js'
-import type { ArtifactRef } from './artifacts.js'
+import type { ArtifactInput } from './artifacts.js'
 import type { CIRequestToken, FailedCICompletion, PassedCICompletion } from './ci.js'
 import type { FailedCIRecord } from './metrics.js'
 import type { EnvironmentDeclaration } from './environment.js'
@@ -251,7 +251,7 @@ export interface ExperimentPlan {
   readonly expected: { readonly direction: 'higher' | 'lower'; readonly rationale: NonEmptyString }
   readonly environment: EnvironmentDeclaration
   /** Earlier artifacts this Experiment consumes. */
-  readonly inputs: readonly ArtifactRef[]
+  readonly inputs: readonly ArtifactInput[]
 }
 
 export interface ExperimentReview {
