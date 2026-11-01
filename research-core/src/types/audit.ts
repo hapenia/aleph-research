@@ -13,6 +13,7 @@ export type AuditAction =
   | 'program.paused'
   | 'program.resumed'
   | 'program.stopped'
+  | 'program.exploration-changed'
   | 'issue.created'
   | 'issue.claimed'
   | 'issue.commented'

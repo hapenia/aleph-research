@@ -62,6 +62,7 @@ export interface OperatorTools {
   readonly createIssue: ToolContract<CreateIssueCommand, ToolResult<Issue>>
   readonly pauseProgram: ToolContract<{ readonly programId: string }, ToolResult<Program>>
   readonly stopProgram: ToolContract<{ readonly programId: string; readonly reason: string }, ToolResult<Program>>
+  readonly setExploration: ToolContract<{ readonly programId: string; readonly level: 'low' | 'normal' | 'high' }, ToolResult<Program>>
 }
 
 /** Watchdog tools; no research decisions, only attention. */

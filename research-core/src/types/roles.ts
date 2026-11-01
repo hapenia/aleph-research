@@ -8,6 +8,7 @@ export type Capability =
   | 'program:create'
   | 'program:pause'
   | 'program:stop'
+  | 'program:exploration'
   | 'issue:create'
   | 'issue:claim'
   | 'issue:comment'
@@ -42,7 +43,7 @@ export interface ImplementerIdentity extends SessionIdentity {
 }
 
 export const capabilitiesOf: Readonly<Record<SessionRole, readonly Capability[]>> = {
-  operator: ['program:create', 'program:pause', 'program:stop', 'issue:create'],
+  operator: ['program:create', 'program:pause', 'program:stop', 'program:exploration', 'issue:create'],
   researcher: [
     'issue:create',
     'issue:claim',

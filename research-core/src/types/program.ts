@@ -7,10 +7,18 @@ export type ProgramStatus = 'running' | 'paused' | 'stopped'
 /**
  * Exploration breadth, inherited from the retired design and kept for its purpose:
  * genetic-algorithm-like diversity so a Researcher does not lock onto one method.
- * The Host maps the level to how many Experiments must start from a diverse base
- * instead of the current best.
+ * The Operator owns the level; the Researcher never chooses a strategy.
+ *
+ * Fixed quota semantics (review decision): `low` exploits only, `normal` requires one
+ * explore Experiment in every three, `high` requires one in every two. Explore
+ * Experiments branch from the research mainline, exploit Experiments from the best
+ * result.
  */
 export type ExplorationLevel = 'low' | 'normal' | 'high'
+
+export type ExplorationQuota =
+  | { readonly level: 'low'; readonly exploitOnly: true; readonly exploreEvery: null }
+  | { readonly level: 'normal' | 'high'; readonly exploitOnly: false; readonly exploreEvery: number }
 export type StopReason = 'goal-met' | 'budget-exhausted' | 'operator' | 'error'
 
 /** The declared compute budget of one Program. No scheduler enforces it; the Host does. */
@@ -59,7 +67,7 @@ export interface Program {
   readonly stopReason?: StopReason
   /** How the Workers of this Program are told to research; editable per Program. */
   readonly methodology: string
-  /** How much diversity the Host requires across Experiments. */
+  /** How much diversity the Host requires across Experiments (operator-owned). */
   readonly exploration: ExplorationLevel
   readonly best: BestResult | null
   readonly createdAt: IsoTimestamp

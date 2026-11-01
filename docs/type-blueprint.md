@@ -84,20 +84,26 @@ An Experiment carries its lineage, because diversity is a first-class concern:
 
 ```ts
 interface ExperimentLineage {
-  base: { kind: 'best' } | { kind: 'experiment'; experimentId: ExperimentId } | { kind: 'mainline' }
+  base: { kind: 'best' } | { kind: 'mainline' }
   baseCommit: CommitSha
   strategy: 'exploit' | 'explore'
-  chosenBy: 'host-policy' | 'researcher'
+  chosenBy: 'host-policy'
   rationale: string
 }
 ```
 
-The Agent design started with an exploration degree for a reason: a genetic-algorithm
-style diversity pressure keeps Researchers from locking onto one method. The blueprint
-keeps `exploration` on the Program, `strategy` and `base` on each Experiment, and lets
-the Host choose the base when the Researcher does not (or must override it to satisfy the
-exploration balance). How the level maps to a required diversity ratio is an open
-question below.
+The original design had an exploration degree for a reason: a genetic-algorithm style
+diversity pressure keeps Researchers from locking onto one method. The Operator owns the
+level; the Researcher never chooses a strategy. Fixed quota (review decision):
+
+| level | quota | base |
+| --- | --- | --- |
+| `low` | exploit only | best result |
+| `normal` | one explore in every three Experiments | research mainline |
+| `high` | one explore in every two Experiments | research mainline |
+
+The Host assigns the strategy and base when it opens an Experiment; the Researcher only
+proposes the plan (hypothesis, steps, expected outcome, environment, artifact inputs).
 
 CI runs are `requested | running | passed | failed`; a passed run carries checks, a
 score, stored artifacts and the log.
@@ -201,19 +207,14 @@ controls in version 1; no event replay; no second source of truth outside Host s
 - uv is fixed in the extension image; methodology text is per Program.
 - Exploration degree from the original design is kept as Program `exploration`, with a
   strategy and lineage on every Experiment.
+- Fixed quota by level: `low` exploits only; `normal` requires one explore in three;
+  `high` requires one in two.
+- Explore Experiments branch from the research mainline; exploit Experiments from the
+  best result.
+- The Operator owns the exploration level and every strategy decision; a Researcher only
+  proposes a plan and cannot choose exploit versus explore.
 
-## Open questions for review
+## Status
 
-1. **Exploration mechanics.** How should the Host turn `exploration` into diversity?
-   Options: a fixed quota (for example every third Experiment must be `explore` and start
-   from a non-best base); a soft target the Host enforces only when a Researcher proposes
-   another exploit; or full Researcher freedom with the Host only recording the strategy.
-   Recommended: a quota per level (`low` = exploit only, `normal` = every third explore,
-   `high` = every other explore), with the Host choosing the diverse base from recent
-   Experiments.
-2. **Diverse base choice.** When the Host must force an explore base, how is it picked:
-   a random earlier Experiment, the most different earlier Experiment by score/lineage,
-   the research mainline, or a pool the Researcher nominates in the Issue? Recommended:
-   random among Experiments whose result is valid, so no method becomes the default.
-3. **Exploration level authority.** May a Researcher change the strategy for a single
-   Experiment (within the Host quota), or is the level entirely the Operator's control?
+No open questions remain after the third review round. Approve the blueprint to start
+phase 1 (domain, storage, audit and management routes with tests).

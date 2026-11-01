@@ -26,11 +26,11 @@ export type CloseReason = 'superseded' | 'abandoned' | 'rejected' | 'concluded'
 /** Exploit continues from the best result; explore deliberately starts elsewhere. */
 export type ExperimentStrategy = 'exploit' | 'explore'
 
-/** Where an Experiment's branch started. */
-export type ExperimentBaseRef =
-  | { readonly kind: 'best' }
-  | { readonly kind: 'experiment'; readonly experimentId: ExperimentId }
-  | { readonly kind: 'mainline' }
+/**
+ * Where an Experiment's branch started. The Host chooses: exploit Experiments start
+ * from the best result, explore Experiments from the research mainline.
+ */
+export type ExperimentBaseRef = { readonly kind: 'best' } | { readonly kind: 'mainline' }
 
 /**
  * Lineage is part of the Experiment, not a comment: the Host needs it to measure
@@ -40,8 +40,8 @@ export interface ExperimentLineage {
   readonly base: ExperimentBaseRef
   readonly baseCommit: CommitSha
   readonly strategy: ExperimentStrategy
-  /** Whether the Host's exploration policy or the Researcher chose the base. */
-  readonly chosenBy: 'host-policy' | 'researcher'
+  /** The base is always assigned by the Host from the operator's exploration level. */
+  readonly chosenBy: 'host-policy'
   readonly rationale: string
 }
 

@@ -70,6 +70,11 @@ export interface CommentRequest {
   readonly body: string
 }
 
+export interface SetExplorationRequest {
+  readonly programId: ProgramId
+  readonly level: 'low' | 'normal' | 'high'
+}
+
 export interface RequestCIRequest {
   readonly programId: ProgramId
   readonly experimentId: string
