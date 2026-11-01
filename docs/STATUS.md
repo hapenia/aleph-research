@@ -19,7 +19,10 @@
   驱动唤醒。
 - **Phase 4 面板与热修改**：AlephResearch Web 面板、版本化配置与回滚、扩展代码
   热重载、`/aleph/api/reload`。
-- **工程化**：所有变更走分支、PR、CI 与 squash merge；`main` 受保护。
+- **工程化**：所有变更走分支、PR、CI 与 squash merge；`main` 受保护；旧插件、
+  旧 operator skills 与旧驱动脚本已归档到 `archive/`，不再参与运行时与 CI。
+- **面板修复**：健康徽章优先显示 `health.runtime`，GitHub Source 关闭不再被误报为
+  `已暂停`。
 
 ## 验证证据
 
@@ -32,7 +35,8 @@
 | 热配置 | lab `cfg-test`：保存 v1 生效、保存 v2、回滚到 v1 |
 | 热重载 | lab `reload-test4`：模块版本 /1 → /2 → /1，路由持续可用 |
 | Watchdog | lab `wd-test8`：`aleph-watchdog` 会话、简报、状态无变化时跳过唤醒 |
-| smoke 性能 | 264.9s → 163.8s（见 PR #59） |
+| smoke 性能 | 264.9s → 163.8s（PR #59）；退役后在 main 复测 91.4s 全绿 |
+| 旧插件退役 | PR #64：归档并在 CI/文档/脚本中移除 |
 
 ## 测试
 
