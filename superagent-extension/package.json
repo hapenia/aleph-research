@@ -14,7 +14,8 @@
     "./package.json": "./package.json",
     "./request-tool": "./request-tool.js",
     "./research-host": "./research-host.js",
-    "./research-storage": "./research-storage.js"
+    "./research-storage": "./research-storage.js",
+    "./research-tools": "./research-tools.js"
   },
   "files": [
     "index.js",
@@ -23,7 +24,8 @@
     "research-extension.js",
     "request-tool.js",
     "research-host.js",
-    "research-storage.js"
+    "research-storage.js",
+    "research-tools.js"
   ],
   "dsh": {
     "bundle": {
