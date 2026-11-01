@@ -8,7 +8,7 @@ import type { CIRun } from './ci.js'
 import type { ArtifactMetadata } from './artifacts.js'
 import type { Issue, IssueComment } from './issue.js'
 import type { Program, Paginated } from './program.js'
-import type { PullRequest, ReviewComment } from './pull-request.js'
+import type { Experiment, ReviewComment } from './experiment.js'
 import type { Attention } from './attention.js'
 import type { AuditEntry } from './audit.js'
 import type { DomainError } from './errors.js'
@@ -24,7 +24,7 @@ export interface ProgramSummary {
   readonly status: Program['status']
   readonly bestScore: number | null
   readonly openIssues: number
-  readonly openPullRequests: number
+  readonly openExperiments: number
 }
 
 /** The one snapshot the panel polls; the panel never asks the prototype directly. */
@@ -32,7 +32,7 @@ export interface ProgramSnapshot {
   readonly program: Program
   readonly issues: Paginated<Issue>
   readonly issueComments: Readonly<Record<string, readonly IssueComment[]>>
-  readonly pullRequests: Paginated<PullRequest>
+  readonly experiments: Paginated<Experiment>
   readonly reviews: Readonly<Record<string, readonly ReviewComment[]>>
   readonly ciRuns: Paginated<CIRun>
   readonly attention: readonly Attention[]
@@ -48,7 +48,7 @@ export interface CreateProgramRequest {
     readonly timeoutMs: number
     readonly scoreField: string
   }
-  readonly budget: { readonly maxPullRequests: number; readonly maxComputeMinutes: number; readonly maxTokens: number }
+  readonly budget: { readonly maxExperiments: number; readonly maxComputeMinutes: number; readonly maxTokens: number }
   readonly methodology: string
 }
 
@@ -72,7 +72,7 @@ export interface CommentRequest {
 
 export interface RequestCIRequest {
   readonly programId: ProgramId
-  readonly pullRequestId: string
+  readonly experimentId: string
 }
 
 /** Route table the Host mounts; handlers are typed by these request/response pairs. */
@@ -83,5 +83,5 @@ export interface ManagementRoutes {
   readonly 'POST /aleph/api/issues': { readonly request: CreateIssueRequest; readonly response: ApiResponse<Issue> }
   readonly 'POST /aleph/api/issues/:id/claim': { readonly request: ClaimIssueRequest; readonly response: ApiResponse<Issue> }
   readonly 'POST /aleph/api/issues/:id/comments': { readonly request: CommentRequest; readonly response: ApiResponse<IssueComment> }
-  readonly 'POST /aleph/api/pull-requests/:id/ci': { readonly request: RequestCIRequest; readonly response: ApiResponse<CIRun> }
+  readonly 'POST /aleph/api/experiments/:id/ci': { readonly request: RequestCIRequest; readonly response: ApiResponse<CIRun> }
 }

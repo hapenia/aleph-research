@@ -5,7 +5,7 @@
  * evaluation. The Host owns an artifact store on its filesystem; the domain keeps
  * typed references, sizes and retention class so best results stay reproducible.
  */
-import type { CIRunId, CommitSha, IsoTimestamp, ProgramId, PullRequestId, Score } from './ids.js'
+import type { CIRunId, CommitSha, IsoTimestamp, ProgramId, ExperimentId, Score } from './ids.js'
 
 export type ArtifactKind = 'model-weights' | 'report' | 'figure' | 'dataset' | 'log' | 'other'
 
@@ -19,7 +19,7 @@ export interface ArtifactRef {
   readonly digest: string
   readonly bytes: number
   readonly programId: ProgramId
-  readonly pullRequestId: PullRequestId
+  readonly experimentId: ExperimentId
   readonly commit: CommitSha
   readonly ciRunId: CIRunId
   /** The score this artifact was produced with; absent for logs and figures. */
@@ -41,7 +41,7 @@ export interface ArtifactStore {
     readonly kind: ArtifactKind
     readonly sourcePath: string
     readonly programId: ProgramId
-    readonly pullRequestId: PullRequestId
+    readonly experimentId: ExperimentId
     readonly commit: CommitSha
     readonly ciRunId: CIRunId
     readonly score?: Score

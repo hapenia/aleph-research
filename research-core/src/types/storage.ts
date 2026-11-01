@@ -7,7 +7,7 @@
  */
 import type { Program } from './program.js'
 import type { Issue, IssueComment } from './issue.js'
-import type { PullRequest, ReviewComment } from './pull-request.js'
+import type { Experiment, ReviewComment } from './experiment.js'
 import type { CIRun } from './ci.js'
 import type { AuditLog } from './audit.js'
 import type { DomainError, Result } from './errors.js'
@@ -29,16 +29,16 @@ export interface IssueRepository {
   comments(issueId: string): Promise<readonly IssueComment[]>
 }
 
-export interface PullRequestRepository {
-  get(id: string): Promise<PullRequest | undefined>
-  listByProgram(programId: ProgramId): Promise<readonly PullRequest[]>
-  listByIssue(issueId: string): Promise<readonly PullRequest[]>
-  reviews(pullRequestId: string): Promise<readonly ReviewComment[]>
+export interface ExperimentRepository {
+  get(id: string): Promise<Experiment | undefined>
+  listByProgram(programId: ProgramId): Promise<readonly Experiment[]>
+  listByIssue(issueId: string): Promise<readonly Experiment[]>
+  reviews(experimentId: string): Promise<readonly ReviewComment[]>
 }
 
 export interface CIRunRepository {
   get(id: string): Promise<CIRun | undefined>
-  listByPullRequest(pullRequestId: string): Promise<readonly CIRun[]>
+  listByExperiment(experimentId: string): Promise<readonly CIRun[]>
 }
 
 /** Who executes a command, and when; deciders and handlers receive this, not raw sessions. */
@@ -52,7 +52,7 @@ export interface CommandContext {
 export interface UnitOfWork {
   readonly programs: ProgramRepository
   readonly issues: IssueRepository
-  readonly pullRequests: PullRequestRepository
+  readonly experiments: ExperimentRepository
   readonly ciRuns: CIRunRepository
   readonly audit: AuditLog
   transaction<T>(work: (uow: UnitOfWork) => Promise<T>): Promise<T>

@@ -12,8 +12,8 @@ export type Capability =
   | 'issue:claim'
   | 'issue:comment'
   | 'issue:close'
-  | 'pr:propose'
-  | 'pr:review'
+  | 'experiment:propose'
+  | 'experiment:review'
   | 'ci:request'
   | 'ci:read'
   | 'ticket:submit'
@@ -48,8 +48,8 @@ export const capabilitiesOf: Readonly<Record<SessionRole, readonly Capability[]>
     'issue:claim',
     'issue:comment',
     'issue:close',
-    'pr:propose',
-    'pr:review',
+    'experiment:propose',
+    'experiment:review',
     'ci:request',
     'ci:read',
     'attention:raise',

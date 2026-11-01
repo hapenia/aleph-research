@@ -6,7 +6,7 @@ export type AttentionSeverity = 'info' | 'warning' | 'blocked'
 export type AttentionSubject =
   | { readonly kind: 'program'; readonly programId: ProgramId }
   | { readonly kind: 'issue'; readonly programId: ProgramId; readonly issueId: string }
-  | { readonly kind: 'pull-request'; readonly programId: ProgramId; readonly pullRequestId: string }
+  | { readonly kind: 'experiment'; readonly programId: ProgramId; readonly experimentId: string }
   | { readonly kind: 'ci-run'; readonly programId: ProgramId; readonly ciRunId: string }
 
 export interface Attention {

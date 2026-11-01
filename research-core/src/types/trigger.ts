@@ -14,17 +14,17 @@ export type ResearchTriggerKind =
   | 'issue-created'
   | 'issue-claimed'
   | 'experiment-proposed'
-  | 'pull-request-opened'
+  | 'experiment-opened'
   | 'ci-requested'
   | 'ci-completed'
   | 'review-commented'
   | 'attention-raised'
 
-/** The Thread a Trigger lands on: one per Program, plus the Issue/Pull request thread. */
+/** The Thread a Trigger lands on: one per Program, plus the Issue/Experiment thread. */
 export interface ResearchThreadRef {
-  /** `research:<programId>` or `research:<programId>:pr:<pullRequestId>`. */
+  /** `research:<programId>` or `research:<programId>:pr:<experimentId>`. */
   readonly id: string
-  readonly kind: 'program' | 'issue' | 'pull-request' | 'ci-run'
+  readonly kind: 'program' | 'issue' | 'experiment' | 'ci-run'
 }
 
 /** What the factory produces; the prototype adds ids, channel and policy. */
@@ -32,7 +32,7 @@ export interface ResearchTriggerDraft {
   readonly kind: ResearchTriggerKind
   readonly programId: ProgramId
   readonly issueId?: string
-  readonly pullRequestId?: string
+  readonly experimentId?: string
   readonly ciRunId?: string
   readonly threads: readonly ResearchThreadRef[]
   /** Who caused the fact; the prototype's Policy checks the actor. */

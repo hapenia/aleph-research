@@ -10,7 +10,7 @@ export interface ResearcherPoolConfig {
 export type WakeReason =
   | { readonly kind: 'issue-assigned'; readonly issueId: string }
   | { readonly kind: 'ci-completed'; readonly ciRunId: string }
-  | { readonly kind: 'review-comment'; readonly pullRequestId: string }
+  | { readonly kind: 'review-comment'; readonly experimentId: string }
   | { readonly kind: 'timer-tick'; readonly at: string }
 
 export interface ResearcherAssignment {

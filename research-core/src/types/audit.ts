@@ -18,8 +18,8 @@ export type AuditAction =
   | 'issue.commented'
   | 'issue.closed'
   | 'experiment.proposed'
-  | 'pull-request.opened'
-  | 'pull-request.commented'
+  | 'experiment.opened'
+  | 'experiment.commented'
   | 'ci.requested'
   | 'ci.started'
   | 'ci.passed'
@@ -41,7 +41,7 @@ export interface AuditEntry {
   readonly programId: ProgramId
   readonly actor: AuditActor
   readonly action: AuditAction
-  readonly subject: { readonly kind: 'program' | 'issue' | 'pull-request' | 'ci-run' | 'artifact'; readonly id: string }
+  readonly subject: { readonly kind: 'program' | 'issue' | 'experiment' | 'ci-run' | 'artifact'; readonly id: string }
   /** Free-form, but always the facts the Host checked (never a model's summary). */
   readonly detail: Readonly<Record<string, string | number | boolean | null>>
   readonly severity?: AttentionSeverity

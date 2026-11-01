@@ -9,7 +9,7 @@ import type { CIRun } from './ci.js'
 import type { DomainError } from './errors.js'
 import type { Issue } from './issue.js'
 import type { Program, Paginated } from './program.js'
-import type { PullRequest } from './pull-request.js'
+import type { Experiment } from './experiment.js'
 import type {
   ClaimIssueCommand,
   CloseIssueCommand,
@@ -32,7 +32,7 @@ export type ToolResult<T> = { readonly ok: true; readonly value: T } | { readonl
 export interface ProgramView {
   readonly program: Program
   readonly issues: Paginated<Issue>
-  readonly pullRequests: Paginated<PullRequest>
+  readonly experiments: Paginated<Experiment>
   readonly ciRuns: Paginated<CIRun>
 }
 
@@ -41,7 +41,7 @@ export interface ResearcherTools {
   readonly readProgram: ToolContract<{ readonly programId: string }, ToolResult<ProgramView>>
   readonly claimIssue: ToolContract<ClaimIssueCommand, ToolResult<Issue>>
   readonly commentOnIssue: ToolContract<CommentOnIssueCommand, ToolResult<Issue>>
-  readonly proposeExperiment: ToolContract<ProposeExperimentCommand, ToolResult<PullRequest>>
+  readonly proposeExperiment: ToolContract<ProposeExperimentCommand, ToolResult<Experiment>>
   readonly requestCI: ToolContract<RequestCICommand, ToolResult<CIRun>>
   readonly closeIssue: ToolContract<CloseIssueCommand, ToolResult<Issue>>
   readonly createIssue: ToolContract<CreateIssueCommand, ToolResult<Issue>>
@@ -53,7 +53,7 @@ export interface ImplementerTools {
     { readonly summary: string; readonly branch: string; readonly head: string },
     ToolResult<{ readonly ticketId: string; readonly status: 'submitted' }>
   >
-  readonly readPullRequest: ToolContract<{ readonly pullRequestId: string }, ToolResult<PullRequest>>
+  readonly readExperiment: ToolContract<{ readonly experimentId: string }, ToolResult<Experiment>>
 }
 
 /** Operator tools; goal, budget and stopping are the operator's authority. */

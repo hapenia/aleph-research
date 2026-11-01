@@ -6,17 +6,17 @@
  * table of allowed moves for current-state records.
  */
 import type { IssueStatus, IssueResolution } from './issue.js'
-import type { PullRequestStatus, CloseReason } from './pull-request.js'
+import type { ExperimentStatus, CloseReason } from './experiment.js'
 import type { CIStatus } from './ci.js'
 
 export type IssueTransition =
   | { readonly from: 'open'; readonly to: 'assigned'; readonly by: 'claim' }
-  | { readonly from: 'assigned'; readonly to: 'in-review'; readonly by: 'open-pull-request' }
+  | { readonly from: 'assigned'; readonly to: 'in-review'; readonly by: 'open-experiment' }
   | { readonly from: 'in-review'; readonly to: 'closed'; readonly by: 'close'; readonly resolution: IssueResolution }
   | { readonly from: 'assigned'; readonly to: 'closed'; readonly by: 'close'; readonly resolution: IssueResolution }
   | { readonly from: 'open'; readonly to: 'closed'; readonly by: 'close'; readonly resolution: IssueResolution }
 
-export type PullRequestTransition =
+export type ExperimentTransition =
   | { readonly from: 'open'; readonly to: 'ci-requested'; readonly by: 'request-ci' }
   | { readonly from: 'ci-requested'; readonly to: 'ci-running'; readonly by: 'start-ci' }
   | { readonly from: 'ci-running'; readonly to: 'ci-passed'; readonly by: 'finish-ci' }

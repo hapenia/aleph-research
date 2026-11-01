@@ -1,26 +1,34 @@
 /** The Program: goal, evaluation contract, budget and best result. */
-import type { CIRunId, CommitSha, IsoTimestamp, ProgramId, PullRequestId, Score } from './ids.js'
+import type { CIRunId, CommitSha, IsoTimestamp, ProgramId, ExperimentId, Score } from './ids.js'
 import type { ArtifactRef } from './artifacts.js'
 
 export type ProgramStatus = 'running' | 'paused' | 'stopped'
+
+/**
+ * Exploration breadth, inherited from the retired design and kept for its purpose:
+ * genetic-algorithm-like diversity so a Researcher does not lock onto one method.
+ * The Host maps the level to how many Experiments must start from a diverse base
+ * instead of the current best.
+ */
+export type ExplorationLevel = 'low' | 'normal' | 'high'
 export type StopReason = 'goal-met' | 'budget-exhausted' | 'operator' | 'error'
 
 /** The declared compute budget of one Program. No scheduler enforces it; the Host does. */
 export interface Budget {
-  readonly maxPullRequests: number
+  readonly maxExperiments: number
   readonly maxComputeMinutes: number
   readonly maxTokens: number
 }
 
 export interface BudgetUsage {
-  readonly pullRequests: number
+  readonly experiments: number
   readonly computeMinutes: number
   readonly tokens: number
 }
 
 /** The evaluation contract names the CI entry and how a score is read from it. */
 export interface EvaluationContract {
-  /** Command run in the Pull request environment, for example `eval/ci.sh`. */
+  /** Command run in the Experiment environment, for example `eval/ci.sh`. */
   readonly ciEntry: string
   /** Timeout for one CI run. */
   readonly timeoutMs: number
@@ -32,7 +40,7 @@ export interface EvaluationContract {
 
 export interface BestResult {
   readonly score: Score
-  readonly pullRequestId: PullRequestId
+  readonly experimentId: ExperimentId
   readonly commit: CommitSha
   readonly ciRunId: CIRunId
   /** The persisted model weights or report this score belongs to. */
@@ -51,6 +59,8 @@ export interface Program {
   readonly stopReason?: StopReason
   /** How the Workers of this Program are told to research; editable per Program. */
   readonly methodology: string
+  /** How much diversity the Host requires across Experiments. */
+  readonly exploration: ExplorationLevel
   readonly best: BestResult | null
   readonly createdAt: IsoTimestamp
 }

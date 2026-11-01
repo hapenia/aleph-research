@@ -1,9 +1,10 @@
 /** Commands: the only way to change a Program; each role may issue a subset. */
 import type { Budget, EvaluationContract } from './program.js'
 import type { IssueLabel } from './issue.js'
+import type { ExperimentBaseRef } from './experiment.js'
 import type { EnvironmentDeclaration } from './environment.js'
 import type { AuditEntry } from './audit.js'
-import type { CommitSha, IssueId, ProgramId, PullRequestId, TicketId } from './ids.js'
+import type { CommitSha, IssueId, ProgramId, ExperimentId, TicketId } from './ids.js'
 
 /** What the operator creates; the only command that carries the whole contract. */
 export interface CreateProgramCommand {
@@ -55,9 +56,20 @@ export interface ProposeExperimentCommand {
   readonly plan: ExperimentPlan
 }
 
+/** A typed reference to a stored artifact; the Host mounts it into the ticket. */
+export interface ArtifactInputRef {
+  readonly artifactId: string
+  readonly mountAs: string
+}
+
 export interface ExperimentPlan {
   readonly hypothesis: string
   readonly steps: readonly string[]
+  /** The Researcher's intent; the Host may override the base for exploration balance. */
+  readonly strategy: 'exploit' | 'explore'
+  readonly base?: ExperimentBaseRef
+  /** Earlier artifacts this Experiment consumes, such as the best model weights. */
+  readonly inputs?: readonly ArtifactInputRef[]
   /** What would count as success when CI reports, before seeing the score. */
   readonly expected: {
     readonly direction: 'higher' | 'lower'
@@ -67,8 +79,8 @@ export interface ExperimentPlan {
   readonly environment: EnvironmentDeclaration
 }
 
-export interface RequestPullRequestCommand {
-  readonly type: 'pull-request.propose'
+export interface OpenExperimentCommand {
+  readonly type: 'experiment.open'
   readonly programId: ProgramId
   readonly issueId: IssueId
   readonly branch: string
@@ -79,7 +91,7 @@ export interface RequestPullRequestCommand {
 export interface RequestCICommand {
   readonly type: 'ci.request'
   readonly programId: ProgramId
-  readonly pullRequestId: PullRequestId
+  readonly experimentId: ExperimentId
   readonly commit: CommitSha
 }
 
@@ -110,7 +122,7 @@ export type ResearcherCommand =
   | ClaimIssueCommand
   | CommentOnIssueCommand
   | ProposeExperimentCommand
-  | RequestPullRequestCommand
+  | OpenExperimentCommand
   | RequestCICommand
   | CloseIssueCommand
 export type ImplementerCommand = SubmitImplementationCommand

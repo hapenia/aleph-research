@@ -15,7 +15,7 @@ export interface Clock {
   now(): IsoTimestamp
 }
 
-/** Runs the Program's CI entry inside the Pull request environment. */
+/** Runs the Program's CI entry inside the Experiment environment. */
 export interface CIRunner {
   run(request: CIExecutionRequest): Promise<CIExecutionResult>
 }
@@ -44,7 +44,7 @@ export type CIExecutionResult =
       readonly logPath: string
     }
 
-/** Builds a Pull request's declared environment with uv. */
+/** Builds a Experiment's declared environment with uv. */
 export interface EnvironmentBuilder {
   build(declaration: EnvironmentDeclaration): Promise<Result<BuiltEnvironment, DomainError>>
 }

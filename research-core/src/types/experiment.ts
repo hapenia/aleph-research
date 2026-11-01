@@ -1,4 +1,4 @@
-/** Pull requests: one Implementer Ticket per experiment, reviewed by a Researcher. */
+/** Experiments: one Implementer Ticket per experiment, reviewed by a Researcher. */
 import type {
   BranchName,
   CommitSha,
@@ -7,13 +7,13 @@ import type {
   IsoTimestamp,
   IssueId,
   ProgramId,
-  PullRequestId,
+  ExperimentId,
   Score,
   SessionId,
 } from './ids.js'
 import type { EnvironmentDeclaration } from './environment.js'
 
-export type PullRequestStatus =
+export type ExperimentStatus =
   | 'open'
   | 'ci-requested'
   | 'ci-running'
@@ -23,11 +23,34 @@ export type PullRequestStatus =
 
 export type CloseReason = 'superseded' | 'abandoned' | 'rejected' | 'concluded'
 
-interface PullRequestBase {
-  readonly id: PullRequestId
+/** Exploit continues from the best result; explore deliberately starts elsewhere. */
+export type ExperimentStrategy = 'exploit' | 'explore'
+
+/** Where an Experiment's branch started. */
+export type ExperimentBaseRef =
+  | { readonly kind: 'best' }
+  | { readonly kind: 'experiment'; readonly experimentId: ExperimentId }
+  | { readonly kind: 'mainline' }
+
+/**
+ * Lineage is part of the Experiment, not a comment: the Host needs it to measure
+ * diversity and to reproduce where a result came from.
+ */
+export interface ExperimentLineage {
+  readonly base: ExperimentBaseRef
+  readonly baseCommit: CommitSha
+  readonly strategy: ExperimentStrategy
+  /** Whether the Host's exploration policy or the Researcher chose the base. */
+  readonly chosenBy: 'host-policy' | 'researcher'
+  readonly rationale: string
+}
+
+interface ExperimentBase {
+  readonly id: ExperimentId
   readonly programId: ProgramId
   readonly issueId: IssueId
   readonly branch: BranchName
+  readonly lineage: ExperimentLineage
   /** The commit CI reviewed last; a new commit invalidates an older CI verdict. */
   readonly head: CommitSha
   readonly environment: EnvironmentDeclaration
@@ -36,30 +59,30 @@ interface PullRequestBase {
 }
 
 /**
- * A Pull request is an experiment snapshot, not a branch to merge into a mainline:
+ * A Experiment is an experiment snapshot, not a branch to merge into a mainline:
  * research does not need git merge semantics. It ends by closing with a reason;
  * the best result is tracked separately on the Program.
  */
-export type PullRequest =
-  | (PullRequestBase & { readonly status: 'open' })
-  | (PullRequestBase & {
+export type Experiment =
+  | (ExperimentBase & { readonly status: 'open' })
+  | (ExperimentBase & {
       readonly status: 'ci-requested'
       readonly ciRunId: CIRunId
       readonly requestedAt: IsoTimestamp
     })
-  | (PullRequestBase & { readonly status: 'ci-running'; readonly ciRunId: CIRunId })
-  | (PullRequestBase & {
+  | (ExperimentBase & { readonly status: 'ci-running'; readonly ciRunId: CIRunId })
+  | (ExperimentBase & {
       readonly status: 'ci-passed'
       readonly ciRunId: CIRunId
       readonly score: Score
       readonly reviewedBy: SessionId
     })
-  | (PullRequestBase & {
+  | (ExperimentBase & {
       readonly status: 'ci-failed'
       readonly ciRunId: CIRunId
       readonly reason: string
     })
-  | (PullRequestBase & {
+  | (ExperimentBase & {
       readonly status: 'closed'
       readonly closedAt: IsoTimestamp
       readonly reason: CloseReason
@@ -68,7 +91,7 @@ export type PullRequest =
 /** Review comments are the Researcher's judgement, separate from CI output. */
 export interface ReviewComment {
   readonly id: CommentId
-  readonly pullRequestId: PullRequestId
+  readonly experimentId: ExperimentId
   readonly author: SessionId
   readonly body: string
   readonly at: IsoTimestamp

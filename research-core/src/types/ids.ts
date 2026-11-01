@@ -13,7 +13,7 @@ export type Brand<T, B extends string> = T & { readonly [brand]: B }
 
 export type ProgramId = Brand<string, 'ProgramId'>
 export type IssueId = Brand<string, 'IssueId'>
-export type PullRequestId = Brand<string, 'PullRequestId'>
+export type ExperimentId = Brand<string, 'ExperimentId'>
 export type CIRunId = Brand<string, 'CIRunId'>
 export type CommentId = Brand<string, 'CommentId'>
 export type EventId = Brand<string, 'EventId'>

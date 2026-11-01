@@ -1,6 +1,6 @@
 /** CI runs: requested by a Researcher, executed by the Host in the PR environment. */
 import type { ArtifactRef } from './artifacts.js'
-import type { CIRunId, CommitSha, IsoTimestamp, PullRequestId, SessionId, Score } from './ids.js'
+import type { CIRunId, CommitSha, IsoTimestamp, ExperimentId, SessionId, Score } from './ids.js'
 
 export type CIStatus = 'requested' | 'running' | 'passed' | 'failed'
 export type CIFailureReason =
@@ -12,7 +12,7 @@ export type CIFailureReason =
 
 interface CIRunBase {
   readonly id: CIRunId
-  readonly pullRequestId: PullRequestId
+  readonly experimentId: ExperimentId
   readonly commit: CommitSha
   readonly requestedBy: SessionId
   readonly requestedAt: IsoTimestamp
@@ -51,7 +51,7 @@ export interface CheckResult {
 }
 
 export interface CIRequest {
-  readonly pullRequestId: PullRequestId
+  readonly experimentId: ExperimentId
   readonly commit: CommitSha
   readonly requestedBy: SessionId
 }
