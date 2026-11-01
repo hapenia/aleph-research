@@ -1433,6 +1433,7 @@ class ProjectService {
       `- Branch: ${branch}`,
       `- Mission repo: ${project.missionRoot}. Template branch: ${project.templateBranch}.`,
       `- Provided data: data/ inside the worktree${project.visibleData ? `; the visible data directory is ${project.visibleData}` : ''}.`,
+      `- Shared interpreter: ${project.pythonPath ?? 'python3'} (numpy, pandas, scipy, scikit-learn and lightgbm are installed there).`,
       ...(project.conventions ? [`- Project conventions:\n${project.conventions}`] : []),
       '',
       'Assignment from the Leader:',

@@ -842,6 +842,7 @@ test('the researcher contract lives in the persona and the Leader sends only an 
     assert.ok(prompts[0].includes(assignment), 'the Leader assignment is delivered verbatim');
     assert.doesNotMatch(prompts[0], /has not been produced by any mission yet/, 'the contract is not repeated in the message');
     assert.match(prompts[0], /Host context for this session/, 'the Host still supplies coordinates');
+    assert.match(prompts[0], /Shared interpreter:/, 'the Host names the prepared interpreter');
   } finally {
     await cleanup(root);
   }
