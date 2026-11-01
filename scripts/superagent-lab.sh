@@ -35,7 +35,10 @@ role_effort="${ALEPH_ROLE_EFFORT:-low}"
 agent_effort="${ALEPH_AGENT_EFFORT:-max}"
 
 [ -d "$vendor" ] || { echo "no vendored prototype at $vendor" >&2; exit 1; }
-[ -e "$run_root" ] && { echo "run already exists: $run_root" >&2; exit 1; }
+if [ -e "$run_root" ] && [ "${ALEPH_SUPERAGENT_REUSE:-0}" != "1" ]; then
+  echo "run already exists: $run_root" >&2
+  exit 1
+fi
 
 # shellcheck source=phase-timing.sh
 source "$repo/scripts/phase-timing.sh"
@@ -47,9 +50,11 @@ if [ -z "$port" ]; then
 fi
 
 # A tiny research fixture: one repository with a template branch plus a data
-# directory, so a ticket can create a worktree and analyse something real.
+# directory, so a ticket can create a worktree and analyse something real. A case run
+# passes ALEPH_SUPERAGENT_PROJECT instead and brings its own repository, data and
+# evaluation command.
 fixtures="$run_root/fixtures"
-if [ ! -d "$fixtures/research/.git" ]; then
+if [ -z "${ALEPH_SUPERAGENT_PROJECT:-}" ] && [ ! -d "$fixtures/research/.git" ]; then
   mkdir -p "$fixtures/research" "$fixtures/data"
   git -C "$fixtures/research" init -q -b main
   printf '# Research repository\n\nTicket worktrees start from this branch.\n' > "$fixtures/research/README.md"
@@ -281,7 +286,7 @@ phase "main session"
 # setting: changing it later needs no restart.
 api="http://127.0.0.1:$port/orchestrator/api"
 python3 - "$api" "$fixtures" "$repo" "$role_provider" "$role_model" "$role_effort" <<'PYSEED'
-import json, sys, urllib.error, urllib.request
+import json, os, sys, urllib.error, urllib.request
 
 api, fixtures, repo, role_provider, role_model, role_effort = sys.argv[1:7]
 role = {'provider': role_provider, 'model': role_model, 'reasoningEffort': role_effort}
@@ -299,16 +304,21 @@ def call(method, path, body=None):
 settings = call('GET', '/settings')
 revision = {source['id']: source['revision'] for source in settings['sources']}
 aleph = next(source for source in settings['sources'] if source['id'] == 'aleph')
-config = {
-    'project': 'fixture',
-    'repository': f'{fixtures}/research',
-    'templateBranch': 'main',
-    'dataDir': f'{fixtures}/data',
-    'python': sys.executable,
-    'conventions': 'Analyse data/ and write findings as Markdown files in this worktree.',
-    'evalCommand': f'sh {fixtures}/eval.sh',
-    'evalTimeoutMs': 120000,
-}
+project_file = os.environ.get('ALEPH_SUPERAGENT_PROJECT', '')
+if project_file:
+    spec = json.loads(open(project_file, encoding='utf-8').read())
+    config = spec['config']
+else:
+    config = {
+        'project': 'fixture',
+        'repository': f'{fixtures}/research',
+        'templateBranch': 'main',
+        'dataDir': f'{fixtures}/data',
+        'python': sys.executable,
+        'conventions': 'Analyse data/ and write findings as Markdown files in this worktree.',
+        'evalCommand': f'sh {fixtures}/eval.sh',
+        'evalTimeoutMs': 120000,
+    }
 def saved(label, result):
     print(label + ':', result)
     if result.get('http_error'):
@@ -352,8 +362,12 @@ phase "settings seed"
 
 if [ "${ALEPH_SUPERAGENT_SMOKE:-0}" = "1" ]; then
   echo "smoke: sending one research request"
-  curl -sS -X POST -H 'content-type: application/json' \
-    -d '{"project":"fixture","ticket":"fixture-smoke","requestId":"smoke-1","text":"Read data/labels.csv. Write a short findings.md with two lines: the row count per well and the clipped floor of por. Commit it once, then call aleph_submit_result (required before reporting) and report the score."}' \
+  if [ -n "${ALEPH_SUPERAGENT_PROJECT:-}" ]; then
+    request="$(python3 -c "import json,os;print(json.dumps(json.load(open(os.environ['ALEPH_SUPERAGENT_PROJECT']))['request']))")"
+  else
+    request='{"project":"fixture","ticket":"fixture-smoke","requestId":"smoke-1","text":"Read data/labels.csv. Write a short findings.md with two lines: the row count per well and the clipped floor of por. Commit it once, then call aleph_submit_result (required before reporting) and report the score."}'
+  fi
+  curl -sS -X POST -H 'content-type: application/json' -d "$request" \
     "http://127.0.0.1:$port/aleph/api/trigger" || true
   echo
   date +%s%3N > "$run_root/request-at.ms"

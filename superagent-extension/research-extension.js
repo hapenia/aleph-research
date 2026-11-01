@@ -184,6 +184,8 @@ const TriggerBody = z.object({
   actor: z.string().trim().min(1).default('operator'),
   kind: z.enum(['request', 'result', 'timer', 'note']).default('request'),
   score: z.number().nullable().optional(),
+  /** The operator already confirmed work the budget gate would otherwise hold. */
+  confirmed: z.boolean().optional(),
 }).strict()
 
 const readBody = async (req) => {
