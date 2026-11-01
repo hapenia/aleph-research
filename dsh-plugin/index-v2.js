@@ -92,6 +92,7 @@ const projectSchema = z.object({
   brief: z.string().optional(),
   researcherCount: z.number().int().optional(),
   exploration: z.enum(['low', 'normal', 'high']).optional(),
+  pendingDispatch: z.object({ at: z.string(), running: z.number().optional(), target: z.number().optional() }).nullable().optional(),
   bootstrap: z.object({
     status: z.enum(['pending', 'running', 'done', 'skipped']),
     childId: z.string().nullable().optional(),
@@ -770,8 +771,12 @@ class ProjectService {
     const target = this.explorationTarget(project);
     // Sessions waiting to be resumed are not dead; replacing them would duplicate their work.
     if (running + waiting >= target) return { dispatched: false, running, waiting, target, reason: 'interrupted researchers are waiting to resume' };
-    const parent = project.orchestratorSessionId ? this.ctx?.agents?.get?.(project.orchestratorSessionId) : null;
-    if (!parent) return { dispatched: false, running, target, reason: 'no live orchestrator session to dispatch from' };
+    const parent = this.liveOrchestrator(project);
+    if (!parent) {
+      // The Leader session can be cold while the cohort drains; retry from the watchdog.
+      await this.mutate(projectId, (current) => ({ ...current, pendingDispatch: { at: now(), running, target } })).catch(() => undefined);
+      return { dispatched: false, running, target, reason: 'no live orchestrator session to dispatch from' };
+    }
     const started = await this.startResearcher({ projectId, agent: parent });
     return { dispatched: true, running: running + 1, target, childId: started.childId, branch: started.branch };
   }
@@ -847,7 +852,11 @@ class ProjectService {
   /** A live Agent that may parent subagents, or null when the owning session is gone. */
   liveOrchestrator(project) {
     if (!project?.orchestratorSessionId) return null;
-    return this.ctx?.agents?.get?.(project.orchestratorSessionId) ?? null;
+    const agent = this.ctx?.agents?.get?.(project.orchestratorSessionId) ?? null;
+    if (!agent) return null;
+    // A session that is not the Leader must never parent the cohort.
+    if (this.presetOfAgent && this.presetOfAgent(agent) !== 'aleph') return null;
+    return agent;
   }
 
   killUnder(rootPath) {

@@ -248,3 +248,29 @@ natural first step rather than because a prompt asks for them.
 An explicit cohort request supersedes the phase, and exploration replacement
 stays quiet while the opening researcher owns the project, so the configured
 number of researchers is never doubled.
+
+## Overnight run audit
+
+A first unattended night produced 17 missions (10 done, 7 failed), 15 batches and
+17 evaluations, and the best hidden score rose from 79.44 to 80.63 in the first
+two and a half hours. The loop then stopped and the score never moved again.
+
+Reading the trajectories rather than the tool history found the cause chain:
+
+| Symptom | Cause |
+| --- | --- |
+| Cohort drained to zero at 00:48 despite `high` exploration | researchers creating missions called `rememberOrchestrator`, so the last one to create a mission became the project's "orchestrator"; when it settled there was no live parent and every replacement was silently dropped |
+| InfraOptimizer never optimized anything | its dispatch depended on a parent registration it never made, so delivery reported failure, the batch was marked failed and the worktree removed while the optimizer was still reading it |
+| Batches failed with only `Command failed` | the runner's stderr and stdout were discarded, and a missing mission envelope did not say what the results directory held |
+
+Fixes: only the Leader may own the orchestrator role and a non-Leader session is
+rejected when resolving a parent; a dispatch that cannot happen is stored as
+`pendingDispatch` and served by the watchdog once the Leader is live again; the
+persistent optimizer is registered as its caller's child, an unacknowledged
+message no longer fails the task, and a task without a report is released after
+fifteen minutes; batch failures now carry the runner's last output lines and the
+produced file list.
+
+Mission failures were all mission-code defects (`TypeError`, `ValueError`,
+`IndexError`, a self-check `RuntimeError`), which the owning researcher is told
+about; three of them were fixed by the next mission in the same night.

@@ -882,3 +882,59 @@ test('the project opens with one researcher and starts the cohort after its eval
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('a researcher creating a mission does not steal the orchestrator role', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-orch-guard-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    await service.scaffoldResearch({ projectId: project.id, agent: { id: 'session-leader' } });
+    // The Host knows which preset each session runs; a researcher must be rejected.
+    service.presetOfAgent = (agent) => (agent?.id === 'session-leader' ? 'aleph' : 'aleph-researcher');
+    assert.equal(service.get(project.id).orchestratorSessionId, 'session-leader');
+
+    await service.createMission({ projectId: project.id, name: 'probe', kind: 'analysis', title: 'probe', summary: 'probe', agent: { id: 'researcher-1' } });
+    assert.equal(service.get(project.id).orchestratorSessionId, 'session-leader', 'the opening Leader session keeps ownership');
+    // And a mission-creation call cannot introduce a non-Leader owner either.
+    await service.rememberOrchestrator(project.id, { id: 'researcher-2' });
+    assert.equal(service.get(project.id).orchestratorSessionId, 'session-leader');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a drained cohort is recorded for a later dispatch instead of disappearing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-pending-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace, researchers: 2 });
+    await service.scaffoldResearch({ projectId: project.id });
+    await service.mutate(project.id, (state) => ({
+      ...state,
+      exploration: 'high',
+      orchestratorSessionId: 'session-leader',
+      bootstrap: { status: 'done' },
+      agents: [],
+    }));
+    // No live orchestrator: the dispatch cannot happen yet, but must not be lost.
+    const first = await service.maybeDispatchReplacement({ projectId: project.id });
+    assert.equal(first.dispatched, false);
+    assert.ok(service.get(project.id).pendingDispatch, 'the intent is stored');
+
+    // Once the Leader is live again, the watchdog serves the pending dispatch.
+    service.ctx = { agents: { get: (id) => (id === 'session-leader' ? { id } : undefined) } };
+    service.presetOfAgent = () => 'aleph';
+    service.subagents = {
+      async startActivation() { return { childId: 'child-x', result: new Promise(() => {}) }; },
+      async sendMessage() { return { id: 'm' }; },
+    };
+    const retried = await service.maybeDispatchReplacement({ projectId: project.id });
+    assert.equal(retried.dispatched, true, 'the replacement starts once a parent is live');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
