@@ -5,7 +5,8 @@
   "description": "AlephResearch extension for dsh-superagent: research Source, evaluation, watchdog and panel.",
   "type": "module",
   "dependencies": {
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "@deepseek-ai/dsh-tools": "0.2.2-alpha.2"
   },
   "exports": {
     ".": "./index.js",

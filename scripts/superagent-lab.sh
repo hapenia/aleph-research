@@ -34,6 +34,13 @@ if [ ! -d "$fixtures/research/.git" ]; then
   git -C "$fixtures/research" -c user.name=AlephResearch -c user.email=aleph@localhost add -A >/dev/null 2>&1
   git -C "$fixtures/research" -c user.name=AlephResearch -c user.email=aleph@localhost commit -qm "research fixture" >/dev/null 2>&1
   printf 'well,por,perm,sw\nw1,0.10,0.01,99.9\nw1,0.18,12.5,45.2\nw2,0.10,0.01,99.9\nw2,0.22,88.0,31.7\n' > "$fixtures/data/labels.csv"
+  cat > "$fixtures/eval.sh" <<'EVAL'
+#!/usr/bin/env bash
+# Fixture evaluation: record that it ran, then print the score JSON the Host reads.
+set -euo pipefail
+printf 'ran %s commit %s ticket %s\n' "$(date -Is)" "${ALEPH_COMMIT:-none}" "${ALEPH_TICKET:-none}" > .aleph-eval-ran
+python3 -c 'import json; print(json.dumps({"score": 80.0}))'
+EVAL
 fi
 
 if [ ! -f "$vendor/lib/index.js" ] || [ -n "${ALEPH_REBUILD_VENDOR:-}" ]; then
@@ -125,7 +132,7 @@ aleph_read_roots="${ALEPH_READ_ROOTS:-/usr:/bin:/sbin:/lib:/lib64:/etc:/opt:/run
 
 # Sessions keep the prototype's danger-full-access unless the deployment asks for
 # confinement; the lab wants the sandbox runner to be the enforcement point.
-DSH_HOME="$DSH_HOME" HOME="$HOME" GH_CONFIG_DIR="$gh_config_dir" ALEPH_READ_ROOTS="$aleph_read_roots" ALEPH_SESSION_PERMISSION="${ALEPH_SESSION_PERMISSION:-workspace-write}" OPENCODE_GO_API_KEY="$api_key" \
+DSH_HOME="$DSH_HOME" HOME="$HOME" GH_CONFIG_DIR="$gh_config_dir" ALEPH_READ_ROOTS="$aleph_read_roots" ALEPH_SESSION_PERMISSION="${ALEPH_SESSION_PERMISSION:-workspace-write}" ALEPH_CHANNEL_DIR="$run_root/state/aleph-channel" OPENCODE_GO_API_KEY="$api_key" \
   nohup dsh --profile "$profile" --no-open --host 127.0.0.1 --port "$port" \
   > "$run_root/host.log" 2>&1 &
 echo $! > "$run_root/host.pid"
@@ -226,6 +233,8 @@ config = {
     'dataDir': f'{fixtures}/data',
     'python': sys.executable,
     'conventions': 'Analyse data/ and write findings as Markdown files in this worktree.',
+    'evalCommand': f'sh {fixtures}/eval.sh',
+    'evalTimeoutMs': 120000,
 }
 def saved(label, result):
     print(label + ':', result)
@@ -268,7 +277,7 @@ PYSEED
 if [ "${ALEPH_SUPERAGENT_SMOKE:-0}" = "1" ]; then
   echo "smoke: sending one research request"
   curl -sS -X POST -H 'content-type: application/json' \
-    -d '{"project":"fixture","ticket":"fixture-smoke","requestId":"smoke-1","text":"Read data/labels.csv, count rows per well and the clipped floor of por, and write the result to findings.md."}' \
+    -d '{"project":"fixture","ticket":"fixture-smoke","requestId":"smoke-1","text":"Read data/labels.csv, count rows per well and the clipped floor of por, write the result to findings.md, commit it, then call aleph_submit_result and report the score."}' \
     "http://127.0.0.1:$port/aleph/api/trigger" || true
   echo
 fi

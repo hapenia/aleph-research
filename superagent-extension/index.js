@@ -7,10 +7,17 @@
  * same domain as GitHub or Feishu events without a remote service.
  */
 import { randomUUID } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { z } from 'zod'
+import { defineTool } from '@deepseek-ai/dsh-tools'
+
+import { evaluateSubmission } from './evaluation.js'
+import { createResearchChannel } from './research-channel.js'
+import { findTicketForDirectory, resultTrigger } from './submit-result.js'
 
 export const name = 'dsh-aleph-superagent'
-export const inject = ['orchestrator']
+export const inject = ['orchestrator', 'tools', 'sessions', 'agentPresets']
 
 /** Source configuration: one research project per Source instance. */
 const AlephConfigSchema = z.object({
@@ -25,6 +32,10 @@ const AlephConfigSchema = z.object({
   python: z.string().trim().default(''),
   /** Submission contract and data notes, written into each ticket. */
   conventions: z.string().trim().default(''),
+  /** Command that prints the score JSON; run by the Worker's result submission. */
+  evalCommand: z.string().trim().default(''),
+  /** Evaluation timeout in milliseconds. */
+  evalTimeoutMs: z.number().int().default(600000),
 }).strict()
 
 /** The `aleph` Source kind: local research threads and triggers. */
@@ -47,6 +58,8 @@ export const alephKind = {
     { key: 'python', type: 'text', label: { zh: '运行时解释器', en: 'Runtime interpreter' } },
     { key: 'conventions', type: 'text', label: { zh: '项目约定', en: 'Project conventions' },
       hint: { zh: '提交契约、数据格式与评测口径。', en: 'Submission contract, data format and scoring notes.' } },
+    { key: 'evalCommand', type: 'text', label: { zh: '评测命令', en: 'Evaluation command' },
+      hint: { zh: '在工单目录运行，打印含 score 的 JSON 行。', en: 'Run in the ticket directory; prints a JSON line carrying score.' } },
   ],
   environment: {
     variables: [
@@ -65,6 +78,9 @@ export const alephKind = {
     }),
   },
   health: ['aleph'],
+  channel: createResearchChannel({
+    dir: process.env.ALEPH_CHANNEL_DIR ?? `${process.cwd()}/.aleph-channel`,
+  }),
   policy: {
     schema: z.object({
       allowed: z.array(z.object({ id: z.string().regex(/^[A-Za-z0-9_.-]+$/), name: z.string().optional() }).strict())
@@ -167,6 +183,82 @@ export function apply(ctx) {
       },
     })
   })
+
+  /** Whether this Agent runs the prototype's Worker preset. */
+  const isWorker = (agent) => {
+    const session = ctx.sessions?.get?.(agent?.id)
+    const preset = session ? ctx.agentPresets?.presetForSession?.(session) : undefined
+    return preset === 'dsh-superagent-worker'
+  }
+
+  const sourceContext = () => ctx.orchestrator.context(alephKind)
+
+  ctx.tools.register(defineTool({
+    name: 'aleph_submit_result',
+    description: 'Run the project evaluation on this ticket directory and report the score back into the domain. Commit first; uncommitted changes are refused.',
+    parameters: {
+      summary: { type: 'string', description: 'One line describing what you changed and what you measured.' },
+    },
+    output: {
+      schema: { type: 'json' },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value, null, 2) }],
+    },
+    execute: async (args, exec) => {
+      const agent = exec?.agent
+      if (!isWorker(agent)) return { ok: false, error: 'aleph_submit_result is only available to a Worker session' }
+      const cwd = agent?.session?.header?.cwd
+      if (!cwd) return { ok: false, error: 'the Worker session has no working directory' }
+
+      const source = sourceContext()
+      const config = source.config('aleph') ?? {}
+      const project = String(config.project ?? 'default')
+      const ticket = findTicketForDirectory(source.tickets.open(), cwd)
+      if (!ticket) return { ok: false, error: `no open Aleph ticket owns ${cwd}` }
+
+      const git = promisify(execFile)
+      let status = ''
+      try {
+        status = (await git('git', ['-C', cwd, 'status', '--porcelain'])).stdout.trim()
+      } catch (error) {
+        return { ok: false, error: `git status failed: ${String(error?.message ?? error)}` }
+      }
+      if (status) {
+        return { ok: false, error: 'uncommitted changes: commit the ticket work before submitting the result', details: status.split(/\r?\n/).slice(0, 20) }
+      }
+      const commit = (await git('git', ['-C', cwd, 'rev-parse', 'HEAD'])).stdout.trim()
+
+      const command = String(config.evalCommand ?? '')
+      if (!command) return { ok: false, error: 'the aleph Source has no evalCommand configured' }
+      const evaluation = await evaluateSubmission({
+        command,
+        cwd,
+        python: String(config.python ?? ''),
+        timeoutMs: Number(config.evalTimeoutMs) || 600000,
+        env: { ALEPH_PROJECT: project, ALEPH_TICKET: ticket.id, ALEPH_SOLUTION_DIR: cwd, ALEPH_COMMIT: commit },
+      })
+
+      const trigger = resultTrigger({
+        project,
+        ticket,
+        score: evaluation.score,
+        evaluationId: evaluation.marker,
+        text: [`Evaluation finished: ${evaluation.score ?? 'no score'}.`, `Commit: ${commit}.`, args?.summary ?? ''].join(' ').trim(),
+      })
+      const received = await source.receive(trigger)
+      return {
+        ok: true,
+        ticket: ticket.id,
+        thread: trigger.threads[0].id,
+        score: evaluation.score,
+        exitCode: evaluation.exitCode,
+        timedOut: evaluation.timedOut,
+        commit,
+        evaluationMarker: evaluation.marker,
+        trigger: received,
+        stdoutTail: evaluation.stdout.trim().split(/\r?\n/).slice(-8),
+      }
+    },
+  }))
 
   ctx.logger.info('dsh-aleph-superagent ready: aleph Source registered')
 }

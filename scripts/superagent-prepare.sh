@@ -66,9 +66,13 @@ ${conventions:-No project conventions were provided.}
 
 ## Work
 
-Implement what the ticket asks, verify it with the commands the ticket names,
-commit your work on this branch with a clear message, and report what you changed,
-what you measured and anything that blocks a person.
+Implement what the ticket asks, verify it with the commands the ticket names, and
+commit your work on this branch with a clear message.
+
+When the work is committed and you want it scored, call the `aleph_submit_result`
+tool with a one-line summary. It refuses uncommitted changes, runs the project
+evaluation in this directory and reports the score back to the ticket. Report what
+you changed, what you measured and anything that blocks a person.
 EOF
 
 cat > "$dir/.gitignore" <<'EOF'
