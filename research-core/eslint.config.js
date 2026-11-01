@@ -96,6 +96,14 @@ export default tseslint.config(
     },
   },
   {
+    // The command handler layer is a composition layer and must construct states through
+    // the factory boundary; only the import restriction is lifted here.
+    files: ['src/runtime/handlers.ts'],
+    rules: {
+      'no-restricted-imports': 'off',
+    },
+  },
+  {
     files: ['src/types/**/*.ts'],
     rules: {
       // Type-only declarations do not execute; unused imports are checked by tsc.
