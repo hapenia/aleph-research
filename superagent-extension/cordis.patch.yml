@@ -10,13 +10,16 @@
     # over DSH's `storageDomain` service (the base profile mounts `storage-domain` with
     # the JSON backend) and provides `alephResearchStore`; `research-host` registers the
     # read/write routes under /aleph/api/research/ and uses that store when it is already
-    # provided; `research-tools` registers the compiled role tool catalog (a YAML-only
-    # mount has no handlers, so calls stay refused until a deployment injects them; the
-    # catalog is still registered and role-gated).
+    # provided; `research-tools` registers the compiled role tool catalog and binds the
+    # host service's executeTool when it is present.
     - id: aleph-research-storage
       name: '@local/dsh-aleph-superagent/research-storage'
     - id: aleph-research-host
       name: '@local/dsh-aleph-superagent/research-host'
+    # The trigger bridge delivers typed research trigger drafts to the prototype
+    # Source's Eval path. It reads the optional host service late-bound.
+    - id: aleph-research-trigger-bridge
+      name: '@local/dsh-aleph-superagent/research-trigger-bridge'
     # The research Session pool. `research-sessions` injects only
     # `sessionController` and `workspaceRegistry`; it reads the optional
     # `alephResearchHost` service with `ctx.get`, never as an injection, so this row

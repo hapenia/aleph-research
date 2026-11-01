@@ -81,8 +81,11 @@ Implemented after the first runtime milestone:
   `.aleph` marker exists; no Experiment, worker or evaluation starts.
 
 Extension tests are **206**; the focused host/tool/trigger/session suites are 52.
-The latest lab smoke (`team-presets-0639`, port 40360) passed **11/11** with
-`persistent:true`, zero activation warnings, evaluation score 80 and clean teardown.
+The latest lab smoke (`team-final2-0652`, port 40392) passed **11/11** with
+`persistent:true`, zero activation warnings, evaluation score 80, three worker commits and
+clean teardown (startup 15.5 s, worker turn 32.1 s, total 55.8 s). The harness now waits
+for `running=0` **and** `queued=0`; the earlier 22 s failures were a smoke race, not a
+runtime regression.
 
 ## What remains (excluded from this completion)
 
