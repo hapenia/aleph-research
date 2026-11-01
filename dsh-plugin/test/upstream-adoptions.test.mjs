@@ -1196,3 +1196,52 @@ test('a queue notice never forks a second Composer when the Leader is cold', asy
     await cleanup(root);
   }
 });
+
+test('the Host dispatches queued work when the queue owner cannot be woken', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-fallback-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    const repo = project.missionRoot;
+    const branch = 'missions/waiting';
+    git(repo, ['switch', '-c', branch, 'template']);
+    await mkdir(join(repo, 'missions', 'waiting'), { recursive: true });
+    await writeFile(join(repo, 'missions', 'waiting', 'mission.json'), JSON.stringify({ id: 'waiting', entrypoint: 'run.sh', kind: 'training', title: 'waiting', summary: 'test' }));
+    await writeFile(join(repo, 'missions', 'waiting', 'run.sh'), '#!/usr/bin/env bash\nset -e\nsleep 2\nprintf \'{}\' > "$ALEPH_OUTPUT_DIR/result.json"\n');
+    git(repo, ['add', '-A']);
+    git(repo, [...identity(repo), 'commit', '-m', 'waiting mission']);
+    git(repo, ['switch', 'template']);
+    await service.propose({ projectId: project.id, branch, agent: { id: 'researcher' } });
+
+    // A Composer exists but its parent and the Leader are both cold, and a notice is parked.
+    await service.mutate(project.id, (state) => ({
+      ...state,
+      agents: [{ role: 'composer', childId: 'composer-cold', parentSessionId: 'session-leader', status: 'done', updatedAt: new Date().toISOString() }],
+      pendingNotices: [{ sessionId: 'composer-cold', text: 'MissionQueue changed', at: new Date().toISOString() }],
+      orchestratorSessionId: 'session-leader',
+      paused: false,
+    }));
+    service.ctx = { agents: { get: () => undefined } };
+    service.presetOfAgent = () => 'aleph';
+    service.subagents = { async sendMessage() { throw new Error('cold'); } };
+
+    for (let tick = 0; tick < 3; tick += 1) service.checkProcesses();
+    for (let i = 0; i < 300; i += 1) {
+      const batches = service.get(project.id).batches;
+      if (batches.some((batch) => ['forming', 'running', 'done'].includes(batch.status))) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    const after = service.get(project.id);
+    assert.ok(after.batches.length >= 1, 'the Host formed a batch itself');
+    assert.match((after.violations ?? []).join('\n'), /Composer could not be woken/, 'the fallback is recorded');
+    // Wait for the run to end so the fixture can be removed.
+    for (let i = 0; i < 400; i += 1) {
+      if (!service.get(project.id).batches.some((batch) => ['forming', 'running'].includes(batch.status))) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  } finally {
+    await cleanup(root);
+  }
+});
