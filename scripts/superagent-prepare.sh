@@ -69,6 +69,10 @@ paths on this machine: no other project, no DSH state, no credentials, no
 datasets outside \`data/\`. If a request seems to need more data, add an Input or
 report that the data is missing instead of reading around the restriction.
 
+Missing measurements may use a sentinel rather than an empty cell. Treat any numeric
+value <= -9999 as missing for features and targets; never feed it to a model or a
+least-squares fit. The evaluator also skips such rows, so cleaning them is not optional.
+
 ## Runtime
 
 Use \`$python\` as the interpreter; the submission has to run under it. Do not modify
