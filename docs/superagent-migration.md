@@ -217,8 +217,30 @@ session header agentPreset: aleph-watchdog
 first brief: "Watchdog brief …"; model answered "no stalled tickets, no action"
 ```
 
-Not yet done: budget wiring into acceptance, extension code hot reload beyond the fiber
-restart, and retirement of the old plugin's roles.
+### Phase 2: budget-tiered admission
+
+New research requests pass a Host-side admission gate before they reach the domain:
+
+- `superagent-extension/admission.js` classifies the request (`budget.js` tiers) and
+  decides with `decideAcceptance`; cheap tiers auto-accept, `training`/`design` wait for
+  a person, and an optional hourly cap bounds automatic admission;
+- `POST /aleph/api/trigger` answers `202 {accepted:false, admission}` when confirmation is
+  needed and only `receive`s the Trigger once admitted (a `confirmed: true` body starts it);
+- `GET/POST /aleph/api/budget` reads and versions the budget settings through a second
+  `ConfigStore`, with the current usage shown next to them.
+
+Verified in lab `budget-test` (port 40360):
+
+```text
+GET  budget                          -> defaults: auto explore+analysis, attention training+design
+POST trigger "Run a hyperparameter sweep…GPU"      -> 202 accepted:false tier:training
+POST trigger "Count the rows per well…"           -> 200 accepted:true  tier:analysis (auto)
+POST budget {maxAutoPerHour:0}                    -> revision 1
+POST trigger "Measure the floor value."           -> 202 hourly budget exhausted
+```
+
+Not yet done: extension code hot reload beyond the fiber restart, and retirement of the
+old plugin's roles.
 
 ## Next phases
 

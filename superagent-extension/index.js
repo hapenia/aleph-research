@@ -15,6 +15,8 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 
 import { evaluateSubmission } from './evaluation.js'
 import { createResearchChannel } from './research-channel.js'
+import { admitRequest, admissionText } from './admission.js'
+import { parseBudget } from './budget.js'
 import { ConfigStore } from './config-store.js'
 import { findStalledTickets, summarizeTickets, watchdogBrief } from './watchdog.js'
 import { retryTicket, stopTicket } from './watchdog-actions.js'
@@ -36,6 +38,25 @@ const configStore = () => new ConfigStore({
 
 /** Prototype management API root, used to apply configuration changes without a restart. */
 const managementBase = () => process.env.ALEPH_MANAGEMENT_API ?? ''
+
+/** Budget-tiered admission: cheap research auto-accepts, expensive work needs a person. */
+const budgetStore = () => new ConfigStore({
+  dir: process.env.ALEPH_CONFIG_DIR ?? `${process.cwd()}/.aleph-config`,
+  name: 'aleph-budget',
+  validate: (value) => {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('budget must be an object')
+  },
+})
+
+/** Requests accepted (evaluated) in the last hour, used by the hourly cap. */
+const autoAcceptedLastHour = async () => {
+  const cutoff = Date.now() - 60 * 60 * 1000
+  const records = await readResults(resultsDir())
+  return records.filter((record) => {
+    const at = Date.parse(record?.at ?? '')
+    return Number.isFinite(at) && at >= cutoff && Number.isFinite(record?.score)
+  }).length
+}
 
 /** Source configuration: one research project per Source instance. */
 const AlephConfigSchema = z.object({
@@ -173,15 +194,55 @@ export function apply(ctx) {
   ctx.inject(['webServer'], (child) => {
     child.webServer.register({
       kind: 'exact',
+      path: '/aleph/api/budget',
+      async handler(req, res) {
+        try {
+          const store = budgetStore()
+          if (req.method === 'GET') {
+            const current = store.current()
+            return sendJson(res, 200, {
+              ok: true,
+              current,
+              effective: parseBudget(current.value ?? {}),
+              usage: { autoAcceptedLastHour: await autoAcceptedLastHour() },
+            })
+          }
+          if (req.method !== 'POST') return sendJson(res, 405, { ok: false })
+          const body = await readBody(req)
+          const saved = store.save(body?.value, { origin: body?.origin ?? 'panel' })
+          return sendJson(res, 200, { ok: true, current: saved })
+        } catch (error) {
+          return sendJson(res, 400, { ok: false, error: String(error?.message ?? error) })
+        }
+      },
+    })
+    child.webServer.register({
+      kind: 'exact',
       path: '/aleph/api/trigger',
       async handler(req, res) {
         if (req.method !== 'POST') return sendJson(res, 405, { ok: false })
         try {
-          const input = TriggerBody.parse(await readBody(req))
+          const body = await readBody(req)
+          const input = TriggerBody.parse(body)
+          const budget = parseBudget(budgetStore().current().value ?? {})
+          const admission = admitRequest({
+            text: input.text,
+            confirmed: body?.confirmed === true,
+            budget,
+            usage: { autoAcceptedLastHour: await autoAcceptedLastHour() },
+          })
+          if (!admission.accepted) {
+            return sendJson(res, 202, {
+              ok: true,
+              accepted: false,
+              admission,
+              message: admissionText(admission),
+            })
+          }
           const requestId = input.requestId ?? randomUUID()
           const trigger = alephTrigger({ ...input, requestId })
           const result = await ctx.orchestrator.context(alephKind).receive(trigger)
-          return sendJson(res, 200, { ok: true, trigger: trigger.id, thread: trigger.threads[0].id, result })
+          return sendJson(res, 200, { ok: true, accepted: true, admission, trigger: trigger.id, thread: trigger.threads[0].id, result })
         } catch (error) {
           return sendJson(res, 400, { ok: false, error: String(error?.message ?? error) })
         }
