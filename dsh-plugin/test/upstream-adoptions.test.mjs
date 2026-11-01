@@ -1166,3 +1166,33 @@ test('the cohort inherits the opening researcher assignment', async () => {
     await cleanup(root);
   }
 });
+
+test('a queue notice never forks a second Composer when the Leader is cold', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'aleph-composer-parent-'));
+  try {
+    const workspace = join(root, 'workspace');
+    await mkdir(workspace, { recursive: true });
+    const service = new ProjectService({}, { table: () => table() }, {});
+    const project = await service.init({ workspace });
+    service.presetOfAgent = (agent) => (agent?.id === 'session-leader' ? 'aleph' : 'aleph-researcher');
+    service.subagents = { async sendMessage() { throw new Error('parent is not live'); }, async startActivation() { throw new Error('must not fork'); } };
+    await service.mutate(project.id, (state) => ({
+      ...state,
+      agents: [{ role: 'composer', childId: 'composer-a', parentSessionId: 'session-leader', status: 'done', updatedAt: new Date().toISOString() }],
+    }));
+
+    // A researcher triggers a notice while the Leader session is cold.
+    const result = await service.notifyComposer({ projectId: project.id, agent: { id: 'researcher-1' }, event: 'mission queued', detail: 'm-1' });
+    assert.equal(result.delivered, false);
+    assert.equal(result.childId, 'composer-a', 'the existing Composer stays the queue owner');
+    const agents = service.get(project.id).agents.filter((item) => item.role === 'composer');
+    assert.equal(agents.length, 1, 'no second Composer was created');
+    assert.equal(agents[0].childId, 'composer-a');
+    assert.ok((service.get(project.id).pendingNotices ?? []).length >= 1, 'the notice is parked for later');
+
+    // A researcher may not start the Composer either.
+    await assert.rejects(() => service.runComposer({ projectId: project.id, agent: { id: 'researcher-1' } }), /only the Leader/);
+  } finally {
+    await cleanup(root);
+  }
+});

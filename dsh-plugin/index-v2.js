@@ -2058,8 +2058,9 @@ class ProjectService {
       return { delivered: Boolean(ensured), started: true, childId: ensured?.childId ?? null };
     }
     const remembered = project.orchestratorSessionId ? this.ctx?.agents?.get?.(project.orchestratorSessionId) : null;
-    const parent = this.parentAgents?.get(record.childId) ?? agent ?? remembered ?? null;
-    if (!parent || !this.subagents) return { delivered: false, reason: 'no live composer parent' };
+    // The Composer answers to the session that created it, never to whoever happens to call.
+    const recordedParent = record.parentSessionId ? this.ctx?.agents?.get?.(record.parentSessionId) : null;
+    const parent = this.parentAgents?.get(record.childId) ?? recordedParent ?? remembered ?? null;
     const queued = project.missions.filter((mission) => mission.status === 'approved').length;
     const machine = project.machines.find((item) => item.id === 'local');
     const text = [
@@ -2067,11 +2068,16 @@ class ProjectService {
       `${queued} mission(s) approved and waiting. Machine local is ${machine?.status ?? 'unknown'}.`,
       'Apply your dispatch policy: run approved work immediately when the machine is idle; only compose ahead and invoke InfraOptimizer while it is busy.',
     ].join(' ');
+    if (!parent || !this.subagents) {
+      // Park the notice; a fork here would give the project two queue owners.
+      await this.deliverOrQueue({ projectId, sessionId: record.childId, text }).catch(() => undefined);
+      return { delivered: false, queued: true, childId: record.childId, reason: 'no live composer parent yet' };
+    }
     try {
       await this.subagents.sendMessage(parent, record.childId, [{ type: 'text', text }], { signal: new AbortController().signal });
-    } catch (error) {
-      const restarted = await this.runComposer({ projectId, agent }).catch(() => null);
-      return { delivered: Boolean(restarted), restarted: true, childId: restarted?.childId ?? null };
+    } catch {
+      await this.deliverOrQueue({ projectId, sessionId: record.childId, text }).catch(() => undefined);
+      return { delivered: false, queued: true, childId: record.childId, reason: 'delivery failed; notice parked' };
     }
     return { delivered: true, childId: record.childId, queued };
   }
@@ -2092,6 +2098,9 @@ class ProjectService {
 
   async runComposer({ projectId, agent }) {
     if (!agent) throw new Error('a calling Agent is required to start Composer');
+    if (this.presetOfAgent && this.presetOfAgent(agent) !== 'aleph') {
+      throw new Error('only the Leader session starts the Composer; a researcher must not fork the queue owner');
+    }
     if (!this.subagents) throw new Error('subagent service is unavailable');
     const project = this.get(projectId);
     if (!project) throw new Error(`project not found: ${projectId}`);
