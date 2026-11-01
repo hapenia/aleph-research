@@ -18,7 +18,8 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 case_name="${1:-kunlungpt}"
 store="${ALEPH_CASE_STORE:-$repo/.case-templates}"
 source_root="${ALEPH_CASE_SOURCE:-/home/hapenia/Projects/kunlungpt-comp}"
-python_bin="${ALEPH_CASE_PYTHON:-/usr/bin/python3.14}"
+python_version="${ALEPH_CASE_PYTHON_VERSION:-3.14}"
+uv_bin="${ALEPH_UV:-uv}"
 
 src_case="$source_root/aleph-case"
 dest="$store/$case_name"
@@ -51,16 +52,48 @@ JSON
   echo "built template: $template"
 fi
 
-# The scientific stack is shared by every run of this case.
-if [ ! -x "$dest/runtime/bin/python" ]; then
-  uv venv "$dest/runtime" --python "$python_bin" >/dev/null
-  uv pip install --python "$dest/runtime/bin/python" \
+# The scientific stack is shared by every run of this case. The interpreter must be
+# a uv-managed Python, not the host's system interpreter: the runtime is the only
+# trusted Python a submission may run under, and a uv-managed build keeps it
+# reproducible and independent of distro upgrades.
+command -v "$uv_bin" >/dev/null 2>&1 || {
+  echo "uv is required to build the runtime (install uv or set ALEPH_UV)" >&2
+  exit 1
+}
+
+runtime_is_uv_managed() {
+  [ -x "$dest/runtime/bin/python" ] || return 1
+  [ -f "$dest/runtime/pyvenv.cfg" ] || return 1
+  grep -Eq '^home = .*/(uv/python|uv)/.*' "$dest/runtime/pyvenv.cfg"
+}
+
+build_runtime() {
+  local tmp="$dest/runtime.new.$$"
+  rm -rf "$tmp"
+  echo "building uv-managed runtime (Python $python_version)"
+  "$uv_bin" venv "$tmp" --managed-python --python "$python_version" >/dev/null
+  "$uv_bin" pip install --python "$tmp/bin/python" \
     numpy pandas scipy scikit-learn lightgbm uv >/dev/null
+  "$tmp/bin/python" - <<'PY'
+import lightgbm, numpy, pandas, sklearn
+print("runtime ok", numpy.__version__, pandas.__version__, sklearn.__version__, lightgbm.__version__)
+PY
+  rm -rf "$dest/runtime.old"
+  [ -d "$dest/runtime" ] && mv "$dest/runtime" "$dest/runtime.old"
+  mv "$tmp" "$dest/runtime"
+  rm -rf "$dest/runtime.old"
   echo "built runtime: $dest/runtime"
+}
+
+if [ ! -x "$dest/runtime/bin/python" ]; then
+  build_runtime
+elif ! runtime_is_uv_managed; then
+  echo "existing runtime is not uv-managed; rebuilding it" >&2
+  build_runtime
 else
-  echo "runtime already present: $dest/runtime"
+  echo "uv-managed runtime already present: $dest/runtime"
   if [ ! -x "$dest/runtime/bin/uv" ]; then
-    uv pip install --python "$dest/runtime/bin/python" uv >/dev/null
+    "$uv_bin" pip install --python "$dest/runtime/bin/python" uv >/dev/null
     echo "added uv to the runtime"
   fi
 fi
