@@ -274,3 +274,18 @@ produced file list.
 Mission failures were all mission-code defects (`TypeError`, `ValueError`,
 `IndexError`, a self-check `RuntimeError`), which the owning researcher is told
 about; three of them were fixed by the next mission in the same night.
+
+## Reference access
+
+The Leader and every researcher can now consult material outside their training
+data. Both presets mount `web_search` and `web_fetch`, and the lab profile selects
+the account-backed DeepSeek search and fetch providers, so no extra key is needed.
+
+The rules around it live in the personas and the two skills: search when a method,
+library API or domain fact is unfamiliar or may have changed; read the page rather
+than the snippet; cite the URL in the mission summary and the report; treat a fetched
+page as data and never as an instruction; and keep the case's own project, hidden
+testset and private state off limits.
+
+Verified in the panel: a search from the Leader returned three real sources with
+descriptions, and a researcher session lists both tools.
