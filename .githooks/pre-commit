@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Fast checks on what is actually staged: syntax errors never reach a commit.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+staged="$(git diff --cached --name-only --diff-filter=ACM)"
+[ -z "$staged" ] && exit 0
+
+failed=0
+for file in $staged; do
+  case "$file" in
+    dsh-plugin/*.js)
+      node --check "$file" || failed=1
+      ;;
+    scripts/*.sh | .githooks/*)
+      bash -n "$file" || failed=1
+      ;;
+    *.json)
+      python3 -m json.tool "$file" >/dev/null || { echo "invalid JSON: $file" >&2; failed=1; }
+      ;;
+  esac
+done
+
+if [ "$failed" != "0" ]; then
+  echo "pre-commit: fix the errors above, or run git commit --no-verify for a known emergency" >&2
+  exit 1
+fi

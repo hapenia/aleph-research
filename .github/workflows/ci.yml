@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plugin:
+    name: plugin syntax and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+
+      - name: Install dependencies
+        working-directory: dsh-plugin
+        run: npm install --no-audit --no-fund
+
+      - name: Check syntax
+        run: |
+          node --check dsh-plugin/index-v2.js
+          node --check dsh-plugin/client.js
+
+      - name: Run tests
+        working-directory: dsh-plugin
+        run: npm test
