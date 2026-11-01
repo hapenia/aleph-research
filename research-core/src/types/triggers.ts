@@ -1,5 +1,5 @@
 /** Mapping research audit facts to SuperAgent Triggers. */
-import type { AuditAction, AuditEntry } from './audit.js'
+import type { AuditAction, AuditEntryOf } from './audit.js'
 import type { Principal } from './actors.js'
 import type { DomainError, Result } from './errors.js'
 import type { IsoTimestamp, NonEmptyArray, ProgramId, TicketId } from './ids.js'
@@ -54,7 +54,16 @@ export interface ResearchTriggerDraft {
   readonly meta: Readonly<Record<string, string | number | boolean | null>>
 }
 
-export type TriggerFactory = (entry: AuditEntry, snapshot: ProgramSnapshot) => ResearchTriggerDraft | null
+export type TriggerReportFor<A extends AuditAction> = {
+  readonly action: A
+  readonly kind: TriggerKindForAction[A]
+  readonly draft: ResearchTriggerDraft | null
+}
+
+/** The mapper must return the trigger kind its action maps to at compile time. */
+export interface TriggerFactory {
+  make<A extends AuditAction>(entry: AuditEntryOf<A>, snapshot: ProgramSnapshot): TriggerReportFor<A>
+}
 
 /** The prototype seam: the adapter receives drafts and wakes the router. */
 export interface TriggerPort {

@@ -101,7 +101,6 @@ export interface ReviewExperimentCommand {
   readonly programId: ProgramId
   readonly experimentId: ExperimentId
   readonly body: NonEmptyString
-  readonly kind: 'review' | 'ci-request'
   readonly verdict: 'approve' | 'request-changes' | 'comment'
 }
 export interface CloseExperimentCommand {
@@ -206,7 +205,7 @@ export type ActorForCommand = {
   readonly 'issue.create': OperatorPrincipal | ResearcherPrincipal
   readonly 'issue.claim': ResearcherPrincipal
   readonly 'issue.comment': OperatorPrincipal | ResearcherPrincipal
-  readonly 'issue.close': OperatorPrincipal | ResearcherPrincipal
+  readonly 'issue.close': ResearcherPrincipal
   readonly 'experiment.propose': ResearcherPrincipal
   readonly 'experiment.review': ResearcherPrincipal
   readonly 'experiment.close': ResearcherPrincipal

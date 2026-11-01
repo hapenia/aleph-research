@@ -48,3 +48,4 @@ jobs:
           npm install --no-audit --no-fund
           npm run typecheck
           npm run lint
+          npm run test:mutation

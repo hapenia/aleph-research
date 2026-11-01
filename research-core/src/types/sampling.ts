@@ -3,7 +3,7 @@
  * candidate, and a fresh start is always possible with the level's fixed probability.
  */
 import type { DomainError, Result } from './errors.js'
-import type { CommitSha, ExperimentId } from './ids.js'
+import type { CIRunId, CommitSha, ExperimentId } from './ids.js'
 import type { MetricDefinition, MetricMap } from './metrics.js'
 import type { ExplorationLevel } from './program.js'
 
@@ -25,6 +25,7 @@ export type BaseChoice =
   | { readonly kind: 'fresh' }
 
 export interface SampleCandidate {
+  readonly ciRunId: CIRunId
   readonly experimentId: ExperimentId
   readonly commit: CommitSha
   readonly metrics: MetricMap

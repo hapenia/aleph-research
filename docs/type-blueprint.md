@@ -30,7 +30,9 @@ A class cannot prevent `JSON.parse`, `any` or `as`. The blueprint therefore decl
 single construction/hydration boundary instead of pretending there is none:
 
 - `src/factories.ts` is the only module allowed to construct domain states (private
-  constructors) and to trust Host-supplied input;
+  constructors) and to trust Host-supplied input; it declares the constructible factory
+  functions for principals, tokens, Program, Issue, Experiment, lineages, artifacts and
+  CI completions;
 - `src/hydration.ts` is the only module allowed to parse storage rows or JSON into domain
   states; every function returns a `Result` and validates at runtime;
 - ESLint and ast-grep reject factory calls, type assertions, `any`, `JSON.parse`, global
@@ -76,14 +78,18 @@ A role class alone does not prove ownership. Two nominal tokens express it:
 
 - `IssueAssignment` is minted only by `AssignedIssue.authorize(actor)`, which compares the
   actor Session with the assignee at runtime. `addExperiment`, `close`, `requestCI` and
-  Experiment closes require it.
+  Experiment closes require it and return `Result`: the transition re-checks
+  `assignment.issueId` and the assignee before moving state.
 - `TicketBinding` is minted by the Host from a Ticket record and carries ticket, experiment
-  and Implementer Session. `submit`, `revise` require it; the submit tool input omits it,
-  so the model cannot choose another Ticket.
+  and Implementer Session. `submit` and `revise` require the Implementer principal and the
+  binding and return `Result`, re-checking ticket, experiment and Session.
+- `PassedCICompletion` / `FailedCICompletion` carry `ciRunId`, experiment and commit; the
+  CI transition re-checks them against the Experiment before recording the result.
 
 The tokens prove that a runtime ownership check happened; they cannot prove at compile
-time that a Session id equals the stored assignee. That comparison is explicitly listed as
-a runtime rule.
+time that a Session id equals the stored assignee. Every association comparison is
+explicitly listed as a runtime rule and returns `DomainError` on mismatch, so a forged or
+stale token cannot silently move another aggregate's state.
 
 ## Executor, commands and audit
 
@@ -104,6 +110,11 @@ a runtime rule.
   attention and audit.
 - `CIRecord` is a status union (`requested/running/passed/failed`) with metrics, artifacts,
   duration and environment digest where they exist; failed runs are persisted.
+- `Ticket` is a real aggregate (open/running/submitted/cancelled/failed) owned by the Host;
+  `TicketBinding` is minted from it and the repository only returns Tickets, never raw
+  tuples.
+- `CIPassedExperiment` stores the CI run reference, not a duplicated metrics/artifact
+  snapshot, so the raw record remains the single source.
 - Only passed records with the required metrics feed the sampler (`listPassed`); validity
   is computed by query, not stored.
 - No best record exists.
@@ -113,10 +124,13 @@ a runtime rule.
 - `Schema<T>` is a plain interface with `parse` and `toJsonSchema`; the adapter supplies both.
 - Command tools carry the command literal; Implementer submit input omits `binding`;
   output is `ReadyExperiment`.
-- Routes are actor-typed; responses are `ApiResponse<T>` = value or `DomainFailure` whose
-  status is derived from the code. Parsers accept raw `unknown` and return commands.
-- Panel reads `ProgramSnapshot` (current state, raw CI records, audit, artifacts,
-  attention); no replay.
+- Writes have one path: `ApiWriteRoutes` is a mapped type whose every method receives the
+  typed `CommandExecutor` and the command's own actor and returns its `CommandOutcome`.
+  There is no route method that can write state directly.
+- The panel is the only non-write route family and reads `ProgramSnapshot` (current state,
+  raw CI records, audit, artifacts, attention); no replay.
+- Responses are `ApiResponse<T>` = value or `DomainFailure`, both carrying audit; parsers
+  accept raw `unknown` and return commands.
 
 ## DSH and dsh-superagent integration
 
@@ -160,9 +174,15 @@ stated rather than hidden.
 `research-core/src/type-tests.ts` covers: widened command rejection, per-command actor
 mismatch, executor host actor rejection, spread/status lookalike rejection, variant
 assignment rejection, failed-CI to passed assignment rejection, DomainFailure construction
-and status correlation, nomial id mixing, ownership-token substitution, Host-only
-cancellation, completed-Program transitions, empty audit rejection, tool input narrowing,
-and lineage separation.
+and status correlation, nominal id mixing, ownership-token substitution, Host-only
+cancellation, completed-Program transitions, empty audit rejection, wrong audit action,
+the capability map, and lineage separation.
+
+`research-core/scripts/type-mutation-check.sh` removes a guarantee in a throwaway copy
+and requires `tsc` to fail: deleting a private brand, widening an outcome audit, allowing
+a Researcher to pause, and mapping `program.pause` to the wrong capability are all killed.
+It runs in `verify.sh` and CI. Tool input shapes are adapter contracts, not a compile-time
+security boundary; the Host injects `binding` at execution time.
 
 Third-review fixes already applied: the factory/hydration boundary moved out of the state
 classes after the lint layer made per-class factories redundant; `ciRunId` on completion
@@ -172,11 +192,19 @@ on API responses; `RouteSpec`; public `Schema` constructor taking a validator; a
 `program.budget-paused` action; and negative tests for success/refusal audit
 non-emptiness and wrong audit action.
 
-Still open from the third review: transitions re-check token association
-(`assignment.issueId`, `binding.experimentId`, `completion.ciRunId`) and return
-`Result`; a real Ticket aggregate; sampler candidate validity/deduplication; trigger map
-consumption; budget writer; route/executor single-path enforcement; mutation tests that
-remove a guarantee and require the suite to fail.
+Third-review items now closed: transitions re-check token association
+(`assignment.issueId`, binding ticket/experiment/session, completion ciRunId/experiment/
+commit) and return `Result`; `Ticket` is a real aggregate with a real repository;
+`ApiWriteRoutes` makes the executor the only write path; the trigger mapper is typed to
+the action map; sampler candidates carry their CI run; `UsageRecorder` is the Host budget
+port; the capability map is load-bearing in a type test; and
+`scripts/type-mutation-check.sh` removes guarantees in a copy and fails if `tsc` still
+accepts the result (four mutations are killed, wired into verify and CI).
+
+Remaining runtime-only rules: the Session comparison behind `authorize`, the Ticket to
+Session binding, candidate deduplication and required-metric validation, trigger delivery
+to the prototype Eval, budget counter arithmetic, DSH tool registration, and storage
+hydration inside the boundary modules.
 
 Known limits, stated instead of hidden:
 

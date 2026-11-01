@@ -2,11 +2,13 @@
  * Host service ports. Implementations live in the adapter; the domain depends only on
  * these interfaces. Each one names the exact input and output types.
  */
+
 import type { ArtifactCandidate, ArtifactStore } from './artifacts.js'
 import type { Attention } from './attention.js'
 import type { CIFailureReason } from './ci.js'
 import type { BuiltEnvironment, EnvironmentDeclaration, RepositorySnapshot } from './environment.js'
 import type { MetricMap } from './metrics.js'
+import type { Program, UsageDelta } from './program.js'
 import type {
   BranchName,
   CIRunId,
@@ -91,3 +93,8 @@ export interface AttentionSink {
 }
 
 export type { ArtifactStore, Sampler }
+
+/** Only the Host records budget usage; the delta is monotonic and non-negative. */
+export interface UsageRecorder {
+  record(programId: ProgramId, delta: UsageDelta): Promise<Result<Program, DomainError>>
+}

@@ -3,7 +3,6 @@ import type { HostPrincipal, ImplementerPrincipal, IssueAssignment, ResearcherPr
 import type { ArtifactRef } from './artifacts.js'
 import type { FailedCICompletion, PassedCICompletion } from './ci.js'
 import type { EnvironmentDeclaration } from './environment.js'
-import type { MetricMap } from './metrics.js'
 import type { DomainError, Result, StoreError } from './errors.js'
 import type {
   BranchName,
@@ -70,8 +69,14 @@ export declare class OpenExperiment implements ExperimentCommon {
   readonly createdBy: ResearcherPrincipal
   readonly createdAt: IsoTimestamp
   /** Implementer marks the Experiment ready; the Ticket binding must match. */
-  submit(binding: TicketBinding, head: CommitSha, environment: EnvironmentDeclaration, at: IsoTimestamp): ReadyExperiment
-  cancel(actor: HostPrincipal, at: IsoTimestamp): ClosedExperiment
+  submit(
+    actor: ImplementerPrincipal,
+    binding: TicketBinding,
+    head: CommitSha,
+    environment: EnvironmentDeclaration,
+    at: IsoTimestamp,
+  ): Result<ReadyExperiment, DomainError>
+  cancel(actor: HostPrincipal, at: IsoTimestamp): Result<ClosedExperiment, DomainError>
 }
 
 export declare class ReadyExperiment implements ExperimentCommon {
@@ -90,9 +95,19 @@ export declare class ReadyExperiment implements ExperimentCommon {
   readonly createdAt: IsoTimestamp
   readonly readyAt: IsoTimestamp
   /** Only the Issue assignee may request CI; the Host mints the CI run id. */
-  requestCI(assignment: IssueAssignment, ciRunId: CIRunId, at: IsoTimestamp): CIPendingExperiment
-  revise(binding: TicketBinding, head: CommitSha, environment: EnvironmentDeclaration, at: IsoTimestamp): OpenExperiment
-  cancel(actor: HostPrincipal, at: IsoTimestamp): ClosedExperiment
+  requestCI(
+    assignment: IssueAssignment,
+    ciRunId: CIRunId,
+    at: IsoTimestamp,
+  ): Result<CIPendingExperiment, DomainError>
+  revise(
+    actor: ImplementerPrincipal,
+    binding: TicketBinding,
+    head: CommitSha,
+    environment: EnvironmentDeclaration,
+    at: IsoTimestamp,
+  ): Result<OpenExperiment, DomainError>
+  cancel(actor: HostPrincipal, at: IsoTimestamp): Result<ClosedExperiment, DomainError>
 }
 
 export declare class CIPendingExperiment implements ExperimentCommon {
@@ -112,7 +127,7 @@ export declare class CIPendingExperiment implements ExperimentCommon {
   readonly ciRunId: CIRunId
   readonly requestedAt: IsoTimestamp
   startCI(actor: HostPrincipal, digest: string, at: IsoTimestamp): CIRunningExperiment
-  cancel(actor: HostPrincipal, at: IsoTimestamp): ClosedExperiment
+  cancel(actor: HostPrincipal, at: IsoTimestamp): Result<ClosedExperiment, DomainError>
 }
 
 export declare class CIRunningExperiment implements ExperimentCommon {
@@ -134,9 +149,17 @@ export declare class CIRunningExperiment implements ExperimentCommon {
   readonly startedAt: IsoTimestamp
   readonly environmentDigest: string
   /** Evidence comes from a Host-minted completion token, not from a bare run object. */
-  passCI(actor: HostPrincipal, completion: PassedCICompletion, at: IsoTimestamp): CIPassedExperiment
-  failCI(actor: HostPrincipal, completion: FailedCICompletion, at: IsoTimestamp): CIFailedExperiment
-  cancel(actor: HostPrincipal, at: IsoTimestamp): ClosedExperiment
+  passCI(
+    actor: HostPrincipal,
+    completion: PassedCICompletion,
+    at: IsoTimestamp,
+  ): Result<CIPassedExperiment, DomainError>
+  failCI(
+    actor: HostPrincipal,
+    completion: FailedCICompletion,
+    at: IsoTimestamp,
+  ): Result<CIFailedExperiment, DomainError>
+  cancel(actor: HostPrincipal, at: IsoTimestamp): Result<ClosedExperiment, DomainError>
 }
 
 export declare class CIPassedExperiment implements ExperimentCommon {
@@ -157,10 +180,8 @@ export declare class CIPassedExperiment implements ExperimentCommon {
   readonly requestedAt: IsoTimestamp
   readonly startedAt: IsoTimestamp
   readonly environmentDigest: string
-  readonly metrics: MetricMap
-  readonly artifacts: readonly ArtifactRef[]
   readonly finishedAt: IsoTimestamp
-  close(assignment: IssueAssignment, reason: NonEmptyString, at: IsoTimestamp): ClosedExperiment
+  close(assignment: IssueAssignment, reason: NonEmptyString, at: IsoTimestamp): Result<ClosedExperiment, DomainError>
 }
 
 export declare class CIFailedExperiment implements ExperimentCommon {
@@ -184,8 +205,14 @@ export declare class CIFailedExperiment implements ExperimentCommon {
   readonly failureReason: FailedCICompletion['reason']
   readonly failureDetail: string
   readonly failedAt: IsoTimestamp
-  revise(binding: TicketBinding, head: CommitSha, environment: EnvironmentDeclaration, at: IsoTimestamp): OpenExperiment
-  close(assignment: IssueAssignment, reason: NonEmptyString, at: IsoTimestamp): ClosedExperiment
+  revise(
+    actor: ImplementerPrincipal,
+    binding: TicketBinding,
+    head: CommitSha,
+    environment: EnvironmentDeclaration,
+    at: IsoTimestamp,
+  ): Result<OpenExperiment, DomainError>
+  close(assignment: IssueAssignment, reason: NonEmptyString, at: IsoTimestamp): Result<ClosedExperiment, DomainError>
 }
 
 export declare class ClosedExperiment implements ExperimentCommon {
@@ -232,6 +259,6 @@ export interface ExperimentReview {
   readonly author: ResearcherPrincipal
   readonly body: NonEmptyString
   readonly at: IsoTimestamp
-  readonly kind: 'review' | 'ci-request'
+  readonly kind: 'review'
   readonly verdict: 'approve' | 'request-changes' | 'comment'
 }

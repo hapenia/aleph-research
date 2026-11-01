@@ -8,16 +8,11 @@ import type { ArtifactRef } from './artifacts.js'
 import type { Attention } from './attention.js'
 import type { AuditEntry } from './audit.js'
 import type { CIRecord } from './metrics.js'
-import type {
-  CIPendingExperiment,
-  ClosedExperiment,
-  Experiment,
-  ExperimentReview,
-  OpenExperiment,
-} from './experiment.js'
-import type { AssignedIssue, ClosedIssue, Issue, IssueComment, OpenIssue } from './issue.js'
+import type { Experiment } from './experiment.js'
+import type { Issue, IssueComment } from './issue.js'
 import type { ExplorationLevel, PausedProgram, Program, RunningProgram, StoppedProgram } from './program.js'
 import type { ActorOfCommand, CommandOf, CommandOutcome, CommandType } from './commands.js'
+import type { CommandExecutor } from './executor.js'
 import type { DomainError, DomainFailure, Result } from './errors.js'
 import type { ExperimentId, IssueId, NonEmptyString, NonEmptyArray, ProgramId } from './ids.js'
 
@@ -89,29 +84,20 @@ export interface RequestParsers {
   requestCI(input: unknown): Result<CommandOf<'ci.request'>, DomainError>
 }
 
-/** A route is a parser plus the command literal and actor it is allowed to produce. */
-export interface RouteSpec<K extends CommandType> {
-  readonly command: K
-  readonly actor: ActorOfCommand<K>
-  parse(input: unknown): Result<CommandOf<K>, DomainError>
+/**
+ * Every write route is an executor call with the command's own actor type. A handler
+ * cannot write state directly: it receives the executor and returns its typed outcome,
+ * and the HTTP layer only maps the outcome to a status.
+ */
+export type ApiWriteRoutes = {
+  readonly [K in CommandType]: (
+    executor: CommandExecutor,
+    actor: ActorOfCommand<K>,
+    input: unknown,
+  ) => Promise<CommandOutcome<K>>
 }
 
-/** Route surface; the actor parameter is the compile-time authorization. */
-export interface ManagementApi {
-  createProgram(actor: OperatorPrincipal, body: unknown): Promise<ApiResponse<RunningProgram>>
-  pauseProgram(actor: OperatorPrincipal, programId: ProgramId): Promise<ApiResponse<PausedProgram>>
-  resumeProgram(actor: OperatorPrincipal, programId: ProgramId): Promise<ApiResponse<RunningProgram>>
-  stopProgram(actor: OperatorPrincipal, programId: ProgramId): Promise<ApiResponse<StoppedProgram>>
-  setGoal(actor: OperatorPrincipal, programId: ProgramId, goal: NonEmptyString): Promise<ApiResponse<RunningProgram>>
-  setMethodology(actor: OperatorPrincipal, programId: ProgramId, methodology: NonEmptyString): Promise<ApiResponse<RunningProgram>>
-  setExploration(actor: OperatorPrincipal, programId: ProgramId, level: ExplorationLevel): Promise<ApiResponse<RunningProgram>>
-  createIssue(actor: OperatorPrincipal | ResearcherPrincipal, body: unknown): Promise<ApiResponse<OpenIssue>>
-  claimIssue(actor: ResearcherPrincipal, issueId: IssueId): Promise<ApiResponse<AssignedIssue>>
-  commentIssue(actor: OperatorPrincipal | ResearcherPrincipal, issueId: IssueId, body: unknown): Promise<ApiResponse<IssueComment>>
-  closeIssue(actor: OperatorPrincipal | ResearcherPrincipal, issueId: IssueId, body: unknown): Promise<ApiResponse<ClosedIssue>>
-  proposeExperiment(actor: ResearcherPrincipal, issueId: IssueId, body: unknown): Promise<ApiResponse<OpenExperiment>>
-  reviewExperiment(actor: ResearcherPrincipal, experimentId: ExperimentId, body: unknown): Promise<ApiResponse<ExperimentReview>>
-  closeExperiment(actor: ResearcherPrincipal, experimentId: ExperimentId, body: unknown): Promise<ApiResponse<ClosedExperiment>>
-  requestCI(actor: ResearcherPrincipal, experimentId: ExperimentId): Promise<ApiResponse<CIPendingExperiment>>
+/** The panel surface; read-only and the only non-write route family. */
+export interface PanelApi {
   snapshot(actor: Principal, programId: ProgramId): Promise<ApiResponse<ProgramSnapshot>>
 }

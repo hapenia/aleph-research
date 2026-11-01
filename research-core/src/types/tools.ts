@@ -93,4 +93,3 @@ export type ToolSetFor<P> = P extends OperatorPrincipal
         ? WatchdogTools
         : never
 
-export type ReviewTool = ToolDefinition<{ readonly experimentId: ExperimentId; readonly issueId: IssueId }, ExperimentReview>

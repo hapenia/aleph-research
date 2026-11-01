@@ -62,8 +62,17 @@ export declare class AssignedIssue implements IssueCommon {
   readonly experimentIds: readonly ExperimentId[]
   /** Runtime check: only the assignee gets a token. */
   authorize(actor: ResearcherPrincipal): Result<IssueAssignment, DomainError>
-  addExperiment(assignment: IssueAssignment, experimentId: ExperimentId, at: IsoTimestamp): AssignedIssue
-  close(assignment: IssueAssignment, resolution: IssueResolution, summary: NonEmptyString, at: IsoTimestamp): ClosedIssue
+  addExperiment(
+    assignment: IssueAssignment,
+    experimentId: ExperimentId,
+    at: IsoTimestamp,
+  ): Result<AssignedIssue, DomainError>
+  close(
+    assignment: IssueAssignment,
+    resolution: IssueResolution,
+    summary: NonEmptyString,
+    at: IsoTimestamp,
+  ): Result<ClosedIssue, DomainError>
 }
 
 export declare class ClosedIssue implements IssueCommon {

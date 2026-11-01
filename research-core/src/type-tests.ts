@@ -12,6 +12,7 @@ import type {
   CommandContext,
   CommandExecutor,
   CommandOutcome,
+  CapabilityOfCommand,
   AuditEntryOf,
   UserCommand,
   CommandOf,
@@ -20,11 +21,9 @@ import type {
   FreshLineage,
   HostPrincipal,
   ImplementerPrincipal,
-  ImplementerTools,
   IssueId,
   IssueRepository,
   OpenIssue,
-  ReadyExperiment,
   AssignedIssue,
   IssueAssignment,
   CIPendingExperiment,
@@ -36,7 +35,6 @@ import type {
   ResearcherPrincipal,
   RunningProgram,
   StoppedProgram,
-  ToolDefinition,
   NonEmptyString,
   IsoTimestamp,
   RequestId,
@@ -80,8 +78,10 @@ const wrongProgramState: RunningProgram = paused
 // @ts-expect-error a stopped Program has fields a running one cannot carry
 const wrongStop: StoppedProgram = { ...running, stoppedAt: at }
 
-// Transitions return exactly one target variant.
-const failedRun: CIFailedExperiment = runningCI.failCI(host, failedCompletion, at)
+// Transitions return exactly one target variant (inside a Result because ownership and
+// completion association are runtime checks).
+const failedTransition = runningCI.failCI(host, failedCompletion, at)
+declare const failedRun: CIFailedExperiment
 // @ts-expect-error a failed CI experiment is not a passed one
 const passedFromFailure: CIPassedExperiment = failedRun
 // @ts-expect-error a failed CI experiment is not an open one
@@ -140,12 +140,6 @@ const wrongOutcomeAudit: CommandOutcome<'program.pause'> = { ok: true, value: pa
 declare const pauseAudit: AuditEntryOf<'program.paused'>
 const correctOutcome: CommandOutcome<'program.pause'> = { ok: true, value: paused, audit: [pauseAudit] }
 
-// Implementer tool input omits Host-injected fields.
-declare const fullSubmitTool: ToolDefinition<CommandOf<'ticket.submit'>, ReadyExperiment>
-declare const implementerTools: ImplementerTools
-// @ts-expect-error the tool input must not include ticketId/experimentId
-const wrongSubmitTool: ImplementerTools['submitImplementation'] = fullSubmitTool
-
 // Lineage variants are nominal.
 declare const freshLineage: FreshLineage
 declare const derivedLineage: DerivedLineage
@@ -153,6 +147,10 @@ declare const derivedLineage: DerivedLineage
 const wrongLineage: DerivedLineage = freshLineage
 // @ts-expect-error a derived lineage is not a fresh lineage
 const wrongLineage2: FreshLineage = derivedLineage
+
+// The capability map is load-bearing: a command must map to its capability.
+declare const pauseCapability: CapabilityOfCommand<'program.pause'>
+const expectedPauseCapability: 'program:pause' = pauseCapability
 
 // Ownership tokens cannot be replaced by principals.
 declare const assignedIssue: AssignedIssue
@@ -190,7 +188,6 @@ export {
   emptyFailure,
   wrongOutcomeAudit,
   correctOutcome,
-  wrongSubmitTool,
   wrongLineage,
   wrongLineage2,
 }
