@@ -37,6 +37,7 @@
 | Watchdog | lab `wd-test8`：`aleph-watchdog` 会话、简报、状态无变化时跳过唤醒 |
 | smoke 性能 | 264.9s → 163.8s（PR #59）；退役后在 main 复测 91.4s 全绿 |
 | 旧插件退役 | PR #64：归档并在 CI/文档/脚本中移除 |
+| 真实案例 | `kunlungpt` 基线通过 Host 评测：score **79.77**（commit `3f8818c`，8 口井 / 79330 行），结果日志与 best 追踪已写入 |
 
 ## 测试
 
@@ -46,6 +47,6 @@
 
 ## 待完成
 
-- 真实案例从工单到评分的完整闭环与多轮改进。
-- 24 小时无人值守 soak（脚本已就绪：`scripts/superagent-soak.sh`）。
+- 真实案例的多轮改进：基线 79.77 已出分，soak 会按间隔继续发送改进工单。
+- 24 小时无人值守 soak 的完整窗口（已启动并持续采样 `case-1/soak.jsonl`）。
 - 文档、CHANGELOG 与版本号的最终收尾。

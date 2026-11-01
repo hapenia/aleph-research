@@ -259,7 +259,28 @@ restore file to /1; POST reload; GET version  -> research-extension/1 (applied c
 routes state/budget/results/version           -> 200 after every reload
 ```
 
-Not yet done: retirement of the old plugin's roles.
+### Full case
+
+The `kunlungpt` case runs on the composition end to end:
+
+```text
+request (confirmed) -> Eval accepted -> Ticket build-predict-baseline-e0c9efd5
+-> prepare with a 78 MB visible-data copy and the submission contract
+-> Worker wrote features.py, train.py, predict.py and experiments
+-> commit 3f8818c -> aleph_submit_result -> Host evaluation
+-> score 79.771049… (POR 0.762, PERM 0.901, SW 0.725; 8 wells, 79330 rows)
+-> results log + best tracking
+```
+
+The first attempt scored null because the case evaluator creates its scratch directory
+under `$ALEPH_WORKSPACE/.aleph` and the new wrapper did not create it; after the fix the
+same commit scored through the Host. `scripts/superagent-soak.sh` is sampling the run
+every five minutes and drives further improvement tickets when the queue is idle.
+
+### Retirement
+
+The old plugin, its skills and its scripts are archived and no longer take part in the
+runtime, configuration or CI.
 
 ## Next phases
 
