@@ -2151,6 +2151,22 @@ class ProjectService {
     try {
       await this.subagents.sendMessage(parent, record.childId, [{ type: 'text', text }], { signal: new AbortController().signal });
     } catch {
+      const leader = this.liveOrchestrator(project);
+      if (leader) {
+        // The recorded owner cannot be reached through its own parent; replace it under the Leader
+        // rather than leaving the project with a queue owner nobody can wake.
+        await this.mutate(projectId, (current) => ({
+          ...current,
+          agents: (current.agents ?? []).map((item) => (item.role === 'composer' && item.childId === record.childId
+            ? { ...item, status: 'failed', summary: 'replaced: its parent session could not wake it', updatedAt: now() }
+            : item)),
+        })).catch(() => undefined);
+        const restarted = await this.runComposer({ projectId, agent: leader }).catch(() => null);
+        if (restarted?.childId && this.subagents) {
+          await this.subagents.sendMessage(leader, restarted.childId, [{ type: 'text', text }], { signal: new AbortController().signal }).catch(() => undefined);
+          return { delivered: true, childId: restarted.childId, queued, restarted: true };
+        }
+      }
       await this.deliverOrQueue({ projectId, sessionId: record.childId, text }).catch(() => undefined);
       return { delivered: false, queued: true, childId: record.childId, reason: 'delivery failed; notice parked' };
     }
