@@ -6,7 +6,16 @@
  * the markers against this ledger; `npm run check:release` additionally fails while any
  * feature is still `'todo'` (type-level release gate).
  */
-export const COMPLETION_FEATURES = [
+export type CompletionFeature =
+  | 'experiment-to-ticket'
+  | 'implementer-ticket-execution'
+  | 'ci-evaluation-writeback'
+  | 'researcher-review-loop'
+  | 'researcher-session-tools'
+  | 'case-migration-live-run'
+  | 'sampler-wiring'
+
+export const COMPLETION_FEATURES: readonly CompletionFeature[] = [
   'experiment-to-ticket',
   'implementer-ticket-execution',
   'ci-evaluation-writeback',
@@ -14,9 +23,8 @@ export const COMPLETION_FEATURES = [
   'researcher-session-tools',
   'case-migration-live-run',
   'sampler-wiring',
-] as const
+]
 
-export type CompletionFeature = (typeof COMPLETION_FEATURES)[number]
 export type CompletionState = 'done' | 'todo'
 
 /** Every feature must be listed; missing keys are a compile error. */
