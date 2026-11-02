@@ -6,6 +6,7 @@ export type CompletionFeature =
   | 'researcher-session-tools'
   | 'case-migration-live-run'
   | 'sampler-wiring'
+  | 'wasm-core-loading'
 
 export const COMPLETION_FEATURES: readonly CompletionFeature[] = [
   'experiment-to-ticket',
@@ -15,6 +16,7 @@ export const COMPLETION_FEATURES: readonly CompletionFeature[] = [
   'researcher-session-tools',
   'case-migration-live-run',
   'sampler-wiring',
+  'wasm-core-loading',
 ]
 
 export type CompletionState = 'done' | 'todo'
@@ -27,6 +29,7 @@ export const COMPLETION: Readonly<Record<CompletionFeature, CompletionState>> = 
   'researcher-session-tools': 'todo',
   'case-migration-live-run': 'todo',
   'sampler-wiring': 'todo',
+  'wasm-core-loading': 'todo',
 }
 
 export function pendingFeatures(): readonly CompletionFeature[] {
