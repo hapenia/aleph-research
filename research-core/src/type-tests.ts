@@ -338,3 +338,14 @@ export {
   expectedCapabilities,
   expectedAuditActions,
 }
+
+// ---------------------------------------------------------------------------------------
+// Typed pipeline chain: a stage cannot accept the evidence of an earlier stage.
+// ---------------------------------------------------------------------------------------
+declare const researchPipeline: import('./pipeline.js').ResearchPipeline
+declare const proposedEvidence: import('./pipeline.js').ExperimentProposedEvidence
+// @ts-expect-error triggerToTicket requires TriggerAcceptedEvidence, not ExperimentProposedEvidence
+researchPipeline.triggerToTicket.run(proposedEvidence)
+declare const acceptedEvidence: import('./pipeline.js').TriggerAcceptedEvidence
+// @ts-expect-error ticketToWorker requires TicketCreatedEvidence
+researchPipeline.ticketToWorker.run(acceptedEvidence)
