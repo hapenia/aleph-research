@@ -1,30 +1,19 @@
-//! Plugin concepts that the TypeScript shell must implement.
-//!
-//! The Rust type system owns the plugin composition. A `Plugin` has associated
-//! Storage/Trigger/Ticket concepts; the flow entry point accepts only that trait, so a
-//! plugin missing a concept cannot be started. TypeScript supplies concrete adapters and
-//! generated wasm-bindgen declarations make a missing method a TypeScript error too.
 
 use crate::{PluginError, ExperimentProposed, TicketOpened, TriggerId, TicketId};
 
-/// Durable state/audit writes.
 pub trait Storage {
     fn save_program(&self, program_id: &str) -> Result<(), PluginError>;
     fn save_ticket(&self, ticket_id: &str) -> Result<(), PluginError>;
 }
 
-/// Delivery to the prototype Source Eval.
 pub trait TriggerSource {
     fn deliver_experiment(&self, experiment_id: &str) -> Result<TriggerId, PluginError>;
 }
 
-/// Implementer Ticket creation.
 pub trait TicketExecutor {
     fn open_ticket(&self, experiment_id: &str) -> Result<TicketId, PluginError>;
 }
 
-/// The complete plugin surface. All concepts are required; a partial implementation
-/// cannot satisfy the trait and therefore cannot call `run`.
 pub trait Plugin {
     type Storage: Storage;
     type Trigger: TriggerSource;
@@ -35,8 +24,6 @@ pub trait Plugin {
     fn ticket(&self) -> &Self::Ticket;
 }
 
-/// Wires the first three concepts. The only input is a complete plugin, so the Rust
-/// compiler rejects a plugin that is missing Storage, Trigger or Ticket.
 pub fn run<C: Plugin>(
     plugin: &C,
     proposed: ExperimentProposed,
@@ -59,33 +46,33 @@ mod tests {
     use super::*;
     use crate::{ExperimentId, IssueId, ProgramId};
 
-    struct Storage;
-    impl Storage for Storage {
+    struct MemoryStorage;
+    impl Storage for MemoryStorage {
         fn save_program(&self, _: &str) -> Result<(), PluginError> { Ok(()) }
         fn save_ticket(&self, _: &str) -> Result<(), PluginError> { Ok(()) }
     }
-    struct Trigger;
-    impl TriggerSource for Trigger {
+    struct TestTriggerSource;
+    impl TriggerSource for TestTriggerSource {
         fn deliver_experiment(&self, _: &str) -> Result<TriggerId, PluginError> {
             Ok(TriggerId("trigger".into()))
         }
     }
-    struct Ticket;
-    impl TicketExecutor for Ticket {
+    struct TestTicketExecutor;
+    impl TicketExecutor for TestTicketExecutor {
         fn open_ticket(&self, _: &str) -> Result<TicketId, PluginError> {
             Ok(TicketId("ticket".into()))
         }
     }
 
     struct FakePlugin {
-        storage: Storage,
-        trigger: Trigger,
-        ticket: Ticket,
+        storage: MemoryStorage,
+        trigger: TestTriggerSource,
+        ticket: TestTicketExecutor,
     }
     impl Plugin for FakePlugin {
-        type Storage = Storage;
-        type Trigger = Trigger;
-        type Ticket = Ticket;
+        type Storage = MemoryStorage;
+        type Trigger = TestTriggerSource;
+        type Ticket = TestTicketExecutor;
         fn storage(&self) -> &Self::Storage { &self.storage }
         fn trigger(&self) -> &Self::Trigger { &self.trigger }
         fn ticket(&self) -> &Self::Ticket { &self.ticket }
@@ -93,7 +80,7 @@ mod tests {
 
     #[test]
     fn a_complete_plugin_drives_the_chain() {
-        let plugin = FakePlugin { storage: Storage, trigger: Trigger, ticket: Ticket };
+        let plugin = FakePlugin { storage: MemoryStorage, trigger: TestTriggerSource, ticket: TestTicketExecutor };
         let proposed = ExperimentProposed::new(
             ProgramId("p".into()), IssueId("i".into()), ExperimentId("e".into()),
         ).unwrap();

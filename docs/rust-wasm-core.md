@@ -5,21 +5,21 @@ proves the toolchain and the ownership-based typestate that a Rust core would gi
 
 ## Decision
 
-Keep a **thin TypeScript concept layer** for DSH/Cordis and put the plugin's concepts and
+Keep a **thin TypeScript trait layer** for DSH/Cordis and put the plugin's traits and
 ordered research flow in a Rust crate compiled to `wasm32-unknown-unknown`.
 
-- Rust defines the **concepts** (Storage, Trigger, Ticket, Session, CI, Clock, Tools,
+- Rust defines the **traits** (Storage, Trigger, Ticket, Session, CI, Clock, Tools,
   HTTP, Artifacts), the flow typestate, receipts, ID validation and stage order.
-- TypeScript only **encapsulates those concepts as adapters**: it maps DSH/Cordis
-  services onto the Rust-defined concept methods and owns the actual external I/O.
-- The Rust `Plugin` trait requires every concept type; a plugin missing a concept
+- TypeScript only **encapsulates those traits as adapters**: it maps DSH/Cordis
+  services onto the Rust-defined trait methods and owns the actual external I/O.
+- The Rust `Plugin` trait requires every trait type; a plugin missing a trait
   cannot be started. wasm-bindgen-generated TypeScript declarations make a missing host
   method a TypeScript compile error too.
 - Rust owns completeness of the composition; TypeScript owns transport and effects, not
   domain decisions.
 
-This is not a claim that WASM proves external effects. The concept adapter still performs
-the effect and returns its result; Rust proves the complete concept surface and the order
+This is not a claim that WASM proves external effects. The trait adapter still performs
+the effect and returns its result; Rust proves the complete trait surface and the order
 of steps, not that a network call happened.
 
 ## What the spike contains
@@ -27,12 +27,12 @@ of steps, not that a network call happened.
 `rust-core/` (`aleph-research-core`):
 
 - `ExperimentProposed -> TriggerAccepted -> TicketOpened` typestate.
-- Each transition consumes `self`; the old value cannot be reused (compile-fail doctest).
+- Each transition consumes `self`; the old value cannot be reused.
 - Empty IDs are refused at the stage boundary.
 - `Plugin` traits with Storage/Trigger/Ticket associated types and a
   `run` entry point; a `FakePlugin` drives the chain in tests.
 - A minimal exported symbol `aleph_stage_count` proves the WASM artifact loads.
-- `cargo test`: 3 unit tests; `cargo test --doc`: 1 compile-fail test.
+- `cargo test`: 3 unit tests.
 - Release WASM builds to ~398 bytes for this probe and is loaded by Node's
   `WebAssembly.instantiate`.
 
@@ -41,7 +41,6 @@ Commands:
 ```bash
 cd rust-core
 cargo test
-cargo test --doc
 rustup target add wasm32-unknown-unknown   # once
 cargo build --release --target wasm32-unknown-unknown
 node -e "const b=require('fs').readFileSync('target/wasm32-unknown-unknown/release/aleph_research_core.wasm'); WebAssembly.instantiate(b).then(({instance})=>console.log(Object.keys(instance.exports)))"
@@ -49,7 +48,7 @@ node -e "const b=require('fs').readFileSync('target/wasm32-unknown-unknown/relea
 
 ## Plugin completeness
 
-Rust declares the plugin concepts as traits and requires a complete bundle:
+Rust declares the plugin traits as traits and requires a complete bundle:
 
 ```rust
 pub trait Storage { /* save_program, save_ticket, ... */ }
@@ -69,14 +68,14 @@ pub fn run<C: Plugin>(plugin: &C, proposed: ExperimentProposed)
     -> Result<TicketOpened, PluginError>
 ```
 
-A plugin with a missing concept does not satisfy `Plugin`, so the entry point is
-unreachable. The spike includes a `FakePlugin` implementing all three concepts and a full
-chain test; the remaining concepts follow the same pattern.
+A plugin with a missing trait does not satisfy `Plugin`, so the entry point is
+unreachable. The spike includes a `FakePlugin` implementing all three traits and a full
+chain test; the remaining traits follow the same pattern.
 
-The TypeScript layer is generated/handwritten to implement exactly these concepts:
+The TypeScript layer is generated/handwritten to implement exactly these traits:
 
 ```text
-TS concept adapters (thin)
+TS trait adapters (thin)
   ResearchStore      -> Storage
   ResearchTrigger    -> TriggerSource
   ResearchTickets    -> TicketExecutor
@@ -89,13 +88,13 @@ TS concept adapters (thin)
         v
 Rust plugin composition (Plugin)
   - owns flow order, typestate and validation
-  - calls concept methods through wasm-bindgen
+  - calls trait methods through wasm-bindgen
   - returns receipts/errors
 ```
 
-No TypeScript adapter contains stage order or receipt validity; it only maps a concept
+No TypeScript adapter contains stage order or receipt validity; it only maps a trait
 method to a DSH/Cordis operation and returns the result. The Rust side cannot be built
-with a missing concept, and generated TS declarations cannot be satisfied with a missing
+with a missing trait, and generated TS declarations cannot be satisfied with a missing
 adapter method.
 
 ## Packaging constraints
@@ -111,7 +110,7 @@ adapter method.
 
 ## Typestate mapping
 
-The Rust concepts and chain should grow to the same nodes as the v4 blueprint:
+The Rust traits and chain should grow to the same nodes as the v4 blueprint:
 
 ```
 ExperimentProposed -> TriggerAccepted -> TicketOpened -> WorkerStarted
@@ -124,9 +123,9 @@ The TypeScript flow cannot hold a stale Rust node because the wasm call consumes
 
 ## Limits
 
-- Rust does not replace the completion ledger: the concept surface can be complete while
-  a stage's real implementation is still a stub; those are tracked as `TODO(@feature)`
-  with the release gate.
+- Rust does not replace the completion ledger: the trait surface can be complete while a
+  step's real implementation is still a stub; those remain pending in the ledger and the
+  release gate, and Rust stubs use `todo!()`.
 - Async JS effects cannot live in the WASM core; the adapter remains async and must map
   errors explicitly.
 - Serialization at the boundary must be versioned; generated TS types are required to

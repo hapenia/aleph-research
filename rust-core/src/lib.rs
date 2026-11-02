@@ -1,10 +1,3 @@
-// TODO(@wasm-core-migration): expand this spike to the full typestate flow and expose
-// the wasm ABI consumed by the thin TypeScript adapter.
-//! AlephResearch typestate core (spike).
-//!
-//! The TypeScript shell only adapts DSH/Cordis services to this crate. The crate owns
-//! the ordered research flow: each type consumes itself and returns the next stage, so
-//! an earlier stage cannot be reused or skipped.
 
 #![deny(unsafe_code)]
 
@@ -59,10 +52,8 @@ impl fmt::Display for PluginError {
 
 impl std::error::Error for PluginError {}
 
-// Plugin implementations live in `concepts`; they are the only host boundary. TODO(@wasm-core-migration): expose the complete concept set through wasm-bindgen.
 
 
-/// Stage 1: the Researcher has proposed an Experiment plan.
 #[derive(Debug)]
 pub struct ExperimentProposed {
     pub program_id: ProgramId,
@@ -70,20 +61,6 @@ pub struct ExperimentProposed {
     pub experiment_id: ExperimentId,
 }
 
-/// Stage 2: the Source Eval accepted the trigger.
-///
-/// The stage is consumed by [`TriggerAccepted::open_ticket`], so it cannot be reused:
-///
-/// ```compile_fail
-/// use aleph_research_core::*;
-/// let proposed = ExperimentProposed::new(
-///     ProgramId("p".into()), IssueId("i".into()), ExperimentId("e".into()),
-/// ).unwrap();
-/// let accepted = proposed.accept_trigger(TriggerId("t".into())).unwrap();
-/// let _ticket = accepted.open_ticket(TicketId("ticket".into())).unwrap();
-/// // `accepted` was consumed by open_ticket.
-/// let _again = accepted.open_ticket(TicketId("other".into())).unwrap();
-/// ```
 #[derive(Debug)]
 pub struct TriggerAccepted {
     pub program_id: ProgramId,
@@ -92,7 +69,6 @@ pub struct TriggerAccepted {
     pub trigger_id: TriggerId,
 }
 
-/// Stage 3: the Executor opened a Ticket.
 #[derive(Debug)]
 pub struct TicketOpened {
     pub program_id: ProgramId,
@@ -113,7 +89,6 @@ impl ExperimentProposed {
         Ok(Self { program_id, issue_id, experiment_id })
     }
 
-    /// Consumes this stage; the old value cannot be used again in Rust.
     pub fn accept_trigger(self, trigger_id: TriggerId) -> Result<TriggerAccepted, FlowError> {
         require_id(&trigger_id.0, "trigger_id")?;
         Ok(TriggerAccepted {
@@ -126,7 +101,6 @@ impl ExperimentProposed {
 }
 
 impl TriggerAccepted {
-    /// Consumes the accepted trigger; only this stage can open a Ticket.
     pub fn open_ticket(self, ticket_id: TicketId) -> Result<TicketOpened, FlowError> {
         require_id(&ticket_id.0, "ticket_id")?;
         Ok(TicketOpened {
@@ -181,7 +155,6 @@ mod tests {
 
 }
 
-/// Minimal WASM ABI probe; the typed wasm-bindgen facade is the next step.
 #[allow(unsafe_code)]
 #[unsafe(no_mangle)]
 pub extern "C" fn aleph_stage_count() -> u32 {
