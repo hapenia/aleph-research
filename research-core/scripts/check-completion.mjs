@@ -13,7 +13,7 @@ if (features.size === 0) {
   process.exit(1)
 }
 
-const scanRoots = [join(root, 'src'), join(root, '..', 'superagent-extension')]
+const scanRoots = [join(root, 'src'), join(root, '..', 'superagent-extension'), join(root, '..', 'rust-core', 'src')]
 const skip = new Set(['node_modules', 'dist', '.git', 'test'])
 const problems = []
 const pending = []
@@ -27,7 +27,7 @@ async function walk(dir) {
     if (entry.name === 'completion.ts' || entry.name === 'release-gate.ts') continue
     const path = join(dir, entry.name)
     if (entry.isDirectory()) { await walk(path); continue }
-    if (!/\.(js|mjs|ts)$/.test(entry.name)) continue
+    if (!/\.(js|mjs|ts|rs)$/.test(entry.name)) continue
     const text = await readFile(path, 'utf8')
     for (const match of text.matchAll(/TODO\(@([a-z0-9-]+)\)/g)) {
       const feature = match[1]
