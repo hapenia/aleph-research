@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
 
+import { loadBundledCommandBridge } from '../research-core/dist/adapter/command-bridge.js'
+import { createCommandSurface } from '../research-core/dist/adapter/command-surface.js'
+import { createDshCommandStore } from '../research-core/dist/adapter/command-store.js'
 import { evaluateSubmission } from './evaluation.js'
 import { createDshCoreRuntime } from './research-core-runtime.js'
 import { bindCoreSurface, createSurfaceHandlers } from './research-core-surface.js'
@@ -153,6 +156,22 @@ export async function apply(ctx, config) {
     return
   }
   const runtime = created.value.runtime
+  const loadedCommandBridge = await loadBundledCommandBridge({
+    store: createDshCommandStore({ store, clock }),
+    clock: { now: () => clock.now() },
+  })
+  let commandSequence = 0
+  const commandId = (prefix) => {
+    commandSequence += 1
+    const stamp = String(clock.now()).replace(/[^A-Za-z0-9._-]/gu, '-')
+    return `${prefix}-${stamp}-${commandSequence}`
+  }
+  const commandSurface = loadedCommandBridge.ok
+    ? createCommandSurface({ bridge: loadedCommandBridge.value, newId: commandId })
+    : undefined
+  if (!loadedCommandBridge.ok) {
+    ctx.logger?.warn?.('aleph-research-core: the command bridge did not load: %s', loadedCommandBridge.error?.kind)
+  }
 
   const routes = new Map()
   const tools = []
@@ -164,6 +183,11 @@ export async function apply(ctx, config) {
 
   const handlers = createSurfaceHandlers({
     executeTool: (tool, input, context) => hostService.executeTool(tool, input, context),
+    executeCommand: commandSurface === undefined
+      ? undefined
+      : (name, input, actor) => (commandSurface.handles(name)
+        ? commandSurface.execute(name, input, actor)
+        : undefined),
     runtime,
     store,
     logger: ctx.logger,

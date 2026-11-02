@@ -3,8 +3,15 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
+use crate::command::{
+    Actor, ActorRole, ClaimIssue, CloseExperiment, CloseIssue, CommandDraft, CommandError,
+    CommandExecutor, CommandName, CommandOutcome, CommentIssue, CreateIssue, CreateProgram,
+    HostGate, PauseProgram, ProposeExperiment, RequestBenchmark, ResumeProgram, ReviewExperiment,
+    SetProgramExploration, SetProgramGoal, SetProgramMethodology, StopProgram, SubmitTicket,
+};
 use crate::domain::{
-    Artifact, BenchmarkRecord, BenchmarkSpec, Program, ResearcherDecision, Versioned,
+    Artifact, BenchmarkRecord, BenchmarkSpec, Experiment, Issue, Program, ResearcherDecision,
+    Ticket, Versioned,
 };
 use crate::error::{
     ArtifactError, BenchmarkError, ClockError, DomainError, HttpError, SessionError, StorageError,
@@ -12,7 +19,7 @@ use crate::error::{
 };
 use crate::id::{
     ArtifactId, BenchmarkRunId, BranchName, CommitSha, EnvironmentDigest, ExperimentId, IssueId,
-    PipelineRunId, ProgramId, SessionId, SpecHash, TicketId, TriggerId, Version,
+    PipelineRunId, ProgramId, RequestId, SessionId, SpecHash, TicketId, TriggerId, Version,
 };
 use crate::pipeline::run_pipeline;
 use crate::plugin::{
@@ -42,6 +49,14 @@ enum EffectName {
     StorageAppendBenchmarkRecord = 8,
     SessionsReview = 9,
     ClockNow = 10,
+    StorageSaveProgram = 11,
+    StorageLoadIssue = 12,
+    StorageSaveIssue = 13,
+    StorageLoadExperiment = 14,
+    StorageSaveExperiment = 15,
+    StorageLoadTicket = 16,
+    StorageSaveTicket = 17,
+    StorageAppendAudit = 18,
 }
 
 impl EffectName {
@@ -62,6 +77,14 @@ impl EffectName {
             8 => Some(Self::StorageAppendBenchmarkRecord),
             9 => Some(Self::SessionsReview),
             10 => Some(Self::ClockNow),
+            11 => Some(Self::StorageSaveProgram),
+            12 => Some(Self::StorageLoadIssue),
+            13 => Some(Self::StorageSaveIssue),
+            14 => Some(Self::StorageLoadExperiment),
+            15 => Some(Self::StorageSaveExperiment),
+            16 => Some(Self::StorageLoadTicket),
+            17 => Some(Self::StorageSaveTicket),
+            18 => Some(Self::StorageAppendAudit),
             _ => None,
         }
     }
@@ -79,6 +102,14 @@ impl EffectName {
             Self::StorageAppendBenchmarkRecord => "storage.appendBenchmarkRecord",
             Self::SessionsReview => "sessions.review",
             Self::ClockNow => "clock.now",
+            Self::StorageSaveProgram => "storage.saveProgram",
+            Self::StorageLoadIssue => "storage.loadIssue",
+            Self::StorageSaveIssue => "storage.saveIssue",
+            Self::StorageLoadExperiment => "storage.loadExperiment",
+            Self::StorageSaveExperiment => "storage.saveExperiment",
+            Self::StorageLoadTicket => "storage.loadTicket",
+            Self::StorageSaveTicket => "storage.saveTicket",
+            Self::StorageAppendAudit => "storage.appendAudit",
         }
     }
 }
@@ -87,6 +118,8 @@ impl EffectName {
 enum FailureKind {
     Rejected = 0,
     Unavailable = 1,
+    NotFound = 2,
+    Conflict = 3,
 }
 
 impl FailureKind {
@@ -94,6 +127,8 @@ impl FailureKind {
         match code {
             0 => Some(Self::Rejected),
             1 => Some(Self::Unavailable),
+            2 => Some(Self::NotFound),
+            3 => Some(Self::Conflict),
             _ => None,
         }
     }
@@ -114,9 +149,29 @@ struct Effect {
 
 type EffectResult = Result<Vec<u8>, HostFailure>;
 type PipelineFuture = Pin<Box<dyn Future<Output = Result<ResearchCompleted, DomainError>>>>;
+type CommandFuture =
+    Pin<Box<dyn Future<Output = (CommandName, Result<CommandOutcome, CommandError>)>>>;
 
-struct Run {
-    future: PipelineFuture,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunMode {
+    Pipeline,
+    Command,
+}
+
+enum Run {
+    Pipeline(PipelineFuture),
+    Command(CommandFuture),
+}
+
+enum Polled {
+    Pipeline(Poll<Result<ResearchCompleted, DomainError>>),
+    Command(Poll<(CommandName, Result<CommandOutcome, CommandError>)>),
+}
+
+struct CommandRequest {
+    request_id: RequestId,
+    actor: Actor,
+    draft: CommandDraft,
 }
 
 struct Resume {
@@ -134,6 +189,10 @@ thread_local! {
     static STAGE: Cell<StageName> = const { Cell::new(StageName::ExperimentProposed) };
     static TRACE: RefCell<Vec<StageName>> = const { RefCell::new(Vec::new()) };
     static ORDER_BROKEN: Cell<bool> = const { Cell::new(false) };
+    static MODE: Cell<RunMode> = const { Cell::new(RunMode::Pipeline) };
+    static AUDIT_ROLE: Cell<crate::command::ActorRole> = const {
+        Cell::new(crate::command::ActorRole::Operator)
+    };
 }
 
 pub const fn version() -> u32 {
@@ -145,13 +204,28 @@ pub fn start(request: &[u8]) -> Vec<u8> {
         Ok(initial) => initial,
         Err(_) => return frame_protocol("the start request is malformed"),
     };
-    reset();
+    reset(RunMode::Pipeline);
     RUN.with(|slot| {
-        *slot.borrow_mut() = Some(Run {
-            future: Box::pin(run_pipeline(&PLUGIN, initial)),
-        });
+        *slot.borrow_mut() = Some(Run::Pipeline(Box::pin(run_pipeline(&PLUGIN, initial))));
     });
     poll_frame()
+}
+
+pub fn start_command(request: &[u8]) -> Vec<u8> {
+    let request = match decode_command_request(request) {
+        Ok(request) => request,
+        Err(_) => return frame_protocol("the command request is malformed"),
+    };
+    reset(RunMode::Command);
+    AUDIT_ROLE.with(|role| role.set(request.actor.role()));
+    RUN.with(|slot| {
+        *slot.borrow_mut() = Some(Run::Command(Box::pin(execute_command(request))));
+    });
+    poll_frame()
+}
+
+pub fn resume_command(request: &[u8]) -> Vec<u8> {
+    resume(request)
 }
 
 pub fn resume(request: &[u8]) -> Vec<u8> {
@@ -176,7 +250,9 @@ pub fn resume(request: &[u8]) -> Vec<u8> {
     poll_frame()
 }
 
-fn reset() {
+fn reset(mode: RunMode) {
+    MODE.with(|cell| cell.set(mode));
+    AUDIT_ROLE.with(|role| role.set(ActorRole::Operator));
     RUN.with(|slot| *slot.borrow_mut() = None);
     EFFECT.with(|slot| *slot.borrow_mut() = None);
     RESPONSE.with(|slot| *slot.borrow_mut() = None);
@@ -196,25 +272,35 @@ fn poll_frame() -> Vec<u8> {
         let mut guard = slot.borrow_mut();
         let run = guard.as_mut()?;
         let mut context = Context::from_waker(Waker::noop());
-        Some(run.future.as_mut().poll(&mut context))
+        Some(match run {
+            Run::Pipeline(future) => Polled::Pipeline(future.as_mut().poll(&mut context)),
+            Run::Command(future) => Polled::Command(future.as_mut().poll(&mut context)),
+        })
     });
     match polled {
-        None => frame_protocol("no pipeline is running"),
-        Some(Poll::Ready(result)) => {
+        None => frame_protocol("no core run is active"),
+        Some(Polled::Pipeline(Poll::Ready(result))) => {
             RUN.with(|slot| *slot.borrow_mut() = None);
             match result {
                 Ok(completed) => frame_completed(&completed),
                 Err(error) => frame_domain(&error),
             }
         }
-        Some(Poll::Pending) => {
-            if ORDER_BROKEN.with(Cell::get) {
+        Some(Polled::Command(Poll::Ready((command, result)))) => {
+            RUN.with(|slot| *slot.borrow_mut() = None);
+            match result {
+                Ok(outcome) => frame_command_completed(&outcome),
+                Err(error) => frame_command_error(command, &error),
+            }
+        }
+        Some(Polled::Pipeline(Poll::Pending)) | Some(Polled::Command(Poll::Pending)) => {
+            if MODE.with(Cell::get) == RunMode::Pipeline && ORDER_BROKEN.with(Cell::get) {
                 RUN.with(|slot| *slot.borrow_mut() = None);
                 return frame_protocol("the pipeline left the declared stage order");
             }
             match take_effect() {
                 Some(effect) => frame_effect(&effect),
-                None => frame_protocol("the pipeline suspended without an effect"),
+                None => frame_protocol("the core suspended without an effect"),
             }
         }
     }
@@ -229,6 +315,9 @@ fn take_effect() -> Option<Effect> {
 }
 
 fn advance(stage: StageName) {
+    if MODE.with(Cell::get) != RunMode::Pipeline {
+        return;
+    }
     let current = STAGE.with(Cell::get);
     if !current.successors().contains(&stage) {
         ORDER_BROKEN.with(|cell| cell.set(true));
@@ -243,7 +332,12 @@ fn frame_effect(effect: &Effect) -> Vec<u8> {
     encoder.u8(0);
     encoder.u8(effect.name.code());
     encoder.u64(effect.sequence);
-    encoder.u8(STAGE.with(Cell::get).code() as u8);
+    let stage = if MODE.with(Cell::get) == RunMode::Pipeline {
+        STAGE.with(Cell::get).code() as u8
+    } else {
+        0
+    };
+    encoder.u8(stage);
     encoder.bytes(&effect.payload);
     encoder.finish()
 }
@@ -278,6 +372,23 @@ fn frame_domain(error: &DomainError) -> Vec<u8> {
     encoder.finish()
 }
 
+fn frame_command_completed(outcome: &CommandOutcome) -> Vec<u8> {
+    let mut encoder = Encoder::new();
+    encoder.u8(1);
+    wire::encode_command_outcome(&mut encoder, outcome);
+    encoder.finish()
+}
+
+fn frame_command_error(command: CommandName, error: &CommandError) -> Vec<u8> {
+    let mut encoder = Encoder::new();
+    encoder.u8(3);
+    encoder.u8(error.kind().code());
+    encoder.string(error.kind().as_str());
+    encoder.string(command.as_str());
+    encoder.string(&error.to_string());
+    encoder.finish()
+}
+
 fn decode_start(bytes: &[u8]) -> Result<ExperimentProposed, wire::DecodeError> {
     let mut decoder = Decoder::new(bytes);
     let program_id = ProgramId::new(decoder.string()?).map_err(|_| wire::DecodeError)?;
@@ -295,6 +406,57 @@ fn decode_start(bytes: &[u8]) -> Result<ExperimentProposed, wire::DecodeError> {
         base_commit,
         environment,
     ))
+}
+
+fn decode_command_request(bytes: &[u8]) -> Result<CommandRequest, wire::DecodeError> {
+    let mut decoder = Decoder::new(bytes);
+    let request_id = wire::decode_request_id(&mut decoder)?;
+    let actor = wire::decode_actor(&mut decoder)?;
+    let draft = wire::decode_command(&mut decoder)?;
+    decoder.finish()?;
+    Ok(CommandRequest {
+        request_id,
+        actor,
+        draft,
+    })
+}
+
+async fn execute_command(
+    request: CommandRequest,
+) -> (CommandName, Result<CommandOutcome, CommandError>) {
+    let command = request.draft.name();
+    let gate = HostGate::new(&PLUGIN);
+    let executor = CommandExecutor::new(&PLUGIN);
+    macro_rules! run {
+        ($kind:ty) => {{
+            let authorized = gate
+                .authorize::<$kind>(&request.actor, request.request_id.clone(), request.draft)
+                .await;
+            match authorized {
+                Ok(authorized) => executor.execute(authorized).await,
+                Err(error) => Err(error),
+            }
+        }};
+    }
+    let result = match command {
+        CommandName::CreateProgram => run!(CreateProgram),
+        CommandName::PauseProgram => run!(PauseProgram),
+        CommandName::ResumeProgram => run!(ResumeProgram),
+        CommandName::StopProgram => run!(StopProgram),
+        CommandName::SetProgramGoal => run!(SetProgramGoal),
+        CommandName::SetProgramMethodology => run!(SetProgramMethodology),
+        CommandName::SetProgramExploration => run!(SetProgramExploration),
+        CommandName::CreateIssue => run!(CreateIssue),
+        CommandName::ClaimIssue => run!(ClaimIssue),
+        CommandName::CommentIssue => run!(CommentIssue),
+        CommandName::CloseIssue => run!(CloseIssue),
+        CommandName::ProposeExperiment => run!(ProposeExperiment),
+        CommandName::ReviewExperiment => run!(ReviewExperiment),
+        CommandName::CloseExperiment => run!(CloseExperiment),
+        CommandName::RequestBenchmark => run!(RequestBenchmark),
+        CommandName::SubmitTicket => run!(SubmitTicket),
+    };
+    (command, result)
 }
 
 fn decode_resume(bytes: &[u8]) -> Result<Resume, wire::DecodeError> {
@@ -362,9 +524,16 @@ async fn host_request(name: EffectName, payload: Vec<u8>) -> EffectResult {
     .await
 }
 
-fn storage_failure(failure: HostFailure) -> StorageError {
-    StorageError::Unavailable {
-        detail: failure.message,
+fn storage_failure(failure: HostFailure, aggregate: crate::error::Aggregate) -> StorageError {
+    match failure.kind {
+        FailureKind::NotFound => StorageError::NotFound { aggregate },
+        FailureKind::Conflict => StorageError::Conflict {
+            expected: None,
+            actual: None,
+        },
+        FailureKind::Rejected | FailureKind::Unavailable => StorageError::Unavailable {
+            detail: failure.message,
+        },
     }
 }
 
@@ -373,9 +542,11 @@ fn trigger_failure(failure: HostFailure) -> TriggerError {
         FailureKind::Rejected => TriggerError::Rejected {
             detail: failure.message,
         },
-        FailureKind::Unavailable => TriggerError::Unavailable {
-            detail: failure.message,
-        },
+        FailureKind::Unavailable | FailureKind::NotFound | FailureKind::Conflict => {
+            TriggerError::Unavailable {
+                detail: failure.message,
+            }
+        }
     }
 }
 
@@ -384,9 +555,11 @@ fn ticket_failure(failure: HostFailure) -> TicketError {
         FailureKind::Rejected => TicketError::Rejected {
             detail: failure.message,
         },
-        FailureKind::Unavailable => TicketError::Unavailable {
-            detail: failure.message,
-        },
+        FailureKind::Unavailable | FailureKind::NotFound | FailureKind::Conflict => {
+            TicketError::Unavailable {
+                detail: failure.message,
+            }
+        }
     }
 }
 
@@ -395,9 +568,11 @@ fn session_failure(failure: HostFailure) -> SessionError {
         FailureKind::Rejected => SessionError::Rejected {
             detail: failure.message,
         },
-        FailureKind::Unavailable => SessionError::Unavailable {
-            detail: failure.message,
-        },
+        FailureKind::Unavailable | FailureKind::NotFound | FailureKind::Conflict => {
+            SessionError::Unavailable {
+                detail: failure.message,
+            }
+        }
     }
 }
 
@@ -406,9 +581,11 @@ fn benchmark_failure(failure: HostFailure) -> BenchmarkError {
         FailureKind::Rejected => BenchmarkError::Rejected {
             detail: failure.message,
         },
-        FailureKind::Unavailable => BenchmarkError::Unavailable {
-            detail: failure.message,
-        },
+        FailureKind::Unavailable | FailureKind::NotFound | FailureKind::Conflict => {
+            BenchmarkError::Unavailable {
+                detail: failure.message,
+            }
+        }
     }
 }
 
@@ -417,9 +594,11 @@ fn clock_failure(failure: HostFailure) -> ClockError {
         FailureKind::Rejected => ClockError::Rejected {
             detail: failure.message,
         },
-        FailureKind::Unavailable => ClockError::Unavailable {
-            detail: failure.message,
-        },
+        FailureKind::Unavailable | FailureKind::NotFound | FailureKind::Conflict => {
+            ClockError::Unavailable {
+                detail: failure.message,
+            }
+        }
     }
 }
 
@@ -454,6 +633,40 @@ fn decode_record(bytes: &[u8]) -> Result<BenchmarkRecord, wire::DecodeError> {
     let record = wire::decode_record(&mut decoder)?;
     decoder.finish()?;
     Ok(record)
+}
+
+fn decode_issue_bytes(bytes: &[u8]) -> Result<Versioned<Issue>, StorageError> {
+    let mut decoder = Decoder::new(bytes);
+    let issue = wire::decode_issue(&mut decoder).map_err(|_| StorageError::Unavailable {
+        detail: "the issue payload is malformed".to_string(),
+    })?;
+    decoder.finish().map_err(|_| StorageError::Unavailable {
+        detail: "the issue payload is malformed".to_string(),
+    })?;
+    Ok(issue)
+}
+
+fn decode_experiment_bytes(bytes: &[u8]) -> Result<Versioned<Experiment>, StorageError> {
+    let mut decoder = Decoder::new(bytes);
+    let experiment =
+        wire::decode_experiment(&mut decoder).map_err(|_| StorageError::Unavailable {
+            detail: "the experiment payload is malformed".to_string(),
+        })?;
+    decoder.finish().map_err(|_| StorageError::Unavailable {
+        detail: "the experiment payload is malformed".to_string(),
+    })?;
+    Ok(experiment)
+}
+
+fn decode_ticket_bytes(bytes: &[u8]) -> Result<Versioned<Ticket>, StorageError> {
+    let mut decoder = Decoder::new(bytes);
+    let ticket = wire::decode_ticket(&mut decoder).map_err(|_| StorageError::Unavailable {
+        detail: "the ticket payload is malformed".to_string(),
+    })?;
+    decoder.finish().map_err(|_| StorageError::Unavailable {
+        detail: "the ticket payload is malformed".to_string(),
+    })?;
+    Ok(ticket)
 }
 
 fn decode_decision(bytes: &[u8]) -> Result<ResearcherDecision, wire::DecodeError> {
@@ -512,7 +725,8 @@ impl Storage for BridgeStorage {
         let mut encoder = Encoder::new();
         encoder.string(id.as_str());
         let response = host_request(EffectName::StorageLoadProgram, encoder.finish()).await;
-        let bytes = response.map_err(storage_failure)?;
+        let bytes = response
+            .map_err(|failure| storage_failure(failure, crate::error::Aggregate::Program))?;
         decode_program(&bytes).map_err(|_| StorageError::Unavailable {
             detail: "the program payload is malformed".to_string(),
         })
@@ -520,69 +734,88 @@ impl Storage for BridgeStorage {
 
     async fn save_program(
         &self,
-        _program: &Program,
-        _expected: Option<Version>,
+        program: &Program,
+        expected: Option<Version>,
     ) -> Result<Version, StorageError> {
-        Err(StorageError::Unavailable {
-            detail: STORAGE_UNEXPOSED.to_string(),
-        })
+        let mut encoder = Encoder::new();
+        wire::encode_optional_version(&mut encoder, expected);
+        wire::encode_program_value(&mut encoder, program);
+        let response = host_request(EffectName::StorageSaveProgram, encoder.finish()).await;
+        let bytes = response
+            .map_err(|failure| storage_failure(failure, crate::error::Aggregate::Program))?;
+        decode_version(&bytes, "the program version is malformed")
     }
 
-    async fn load_issue(
-        &self,
-        _id: &IssueId,
-    ) -> Result<Versioned<crate::domain::Issue>, StorageError> {
-        Err(StorageError::Unavailable {
-            detail: STORAGE_UNEXPOSED.to_string(),
-        })
+    async fn load_issue(&self, id: &IssueId) -> Result<Versioned<Issue>, StorageError> {
+        let mut encoder = Encoder::new();
+        encoder.string(id.as_str());
+        let response = host_request(EffectName::StorageLoadIssue, encoder.finish()).await;
+        let bytes =
+            response.map_err(|failure| storage_failure(failure, crate::error::Aggregate::Issue))?;
+        decode_issue_bytes(&bytes)
     }
 
     async fn save_issue(
         &self,
-        _issue: &crate::domain::Issue,
-        _expected: Option<Version>,
+        issue: &Issue,
+        expected: Option<Version>,
     ) -> Result<Version, StorageError> {
-        Err(StorageError::Unavailable {
-            detail: STORAGE_UNEXPOSED.to_string(),
-        })
+        let mut encoder = Encoder::new();
+        wire::encode_optional_version(&mut encoder, expected);
+        wire::encode_issue_value(&mut encoder, issue);
+        let response = host_request(EffectName::StorageSaveIssue, encoder.finish()).await;
+        let bytes =
+            response.map_err(|failure| storage_failure(failure, crate::error::Aggregate::Issue))?;
+        decode_version(&bytes, "the issue version is malformed")
     }
 
     async fn load_experiment(
         &self,
-        _id: &ExperimentId,
-    ) -> Result<Versioned<crate::domain::Experiment>, StorageError> {
-        Err(StorageError::Unavailable {
-            detail: STORAGE_UNEXPOSED.to_string(),
-        })
+        id: &ExperimentId,
+    ) -> Result<Versioned<Experiment>, StorageError> {
+        let mut encoder = Encoder::new();
+        encoder.string(id.as_str());
+        let response = host_request(EffectName::StorageLoadExperiment, encoder.finish()).await;
+        let bytes = response
+            .map_err(|failure| storage_failure(failure, crate::error::Aggregate::Experiment))?;
+        decode_experiment_bytes(&bytes)
     }
 
     async fn save_experiment(
         &self,
-        _experiment: &crate::domain::Experiment,
-        _expected: Option<Version>,
+        experiment: &Experiment,
+        expected: Option<Version>,
     ) -> Result<Version, StorageError> {
-        Err(StorageError::Unavailable {
-            detail: STORAGE_UNEXPOSED.to_string(),
-        })
+        let mut encoder = Encoder::new();
+        wire::encode_optional_version(&mut encoder, expected);
+        wire::encode_experiment_value(&mut encoder, experiment);
+        let response = host_request(EffectName::StorageSaveExperiment, encoder.finish()).await;
+        let bytes = response
+            .map_err(|failure| storage_failure(failure, crate::error::Aggregate::Experiment))?;
+        decode_version(&bytes, "the experiment version is malformed")
     }
 
-    async fn load_ticket(
-        &self,
-        _id: &TicketId,
-    ) -> Result<Versioned<crate::domain::Ticket>, StorageError> {
-        Err(StorageError::Unavailable {
-            detail: STORAGE_UNEXPOSED.to_string(),
-        })
+    async fn load_ticket(&self, id: &TicketId) -> Result<Versioned<Ticket>, StorageError> {
+        let mut encoder = Encoder::new();
+        encoder.string(id.as_str());
+        let response = host_request(EffectName::StorageLoadTicket, encoder.finish()).await;
+        let bytes = response
+            .map_err(|failure| storage_failure(failure, crate::error::Aggregate::Ticket))?;
+        decode_ticket_bytes(&bytes)
     }
 
     async fn save_ticket(
         &self,
-        _ticket: &crate::domain::Ticket,
-        _expected: Option<Version>,
+        ticket: &Ticket,
+        expected: Option<Version>,
     ) -> Result<Version, StorageError> {
-        Err(StorageError::Unavailable {
-            detail: STORAGE_UNEXPOSED.to_string(),
-        })
+        let mut encoder = Encoder::new();
+        wire::encode_optional_version(&mut encoder, expected);
+        wire::encode_ticket_value(&mut encoder, ticket);
+        let response = host_request(EffectName::StorageSaveTicket, encoder.finish()).await;
+        let bytes = response
+            .map_err(|failure| storage_failure(failure, crate::error::Aggregate::Ticket))?;
+        decode_version(&bytes, "the ticket version is malformed")
     }
 
     async fn append_benchmark_record(&self, record: &BenchmarkRecord) -> Result<(), StorageError> {
@@ -590,7 +823,9 @@ impl Storage for BridgeStorage {
         wire::encode_record(&mut encoder, record);
         let response =
             host_request(EffectName::StorageAppendBenchmarkRecord, encoder.finish()).await;
-        let bytes = response.map_err(storage_failure)?;
+        let bytes = response.map_err(|failure| {
+            storage_failure(failure, crate::error::Aggregate::BenchmarkRecord)
+        })?;
         expect_empty(&bytes).map_err(|_| StorageError::Unavailable {
             detail: "the append payload is malformed".to_string(),
         })?;
@@ -630,11 +865,34 @@ impl Storage for BridgeStorage {
         })
     }
 
-    async fn append_audit(&self, _entry: &crate::domain::AuditEntry) -> Result<(), StorageError> {
-        Err(StorageError::Unavailable {
-            detail: STORAGE_UNEXPOSED.to_string(),
+    async fn append_audit(&self, entry: &crate::domain::AuditEntry) -> Result<(), StorageError> {
+        let mut encoder = Encoder::new();
+        encoder.u8(match AUDIT_ROLE.with(Cell::get) {
+            crate::command::ActorRole::Operator => 0,
+            crate::command::ActorRole::Researcher => 1,
+            crate::command::ActorRole::Implementer => 2,
+        });
+        wire::encode_audit_entry(&mut encoder, entry);
+        let response = host_request(EffectName::StorageAppendAudit, encoder.finish()).await;
+        let bytes =
+            response.map_err(|failure| storage_failure(failure, crate::error::Aggregate::Audit))?;
+        expect_empty(&bytes).map_err(|_| StorageError::Unavailable {
+            detail: "the audit payload is malformed".to_string(),
         })
     }
+}
+
+fn decode_version(bytes: &[u8], message: &str) -> Result<Version, StorageError> {
+    let mut decoder = Decoder::new(bytes);
+    let version = decoder.u64().map_err(|_| StorageError::Unavailable {
+        detail: message.to_string(),
+    })?;
+    decoder.finish().map_err(|_| StorageError::Unavailable {
+        detail: message.to_string(),
+    })?;
+    Version::new(version).map_err(|_| StorageError::Unavailable {
+        detail: message.to_string(),
+    })
 }
 
 impl TriggerSource for BridgeTrigger {
@@ -1005,6 +1263,193 @@ mod tests {
         let mut decoder = Decoder::new(&frame);
         assert_eq!(decoder.u8().unwrap(), 3);
         assert!(decoder.string().unwrap().contains("rejected"));
+        decoder.finish().unwrap();
+    }
+
+    use crate::command::{Actor, CreateProgramCommand, PauseProgramCommand};
+    use crate::id::ActorId;
+
+    fn operator_actor() -> Actor {
+        Actor::operator(ActorId::new("operator-1").unwrap())
+    }
+
+    fn implementer_actor() -> Actor {
+        Actor::implementer(
+            ActorId::new("implementer-1").unwrap(),
+            SessionId::new("session-1").unwrap(),
+        )
+    }
+
+    fn create_program_command() -> CommandDraft {
+        let fixture = program();
+        CommandDraft::CreateProgram(Box::new(CreateProgramCommand {
+            id: ProgramId::new("program-1").unwrap(),
+            name: "Program".to_string(),
+            goal: "Improve the benchmark".to_string(),
+            methodology: "Propose, run, review".to_string(),
+            benchmark: fixture.value().benchmark().clone(),
+            utility: fixture.value().utility().to_vec(),
+            exploration: Exploration::Normal,
+            policy: ResearchPolicy::default(),
+        }))
+    }
+
+    fn command_request(actor: &Actor, draft: &CommandDraft) -> Vec<u8> {
+        let mut encoder = Encoder::new();
+        wire::encode_request_id(&mut encoder, &RequestId::new("request-1").unwrap());
+        wire::encode_actor(&mut encoder, actor);
+        wire::encode_command(&mut encoder, draft);
+        encoder.finish()
+    }
+
+    fn command_effect_frame(frame: &[u8]) -> (EffectName, u64, Vec<u8>) {
+        let mut decoder = Decoder::new(frame);
+        assert_eq!(decoder.u8().unwrap(), 0);
+        let effect = EffectName::from_code(decoder.u8().unwrap()).unwrap();
+        let sequence = decoder.u64().unwrap();
+        let _stage = decoder.u8().unwrap();
+        let payload = decoder.bytes().unwrap().to_vec();
+        decoder.finish().unwrap();
+        (effect, sequence, payload)
+    }
+
+    fn resume_value(sequence: u64, effect: EffectName, value: &[u8]) -> Vec<u8> {
+        let mut encoder = Encoder::new();
+        encoder.u64(sequence);
+        encoder.u8(effect.code());
+        encoder.u8(0);
+        encoder.bytes(value);
+        encoder.finish()
+    }
+
+    fn resume_failure_kind(
+        sequence: u64,
+        effect: EffectName,
+        kind: FailureKind,
+        message: &str,
+    ) -> Vec<u8> {
+        let mut encoder = Encoder::new();
+        encoder.u64(sequence);
+        encoder.u8(effect.code());
+        encoder.u8(1);
+        encoder.u8(kind as u8);
+        encoder.string(message);
+        encoder.finish()
+    }
+
+    fn version_bytes(version: u64) -> Vec<u8> {
+        let mut encoder = Encoder::new();
+        encoder.u64(version);
+        encoder.finish()
+    }
+
+    fn timestamp_bytes() -> Vec<u8> {
+        let mut encoder = Encoder::new();
+        wire::encode_timestamp(
+            &mut encoder,
+            Timestamp::parse("2026-01-01T00:00:00.000Z").unwrap(),
+        );
+        encoder.finish()
+    }
+
+    #[test]
+    fn a_command_without_capability_is_refused_without_effects() {
+        let draft = CommandDraft::PauseProgram(Box::new(PauseProgramCommand {
+            program_id: ProgramId::new("program-1").unwrap(),
+        }));
+        let frame = start_command(&command_request(&implementer_actor(), &draft));
+        let mut decoder = Decoder::new(&frame);
+        assert_eq!(decoder.u8().unwrap(), 3);
+        assert_eq!(decoder.u8().unwrap(), 2);
+        assert_eq!(decoder.string().unwrap(), "forbidden");
+        assert_eq!(decoder.string().unwrap(), "program.pause");
+        assert!(decoder.string().unwrap().contains("lacks capability"));
+        decoder.finish().unwrap();
+    }
+
+    #[test]
+    fn a_malformed_command_request_is_refused() {
+        let frame = start_command(&[255]);
+        let mut decoder = Decoder::new(&frame);
+        assert_eq!(decoder.u8().unwrap(), 2);
+        assert!(decoder.string().unwrap().contains("malformed"));
+        decoder.finish().unwrap();
+    }
+
+    #[test]
+    fn an_authorized_command_runs_the_effect_protocol() {
+        let frame = start_command(&command_request(
+            &operator_actor(),
+            &create_program_command(),
+        ));
+        let (effect, sequence, payload) = command_effect_frame(&frame);
+        assert_eq!(effect, EffectName::StorageLoadProgram);
+        let mut decoder = Decoder::new(&payload);
+        assert_eq!(decoder.string().unwrap(), "program-1");
+        decoder.finish().unwrap();
+
+        let frame = resume_command(&resume_failure_kind(
+            sequence,
+            effect,
+            FailureKind::NotFound,
+            "program is absent",
+        ));
+        let (effect, sequence, _) = command_effect_frame(&frame);
+        assert_eq!(effect, EffectName::ClockNow);
+
+        let frame = resume_command(&resume_value(sequence, effect, &timestamp_bytes()));
+        let (effect, sequence, payload) = command_effect_frame(&frame);
+        assert_eq!(effect, EffectName::StorageSaveProgram);
+        let mut decoder = Decoder::new(&payload);
+        assert_eq!(decoder.u8().unwrap(), 0);
+        let program = wire::decode_program_value(&mut decoder).unwrap();
+        assert_eq!(program.id().as_str(), "program-1");
+        assert_eq!(program.owner().as_str(), "operator-1");
+        decoder.finish().unwrap();
+
+        let frame = resume_command(&resume_value(sequence, effect, &version_bytes(1)));
+        let (effect, sequence, _) = command_effect_frame(&frame);
+        assert_eq!(effect, EffectName::ClockNow);
+
+        let frame = resume_command(&resume_value(sequence, effect, &timestamp_bytes()));
+        let (effect, sequence, payload) = command_effect_frame(&frame);
+        assert_eq!(effect, EffectName::StorageAppendAudit);
+        let mut decoder = Decoder::new(&payload);
+        assert_eq!(decoder.u8().unwrap(), 0);
+        let _audit_id = decoder.string().unwrap();
+        assert_eq!(decoder.string().unwrap(), "operator-1");
+        assert_eq!(decoder.string().unwrap(), "program.create");
+        assert_eq!(decoder.string().unwrap(), "program:program-1");
+        let _detail = decoder.string().unwrap();
+        assert_eq!(decoder.string().unwrap(), "request-1");
+        let _timestamp = decoder.string().unwrap();
+        decoder.finish().unwrap();
+
+        let frame = resume_command(&resume_value(sequence, effect, &[]));
+        let mut decoder = Decoder::new(&frame);
+        assert_eq!(decoder.u8().unwrap(), 1);
+        assert_eq!(decoder.u8().unwrap(), 0);
+        assert_eq!(decoder.string().unwrap(), "program-1");
+        assert_eq!(decoder.u64().unwrap(), 1);
+        decoder.finish().unwrap();
+    }
+
+    #[test]
+    fn a_tampered_resume_cannot_continue_a_command() {
+        let draft = CommandDraft::PauseProgram(Box::new(PauseProgramCommand {
+            program_id: ProgramId::new("program-1").unwrap(),
+        }));
+        let frame = start_command(&command_request(&operator_actor(), &draft));
+        let (effect, sequence, _) = command_effect_frame(&frame);
+        assert_eq!(effect, EffectName::StorageLoadProgram);
+        let frame = resume_command(&resume_value(
+            sequence,
+            EffectName::StorageSaveProgram,
+            &version_bytes(1),
+        ));
+        let mut decoder = Decoder::new(&frame);
+        assert_eq!(decoder.u8().unwrap(), 2);
+        assert!(decoder.string().unwrap().contains("expected"));
         decoder.finish().unwrap();
     }
 }

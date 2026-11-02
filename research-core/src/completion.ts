@@ -32,7 +32,7 @@ export const COMPLETION: Readonly<Record<CompletionFeature, CompletionState>> = 
   'case-migration-live-run': 'todo',
   'sampler-wiring': 'todo',
   'wasm-core-loading': 'done',
-  'rust-command-bridge': 'todo',
+  'rust-command-bridge': 'done',
 }
 
 export function pendingFeatures(): readonly CompletionFeature[] {

@@ -120,6 +120,24 @@ pub extern "C" fn aleph_resume(pointer: *const u8, length: usize) -> u32 {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn aleph_command_start(pointer: *const u8, length: usize) -> u32 {
+    let Some(request) = input(pointer, length) else {
+        return 0;
+    };
+    respond(crate::bridge::start_command(request));
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn aleph_command_resume(pointer: *const u8, length: usize) -> u32 {
+    let Some(request) = input(pointer, length) else {
+        return 0;
+    };
+    respond(crate::bridge::resume_command(request));
+    1
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn aleph_response_len() -> u32 {
     RESPONSE.with(|buffer| buffer.borrow().len() as u32)
 }

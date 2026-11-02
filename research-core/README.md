@@ -1,13 +1,16 @@
-# AlephResearch core: type blueprint v3.1
+# AlephResearch core
 
-Types only, with compile-time negative tests, ESLint/ast-grep boundary rules and a
-mutation harness. No runtime implementation lives here yet.
+The typed research runtime, the wasm effect bridge and the thin adapter over the
+DSH storage domain. The TypeScript adapter owns DSH mechanics; the wasm core
+owns commands, authorization, pipeline order and stage transitions.
 
 ```bash
 npm install
+npm run build:wasm
 npm run typecheck
 npm run lint
-npm run test:mutation
+npm test
+npm run check:wasm
 ```
 
 The design, the mechanism and the review responses are in `docs/type-blueprint.md`; the
