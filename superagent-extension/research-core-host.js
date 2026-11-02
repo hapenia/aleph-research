@@ -8,7 +8,7 @@ import { createDshCoreRuntime } from './research-core-runtime.js'
 import { bindCoreSurface, createSurfaceHandlers } from './research-core-surface.js'
 
 export const name = 'aleph-research-core-host'
-export const inject = ['webServer', 'tools']
+export const inject = ['webServer', 'tools', 'alephResearchHost', 'alephResearchSessions']
 
 const SERVICE_NAME = 'alephResearchCore'
 const HOST_SERVICE_NAME = 'alephResearchHost'
@@ -91,7 +91,12 @@ const benchmarkRecordOf = (request, outcome, specHash, environmentDigest, at) =>
 
 const benchmarkOf = (config, clock, fallbackSpecHash) => {
   const settings = isRecord(config.benchmark) ? config.benchmark : {}
-  const command = typeof config.evalCommand === 'string' ? config.evalCommand : ''
+  const command = typeof config.evalCommand === 'string' && config.evalCommand.length > 0
+    ? config.evalCommand
+    : (typeof process.env.ALEPH_EVAL_COMMAND === 'string' ? process.env.ALEPH_EVAL_COMMAND : '')
+  const cwd = typeof config.cwd === 'string' && config.cwd.length > 0
+    ? config.cwd
+    : (typeof process.env.ALEPH_EVAL_CWD === 'string' ? process.env.ALEPH_EVAL_CWD : process.cwd())
   return {
     async specHash(spec) {
       if (typeof settings.specHash === 'function') return settings.specHash(spec)
@@ -110,7 +115,7 @@ const benchmarkOf = (config, clock, fallbackSpecHash) => {
       }
       const outcome = await evaluateSubmission({
         command,
-        cwd: typeof config.cwd === 'string' ? config.cwd : process.cwd(),
+        cwd,
         timeoutMs: Number(request.spec.timeoutMs),
         python: typeof config.python === 'string' ? config.python : '',
       })
@@ -263,6 +268,10 @@ export async function apply(ctx, config) {
         return
       }
       if (req.method === 'GET') {
+        if (url.pathname === `${API_PREFIX}/health`) {
+          sendJson(res, 200, { ok: true, version: 'research-core/1', persistent: true })
+          return
+        }
         const programPath = `${API_PREFIX}/programs`
         if (url.pathname === programPath) {
           const programs = await listPrograms(host)

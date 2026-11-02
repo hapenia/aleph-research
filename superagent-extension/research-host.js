@@ -1354,6 +1354,14 @@ export const apply = async (ctx, config) => {
     )
   }
 
+  if (settings.routes === false) {
+    ctx.logger?.info?.(
+      'aleph-research-host ready without routes (persistent: %s, service: %s)',
+      String(persistent),
+      String(service !== null),
+    )
+    return
+  }
   registerRoutes(ctx, composed, actorKinds, maxBodyBytes, persistent, routeDisposers)
   ctx.logger?.info?.(
     'aleph-research-host ready: %d research routes (persistent: %s, service: %s)',

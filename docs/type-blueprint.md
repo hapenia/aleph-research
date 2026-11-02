@@ -41,6 +41,12 @@ benchmark.
 Autonomy is therefore bounded and auditable: the agent chooses hypotheses and
 implementations, while the benchmark and budget define success.
 
+## Live validation boundary
+
+The implementation is validated by a real DSH lab with the embedded wasm, the real
+command bridge and a synthetic benchmark command. The actual 24-hour case run is out of
+scope: it is an acceptance run for the framework, not an implementation step.
+
 ## Out of scope
 
 The old Boltzmann sampler, quota, merge and best-result tracker are not part of this

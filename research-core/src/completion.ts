@@ -4,7 +4,6 @@ export type CompletionFeature =
   | 'benchmark-evaluation-writeback'
   | 'researcher-review-loop'
   | 'researcher-session-tools'
-  | 'case-migration-live-run'
   | 'wasm-core-loading'
   | 'rust-command-bridge'
 
@@ -14,26 +13,32 @@ export const COMPLETION_FEATURES: readonly CompletionFeature[] = [
   'benchmark-evaluation-writeback',
   'researcher-review-loop',
   'researcher-session-tools',
-  'case-migration-live-run',
   'wasm-core-loading',
   'rust-command-bridge',
 ]
 
 export type CompletionState = 'done' | 'todo'
 
-export const COMPLETION: Readonly<Record<CompletionFeature, CompletionState>> = {
+const completion = <L extends Readonly<Record<CompletionFeature, CompletionState>>>(ledger: L): L => ledger
+
+export const COMPLETION = completion({
   'experiment-to-ticket': 'done',
   'implementer-ticket-execution': 'done',
   'benchmark-evaluation-writeback': 'done',
   'researcher-review-loop': 'done',
   'researcher-session-tools': 'done',
-  'case-migration-live-run': 'todo',
   'wasm-core-loading': 'done',
   'rust-command-bridge': 'done',
+})
+
+const COMPLETION_STATES: Readonly<Record<CompletionFeature, CompletionState>> = COMPLETION
+
+function isPending(feature: CompletionFeature): boolean {
+  return COMPLETION_STATES[feature] === 'todo'
 }
 
 export function pendingFeatures(): readonly CompletionFeature[] {
-  return COMPLETION_FEATURES.filter((feature) => COMPLETION[feature] === 'todo')
+  return COMPLETION_FEATURES.filter(isPending)
 }
 
 export type DoneLedger = { readonly [K in CompletionFeature]: 'done' }

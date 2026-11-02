@@ -89,4 +89,4 @@ Features that are not wired end to end are listed as `'todo'` in
 in `verify.sh` and CI. `npm run check:release` compiles `src/release-gate.ts` and fails
 while any feature remains `'todo'`, so a release cannot ignore the gap. The current
 pending features are the experiment-to-ticket path, implementer execution, CI writeback,
-researcher review, session tools, live case migration and the Rust command bridge.
+researcher review, session tools, the Rust command bridge; an actual 24-hour case run is out of scope for this implementation.

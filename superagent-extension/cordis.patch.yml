@@ -17,9 +17,9 @@
     - id: aleph-research-host
       name: '@local/dsh-aleph-superagent/research-host'
       config:
-        # A test deployment needs the Operator to create Programs/Issues and a
-        # Researcher principal to claim an Issue and propose an Experiment. The
-        # production composition should narrow this to the sessions it really mounts.
+        # The core host owns the research routes; this legacy host only provides the
+        # service/store seam the core host and trigger bridge read.
+        routes: false
         actorKinds: ["operator", "researcher"]
     # The trigger bridge delivers typed research trigger drafts to the prototype
     # Source's Eval path. It reads the optional host service late-bound.
@@ -34,8 +34,6 @@
       name: '@local/dsh-aleph-superagent/research-sessions'
     - id: aleph-research-core-host
       name: '@local/dsh-aleph-superagent/research-core-host'
-    - id: aleph-research-tools
-      name: '@local/dsh-aleph-superagent/research-tools'
     # The Watchdog Session is its own agent preset: it receives periodic briefs and
     # may stop or retry a stuck ticket. Not offered for manual selection.
     - id: aleph-watchdog-preset
