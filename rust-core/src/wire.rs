@@ -6,8 +6,8 @@ use crate::domain::{
     ResearchPolicy, ResearcherDecision, StopReason, Usage, Versioned,
 };
 use crate::id::{
-    BenchmarkRunId, BenchmarkSpecId, CommitSha, EnvironmentDigest, EnvironmentFile, ExperimentId,
-    ProgramId, SpecHash, TicketId, Version,
+    ActorId, BenchmarkRunId, BenchmarkSpecId, CommitSha, EnvironmentDigest, EnvironmentFile,
+    ExperimentId, ProgramId, SpecHash, TicketId, Version,
 };
 use crate::time::Timestamp;
 
@@ -346,6 +346,7 @@ pub fn encode_program(encoder: &mut Encoder, versioned: &Versioned<Program>) {
     let program = versioned.value();
     encoder.u64(versioned.version().get());
     encoder.string(program.id().as_str());
+    encoder.string(program.owner().as_str());
     encoder.string(program.name());
     encoder.string(program.goal());
     encoder.string(program.methodology());
@@ -381,6 +382,7 @@ pub fn encode_program(encoder: &mut Encoder, versioned: &Versioned<Program>) {
 pub fn decode_program(decoder: &mut Decoder<'_>) -> Result<Versioned<Program>, DecodeError> {
     let version = Version::new(decoder.u64()?).map_err(|_| DecodeError::new())?;
     let id = ProgramId::new(decoder.string()?).map_err(|_| DecodeError::new())?;
+    let owner = ActorId::new(decoder.string()?).map_err(|_| DecodeError::new())?;
     let name = decoder.string()?.to_string();
     let goal = decoder.string()?.to_string();
     let methodology = decoder.string()?.to_string();
@@ -416,6 +418,7 @@ pub fn decode_program(decoder: &mut Decoder<'_>) -> Result<Versioned<Program>, D
     let created_at = decode_timestamp(decoder)?;
     let program = Program::new(ProgramInput {
         id,
+        owner,
         name,
         goal,
         methodology,

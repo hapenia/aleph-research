@@ -886,6 +886,7 @@ mod tests {
         .unwrap();
         let program = Program::new(ProgramInput {
             id: ProgramId::new("program-1").unwrap(),
+            owner: crate::id::ActorId::new("operator-1").unwrap(),
             name: "Program".to_string(),
             goal: "Improve the benchmark".to_string(),
             methodology: "Propose, run, review".to_string(),

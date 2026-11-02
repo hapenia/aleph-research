@@ -36,6 +36,7 @@ const NOW = at('2026-01-01T00:00:00.000Z')
 
 const PROGRAM: CoreProgram = {
   id: programId('program-1'),
+  owner: 'operator-1',
   name: 'Program',
   goal: 'Improve the benchmark',
   methodology: 'Propose, run, review',

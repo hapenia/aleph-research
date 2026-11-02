@@ -74,6 +74,7 @@ export declare class BenchmarkFailed {
 export declare class BenchmarkRetryable {
   private constructor()
   private readonly __benchmarkRetryable: true
+  readonly record: BenchmarkRecord
   readonly benchmarkRunId: string
   readonly attempt: number
   readonly maxAttempts: number

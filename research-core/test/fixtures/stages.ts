@@ -81,6 +81,7 @@ export function createBenchmarkFailed(input: {
 }
 
 export function createBenchmarkRetryable(input: {
+  readonly record: BenchmarkRecord
   readonly benchmarkRunId: string
   readonly attempt: number
   readonly maxAttempts: number

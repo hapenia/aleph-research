@@ -127,7 +127,7 @@ test('retryable benchmark becomes terminal when attempts are exhausted', async (
   assert.equal(result.attempts, 2)
   assert.equal(lab.benchmark.results.length, 2)
   assert.equal(lab.benchmark.attempts.length, 2)
-  assert.equal(lab.records.length, 0)
+  assert.equal(lab.records.length, 2)
   assert.equal(lab.trace.filter((step) => step === 'retryBenchmark').length, 1)
   assert.equal(lab.trace.at(-1), 'closeFailed')
 })

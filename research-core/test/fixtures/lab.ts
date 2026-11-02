@@ -340,6 +340,14 @@ export function createLab(options: LabOptions): Lab {
           return ran
         }
         const outcome = ran.value
+        recordIndex += 1
+        const record = createBenchmarkRecord({
+          id: `benchmark-record-${recordIndex}`,
+          attempt: attemptInput,
+          outcome,
+          now: clock.now(),
+        })
+        records.push(record)
         if (outcome.status === 'retryable') {
           benchmarkRunIndex += 1
           const benchmarkRunId = `benchmark-run-${benchmarkRunIndex}`
@@ -351,6 +359,7 @@ export function createLab(options: LabOptions): Lab {
           return {
             ok: true,
             value: createBenchmarkRetryable({
+              record,
               benchmarkRunId,
               attempt,
               maxAttempts,
@@ -358,14 +367,6 @@ export function createLab(options: LabOptions): Lab {
             }),
           }
         }
-        recordIndex += 1
-        const record = createBenchmarkRecord({
-          id: `benchmark-record-${recordIndex}`,
-          attempt: attemptInput,
-          outcome,
-          now: clock.now(),
-        })
-        records.push(record)
         if (outcome.status === 'passed') {
           return { ok: true, value: createBenchmarkPassed({ record }) }
         }
@@ -445,7 +446,7 @@ export function createLab(options: LabOptions): Lab {
         input: BenchmarkFailed | BenchmarkRetryable,
       ): Promise<Result<ResearchCompleted, DomainError>> {
         trace.push('closeFailed')
-        if ('record' in input) {
+        if (!('benchmarkRunId' in input)) {
           return {
             ok: true,
             value: createResearchCompleted({

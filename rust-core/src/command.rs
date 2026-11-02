@@ -8,7 +8,7 @@ use crate::domain::{
     Exploration, Issue, IssueInput, IssueStatus, Lineage, MetricWeight, Program, ProgramInput,
     ProgramStatus, ResearchPolicy, ResearcherDecision, Ticket, TicketStatus, Usage, Versioned,
 };
-use crate::error::StorageError;
+use crate::error::{ClockError, StorageError};
 use crate::id::{
     ActorId, AuditId, BranchName, CommentId, CommitSha, ExperimentId, IssueId, ProgramId,
     RequestId, SessionId, TicketId, Version,
@@ -600,6 +600,7 @@ pub enum CommandError {
         state: String,
     },
     Storage(StorageError),
+    Clock(ClockError),
 }
 
 impl fmt::Display for CommandError {
@@ -638,11 +639,18 @@ impl fmt::Display for CommandError {
                 "{command} cannot change {subject} while it is {state}"
             ),
             Self::Storage(error) => write!(formatter, "command storage error: {error}"),
+            Self::Clock(error) => write!(formatter, "command clock error: {error}"),
         }
     }
 }
 
 impl std::error::Error for CommandError {}
+
+impl From<ClockError> for CommandError {
+    fn from(error: ClockError) -> Self {
+        Self::Clock(error)
+    }
+}
 
 impl From<StorageError> for CommandError {
     fn from(error: StorageError) -> Self {
@@ -788,7 +796,7 @@ impl<'a, P: Plugin> CommandExecutor<'a, P> {
                     policy: command.policy,
                     usage: Usage::ZERO,
                     status: ProgramStatus::Running,
-                    created_at: self.plugin.clock().now(),
+                    created_at: self.plugin.clock().now().await?,
                 })
                 .map_err(|error| invalid_error(name, error))?;
                 let version = self.plugin.storage().save_program(&program, None).await?;
@@ -841,7 +849,7 @@ impl<'a, P: Plugin> CommandExecutor<'a, P> {
                     body: command.body.clone(),
                     labels: command.labels.clone(),
                     author: actor.id().clone(),
-                    created_at: self.plugin.clock().now(),
+                    created_at: self.plugin.clock().now().await?,
                 })
                 .map_err(|error| invalid_error(name, error))?;
                 let version = self.plugin.storage().save_issue(&issue, None).await?;
@@ -891,7 +899,7 @@ impl<'a, P: Plugin> CommandExecutor<'a, P> {
                     lineage: command.lineage.clone(),
                     plan_comment_id: command.plan_comment_id.clone(),
                     created_by: actor.id().clone(),
-                    created_at: self.plugin.clock().now(),
+                    created_at: self.plugin.clock().now().await?,
                     status: ExperimentStatus::Open,
                 });
                 let version = self
@@ -1005,7 +1013,7 @@ impl<'a, P: Plugin> CommandExecutor<'a, P> {
             subject.to_string(),
             detail,
             request_id,
-            self.plugin.clock().now(),
+            self.plugin.clock().now().await?,
         )
         .map_err(|error| invalid_error(name, error))?;
         self.plugin.storage().append_audit(&entry).await?;

@@ -462,6 +462,7 @@ function decodeRecord(decoder: Decoder): CoreBenchmarkRecord {
 function encodeProgram(encoder: Encoder, program: CoreProgram): void {
   encoder.u64(1)
   encoder.text(program.id)
+  encoder.text(program.owner)
   encoder.text(program.name)
   encoder.text(program.goal)
   encoder.text(program.methodology)

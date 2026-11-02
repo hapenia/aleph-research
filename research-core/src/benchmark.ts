@@ -26,7 +26,12 @@ export interface BenchmarkRecord {
   readonly specHash: string
   readonly environmentDigest: string
   readonly metrics: Readonly<Record<string, number>>
+  readonly status: 'passed' | 'failed' | 'retryable'
   readonly passed: boolean
+  readonly attempt: number
+  readonly maxAttempts: number
+  readonly stdout: string
+  readonly stderr: string
   readonly artifacts: readonly string[]
   readonly createdAt: string
 }

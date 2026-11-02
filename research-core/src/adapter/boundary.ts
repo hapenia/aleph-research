@@ -86,6 +86,7 @@ export interface CoreResearchPolicy {
 
 export interface CoreProgram {
   readonly id: ProgramId
+  readonly owner: string
   readonly name: string
   readonly goal: string
   readonly methodology: string
