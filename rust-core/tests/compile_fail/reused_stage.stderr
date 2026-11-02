@@ -1,0 +1,15 @@
+error[E0382]: use of moved value: `state`
+ --> tests/compile_fail/reused_stage.rs:7:13
+  |
+5 | async fn reuse<P: Plugin>(state: ExperimentProposed, context: &PipelineContext<'_, P>) {
+  |                           ----- move occurs because `state` has type `aleph_research_core::ExperimentProposed`, which does not implement the `Copy` trait
+6 |     let _ = state.deliver_trigger(context).await;
+  |                   ------------------------ `state` moved due to this method call
+7 |     let _ = state.deliver_trigger(context).await;
+  |             ^^^^^ value used here after move
+  |
+note: `aleph_research_core::ExperimentProposed::deliver_trigger` takes ownership of the receiver `self`, which moves `state`
+ --> src/stage.rs
+  |
+  |         self,
+  |         ^^^^

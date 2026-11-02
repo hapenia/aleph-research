@@ -1,0 +1,5 @@
+error[E0599]: no method named `open_ticket` found for struct `aleph_research_core::ExperimentProposed` in the current scope
+ --> tests/compile_fail/skipped_stage.rs:6:19
+  |
+6 |     let _ = state.open_ticket(context).await;
+  |                   ^^^^^^^^^^^ method not found in `aleph_research_core::ExperimentProposed`

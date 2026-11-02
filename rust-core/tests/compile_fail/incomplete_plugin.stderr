@@ -1,0 +1,8 @@
+error[E0046]: not all trait items implemented, missing: `Surface`, `surface`
+  --> tests/compile_fail/incomplete_plugin.rs:21:1
+   |
+21 | impl Plugin for Partial {
+   | ^^^^^^^^^^^^^^^^^^^^^^^ missing `Surface`, `surface` in implementation
+   |
+   = help: implement the missing item: `type Surface = /* Type */;`
+   = help: implement the missing item: `fn surface(&self) -> &<Self as Plugin>::Surface { todo!() }`
