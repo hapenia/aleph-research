@@ -15,3 +15,4 @@ vendor/dsh-superagent/.artifacts/
 superagent-extension/node_modules/
 research-core/node_modules/
 research-core/dist/
+rust-core/target/
