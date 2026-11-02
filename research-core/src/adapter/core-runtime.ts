@@ -3,6 +3,7 @@ import type { CommitSha, TicketId } from '../types/ids.js'
 import type {
   CoreBridgeError,
   CoreConcepts,
+  CoreEffectFailure,
   CoreEffectResume,
   CoreFrame,
   CoreLoadError,
@@ -38,6 +39,7 @@ export interface CoreRuntime {
   start(input: CoreStartInput): Promise<CoreProgress>
   resumeReview(decision: CoreResearcherDecision): Promise<CoreProgress>
   resumeCommit(commit: CommitSha): Promise<CoreProgress>
+  failPending(message: string): Promise<CoreProgress>
   pending(): CorePending | undefined
   readonly core: ResearchCore
   readonly concepts: CoreConcepts
@@ -112,6 +114,26 @@ class Runtime implements CoreRuntime {
       sequence: pending.sequence,
       result: { ok: true, value: commit },
     })
+    if (!resumed.ok) return failed(resumed.error)
+    return this.advance(resumed.value)
+  }
+
+  async failPending(message: string): Promise<CoreProgress> {
+    const pending = this.current
+    if (pending === undefined) return protocolFailure('no effect is pending')
+    this.current = undefined
+    const failure: CoreEffectFailure = { kind: 'unavailable', message }
+    const resumed = pending.effect === 'sessions.submitCommit'
+      ? this.core.resume({
+          effect: 'sessions.submitCommit',
+          sequence: pending.sequence,
+          result: { ok: false, failure },
+        })
+      : this.core.resume({
+          effect: 'sessions.review',
+          sequence: pending.sequence,
+          result: { ok: false, failure },
+        })
     if (!resumed.ok) return failed(resumed.error)
     return this.advance(resumed.value)
   }

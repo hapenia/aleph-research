@@ -25,7 +25,7 @@ export type CompletionState = 'done' | 'todo'
 
 export const COMPLETION: Readonly<Record<CompletionFeature, CompletionState>> = {
   'experiment-to-ticket': 'done',
-  'implementer-ticket-execution': 'todo',
+  'implementer-ticket-execution': 'done',
   'benchmark-evaluation-writeback': 'done',
   'researcher-review-loop': 'done',
   'researcher-session-tools': 'done',

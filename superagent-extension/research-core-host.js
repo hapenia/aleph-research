@@ -299,6 +299,20 @@ export async function apply(ctx, config) {
     async start(input) {
       return runtime.start(input)
     },
+    async failWorker(sessionId, message) {
+      const ticketId = created.value.ticketsBySession.get(sessionId)
+      if (ticketId === undefined) {
+        return {
+          ok: false,
+          error: { code: 'not-found', message: `session ${sessionId} is not an active implementer` },
+        }
+      }
+      const progress = await runtime.failPending(message)
+      if (progress.status === 'failed') {
+        return { ok: false, error: { code: progress.error.kind, message: progress.error.message } }
+      }
+      return { ok: true, value: progress }
+    },
     pending() {
       return runtime.pending()
     },

@@ -513,6 +513,50 @@ export function createResearchSessionPool(ctx, config) {
     return { ok: true, sessionId, deduped: false }
   }
 
+  const wakeImplementer = async (sessionId, message) => {
+    if (state.disposed) return { ok: false, sessionId, code: 'disposed', error: 'the pool was disposed' }
+    if (typeof sessionId !== 'string' || !SESSION_ID_PATTERN.test(sessionId)) {
+      return {
+        ok: false,
+        sessionId,
+        code: 'invalid-session-id',
+        error: 'sessionId must be 1-128 characters matching /^[A-Za-z0-9][A-Za-z0-9._:-]*$/',
+      }
+    }
+    if (typeof message !== 'string' || message.trim().length === 0) {
+      return {
+        ok: false,
+        sessionId,
+        code: 'invalid-message',
+        error: 'message must be a non-empty string',
+      }
+    }
+    let agent
+    try {
+      agent = await ensureSession(sessionId, IMPLEMENTER_PRESET)
+    } catch (error) {
+      const entry = recordFailure(sessionId, 'session-failed', error)
+      return { ok: false, sessionId, code: 'session-failed', error: entry.error }
+    }
+    if (state.disposed) return { ok: false, sessionId, code: 'disposed', error: 'the pool was disposed' }
+    if (typeof agent?.followup !== 'function') {
+      const entry = recordFailure(sessionId, 'agent/cannot-followup', 'the resolved Agent has no followup()')
+      return { ok: false, sessionId, code: 'agent/cannot-followup', error: entry.error }
+    }
+    try {
+      await agent.followup({
+        id: `aleph-research:${randomUUID()}`,
+        role: 'user',
+        content: [{ type: 'text', text: message }],
+        source: { kind: 'aleph-research' },
+      })
+    } catch (error) {
+      const entry = recordFailure(sessionId, 'followup-failed', error)
+      return { ok: false, sessionId, code: 'followup-failed', error: entry.error }
+    }
+    return { ok: true, sessionId }
+  }
+
   /**
    * Ensure `size` deterministic Researcher Sessions (`aleph-researcher-1..size`).
    *
@@ -586,6 +630,7 @@ export function createResearchSessionPool(ctx, config) {
     ensureResearcherSession,
     ensureImplementer: ensureImplementerSession,
     startWorker: ensureImplementerSession,
+    wakeImplementer,
     wakeResearcher,
     ensurePool,
     status,

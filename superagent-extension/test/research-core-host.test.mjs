@@ -105,6 +105,9 @@ function createHarness() {
     async ensureImplementer(ticketId) {
       return `aleph-implementer-${ticketId}`
     },
+    async wakeImplementer(sessionId) {
+      return { ok: true, sessionId }
+    },
   }
   const benchmark = {
     async specHash() {
@@ -289,6 +292,16 @@ async function realHarness(options = {}) {
     logger: { info() {}, warn() {}, error() {} },
     get(name) {
       if (name === 'alephResearchHost') return service
+      if (name === 'alephResearchSessions') {
+        return {
+          async ensureImplementer(ticketId) {
+            return `aleph-implementer-${ticketId}`
+          },
+          async wakeImplementer(sessionId) {
+            return { ok: true, sessionId }
+          },
+        }
+      }
       return undefined
     },
     webServer: {
@@ -422,3 +435,28 @@ test('the surface runs an Experiment through the embedded core to completion', a
 })
 
 const proposalStatus = (res) => (res.body?.ok === true ? 200 : res.statusCode)
+
+test('the core service fails a worker without a commit as a typed error', async () => {
+  const harness = createHarness()
+  await apply(harness.ctx, { benchmark: harness.benchmark })
+  const service = harness.provided.get('alephResearchCore')
+  const res = response()
+
+  await harness.routes[0].handler(
+    request('POST', '/aleph/api/research/programs/program-1/experiments/experiment-1/benchmarks', {}),
+    res,
+  )
+  assert.equal(res.body.value.progress.pending.effect, 'sessions.submitCommit')
+
+  const failed = await service.failWorker(
+    'aleph-implementer-ticket:experiment-1',
+    'the implementer exited without a commit',
+  )
+  assert.equal(failed.ok, false)
+  assert.equal(failed.error.code, 'domain')
+  assert.match(failed.error.message, /exited without a commit/)
+
+  const unknown = await service.failWorker('unknown-session', 'no worker')
+  assert.equal(unknown.ok, false)
+  assert.equal(unknown.error.code, 'not-found')
+})

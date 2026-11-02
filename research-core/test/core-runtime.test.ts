@@ -221,3 +221,31 @@ test('a resume without a pending effect is a protocol failure', async () => {
   if (commit.status !== 'failed') return
   assert.equal(commit.error.kind, 'protocol')
 })
+
+test('a failed worker resumes the pending commit as a typed failure', async () => {
+  const recorder = createConcepts()
+  const loaded = await createCoreRuntime({
+    concepts: recorder.concepts,
+    hooks: { canSubmitCommit: async () => false },
+  })
+  assert.equal(loaded.ok, true)
+  if (!loaded.ok) return
+  const runtime = loaded.value
+
+  const started = await runtime.start(START)
+  assert.equal(started.status, 'paused')
+  if (started.status !== 'paused') return
+  assert.equal(started.pending.effect, 'sessions.submitCommit')
+
+  const failed = await runtime.failPending('the implementer session failed')
+  assert.equal(failed.status, 'failed')
+  if (failed.status !== 'failed') return
+  assert.equal(failed.error.kind, 'domain')
+  assert.match(failed.error.message, /implementer session failed/)
+  assert.equal(runtime.pending(), undefined)
+
+  const idle = await runtime.failPending('no worker is pending')
+  assert.equal(idle.status, 'failed')
+  if (idle.status !== 'failed') return
+  assert.equal(idle.error.kind, 'protocol')
+})

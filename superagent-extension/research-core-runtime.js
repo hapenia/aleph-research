@@ -265,6 +265,14 @@ export function createDshCoreConcepts(options) {
             sessionId,
             startedAt: now(),
           })
+          if (typeof sessions.wakeImplementer !== 'function') {
+            return failure('the session pool has no implementer wake channel')
+          }
+          const brief = `Ticket ${request.ticketId} for experiment ${request.experimentId} is running in session ${sessionId}. Implement the experiment in the ticket workspace, commit the change, and call aleph_research_submit_ticket with the commit head. The ticket base commit is ${ticket.baseCommit}. Do not change the benchmark.`
+          const woken = await sessions.wakeImplementer(sessionId, brief)
+          if (woken?.ok !== true) {
+            return failure(woken?.error ?? 'the implementer session could not be woken')
+          }
           return ok(sessionId)
         } catch (error) {
           return failure(messageOf(error))

@@ -92,6 +92,11 @@ function createHarness() {
       calls.push(`ensureImplementer:${ticketId}`)
       return 'session-1'
     },
+    async wakeImplementer(sessionId, message) {
+      calls.push(`wakeImplementer:${sessionId}`)
+      assert.match(message, /aleph_research_submit_ticket/)
+      return { ok: true, sessionId }
+    },
   }
   const trigger = {
     async deliver(draft) {
@@ -167,7 +172,10 @@ test('the DSH core runtime drives the embedded wasm through every stage', async 
   assert.ok(ticket)
   assert.equal(ticket.value.status, 'running')
   assert.equal(ticket.value.sessionId, 'session-1')
-  assert.deepEqual(harness.calls, ['ensureImplementer:ticket:experiment-1'])
+  assert.deepEqual(harness.calls, [
+    'ensureImplementer:ticket:experiment-1',
+    'wakeImplementer:session-1',
+  ])
   assert.equal(harness.triggers.length, 1)
   assert.equal(harness.triggers[0].kind, 'experiment-proposed')
   assert.equal(harness.triggers[0].programId, 'program-1')
