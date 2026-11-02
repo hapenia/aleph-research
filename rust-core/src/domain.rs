@@ -932,6 +932,19 @@ impl Issue {
         &self.experiments
     }
 
+    pub fn restore(
+        input: IssueInput,
+        status: IssueStatus,
+        assignee: Option<SessionId>,
+        experiments: Vec<ExperimentId>,
+    ) -> Result<Self, DomainError> {
+        let mut issue = Self::new(input)?;
+        issue.status = status;
+        issue.assignee = assignee;
+        issue.experiments = experiments;
+        Ok(issue)
+    }
+
     pub fn assign(mut self, session: SessionId) -> Self {
         self.status = IssueStatus::Assigned;
         self.assignee = Some(session);

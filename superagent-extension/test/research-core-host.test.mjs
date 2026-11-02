@@ -45,14 +45,57 @@ function createStore() {
       },
     }],
   ])
+  const issues = new Map()
   const tickets = new Map()
   const ciRecords = []
+  const audit = []
+  const saveAggregate = async (rows, ticket) => {
+    const current = rows.get(ticket.id)
+    const version = current?.version ?? 0
+    if (version !== ticket.expected) return { ok: false, error: { kind: 'version-conflict' } }
+    rows.set(ticket.id, { version: version + 1, value: ticket.value })
+    return ok(version + 1)
+  }
   return {
     programs: {
       get: async (id) => programs.get(id),
       list: async () => [...programs.values()],
+      async save(expected, next) {
+        const current = programs.get(next.id)
+        const version = current?.version ?? 0
+        if (version !== expected) return { ok: false, error: { kind: 'version-conflict' } }
+        programs.set(next.id, { version: version + 1, value: next })
+        return ok(version + 1)
+      },
     },
-    experiments: { get: async (id) => experiments.get(id) },
+    issues: {
+      get: async (id) => issues.get(id),
+      async save(expected, next) {
+        const current = issues.get(next.id)
+        const version = current?.version ?? 0
+        if (version !== expected) return { ok: false, error: { kind: 'version-conflict' } }
+        issues.set(next.id, { version: version + 1, value: next })
+        return ok(version + 1)
+      },
+    },
+    experiments: {
+      get: async (id) => experiments.get(id),
+      async save(expected, next) {
+        const current = experiments.get(next.id)
+        const version = current?.version ?? 0
+        if (version !== expected) return { ok: false, error: { kind: 'version-conflict' } }
+        experiments.set(next.id, { version: version + 1, value: next })
+        return ok(version + 1)
+      },
+    },
+    audit: {
+      async append(entries) {
+        audit.push(...entries)
+      },
+      async list(programId, limit) {
+        return audit.filter((entry) => entry.programId === programId).slice(-limit)
+      },
+    },
     tickets: {
       get: async (id) => tickets.get(id),
       async save(expected, ticket) {
@@ -69,7 +112,7 @@ function createStore() {
         return ok(undefined)
       },
     },
-    state: { programs, experiments, tickets, ciRecords },
+    state: { programs, issues, experiments, tickets, ciRecords, audit },
   }
 }
 
@@ -211,21 +254,32 @@ test('the core host binds the surface into DSH and provides its service', async 
   assert.equal(typeof service.artifacts.list, 'function')
 })
 
-test('a POST route reaches the legacy command through the dispatcher', async () => {
+test('a POST route reaches the rust command bridge through the dispatcher', async () => {
   const harness = createHarness()
   await apply(harness.ctx, { benchmark: harness.benchmark })
   const route = harness.routes[0]
   const res = response()
 
   await route.handler(
-    request('POST', '/aleph/api/research/programs', { name: 'Program', goal: 'Goal', methodology: 'Method' }),
+    request('POST', '/aleph/api/research/programs', {
+      programId: 'program-2',
+      name: 'Program',
+      goal: 'Goal',
+      methodology: 'Method',
+      contract: { ciEntry: 'bench.py', timeoutMs: 30_000, requiredMetrics: ['score'] },
+      utility: { metrics: [{ name: 'score', direction: 'higher', weight: 1 }] },
+      exploration: 'normal',
+      budget: { maxExperiments: 4, maxComputeMinutes: 60, maxTokens: 10_000 },
+    }),
     res,
   )
 
   assert.equal(res.statusCode, 200)
   assert.equal(res.body.ok, true)
-  assert.equal(harness.toolCalls.length, 1)
-  assert.equal(harness.toolCalls[0].tool, 'operator_create_program')
+  assert.equal(res.body.value.id, 'program-2')
+  assert.equal(harness.toolCalls.length, 0)
+  assert.equal(harness.store.state.programs.get('program-2')?.value.name, 'Program')
+  assert.equal(harness.store.state.audit.length, 1)
 })
 
 test('benchmark.request runs the embedded core and reports its paused progress', async () => {
@@ -328,7 +382,7 @@ async function realHarness(options = {}) {
   return { host, service, routes, provided, tools, config }
 }
 
-test('the surface drives the real legacy command runtime for program.create', async () => {
+test('the surface drives program.create through the embedded command bridge', async () => {
   const harness = await realHarness()
   const { host, service, routes } = harness
 

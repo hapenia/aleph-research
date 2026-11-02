@@ -143,7 +143,7 @@ export function decodeBase64(text: string): Uint8Array {
   return Uint8Array.from(output)
 }
 
-class Encoder {
+export class Encoder {
   private readonly buffer: number[] = []
 
   u8(value: number): void {
@@ -179,7 +179,7 @@ class Encoder {
   }
 }
 
-class Decoder {
+export class Decoder {
   private readonly bytes: Uint8Array
   private readonly view: DataView
   private position = 0
@@ -245,11 +245,11 @@ function effectName(code: number): CoreEffectName {
   return name
 }
 
-function direction(value: CoreMetricDirection): number {
+export function direction(value: CoreMetricDirection): number {
   return value === 'maximize' ? 0 : 1
 }
 
-function decodeDirection(value: number): CoreMetricDirection {
+export function decodeDirection(value: number): CoreMetricDirection {
   if (value === 0) return 'maximize'
   if (value === 1) return 'minimize'
   throw new ProtocolFailure('the protocol frame names an unknown metric direction')
@@ -304,22 +304,22 @@ function decodeBranch(value: string): BranchName {
   return parsed.value
 }
 
-function decodeTimestamp(value: string): IsoTimestamp {
+export function decodeTimestamp(value: string): IsoTimestamp {
   const parsed = parseIsoTimestamp(value)
   if (!parsed.ok) throw new ProtocolFailure(parsed.error.message)
   return parsed.value
 }
 
-function encodeTimestamp(encoder: Encoder, value: IsoTimestamp): void {
+export function encodeTimestamp(encoder: Encoder, value: IsoTimestamp): void {
   encoder.text(value)
 }
 
-function encodeEnvironment(encoder: Encoder, environment: CoreEnvironmentDeclaration): void {
+export function encodeEnvironment(encoder: Encoder, environment: CoreEnvironmentDeclaration): void {
   encoder.u8(environment.kind === 'requirements' ? 0 : 1)
   encoder.text(environment.file)
 }
 
-function decodeEnvironment(decoder: Decoder): CoreEnvironmentDeclaration {
+export function decodeEnvironment(decoder: Decoder): CoreEnvironmentDeclaration {
   const kind = decoder.u8()
   const file = decoder.text()
   if (kind === 0) return { kind: 'requirements', file }
@@ -327,7 +327,7 @@ function decodeEnvironment(decoder: Decoder): CoreEnvironmentDeclaration {
   throw new ProtocolFailure('the protocol frame names an unknown environment')
 }
 
-function encodeSpec(encoder: Encoder, spec: CoreBenchmarkSpec): void {
+export function encodeSpec(encoder: Encoder, spec: CoreBenchmarkSpec): void {
   encoder.text(spec.id)
   encoder.text(spec.entry)
   encoder.u64(spec.timeoutMs)
@@ -358,7 +358,7 @@ function encodeSpec(encoder: Encoder, spec: CoreBenchmarkSpec): void {
   }
 }
 
-function decodeSpec(decoder: Decoder): CoreBenchmarkSpec {
+export function decodeSpec(decoder: Decoder): CoreBenchmarkSpec {
   const id = decoder.text()
   const entry = decoder.text()
   const timeoutMs = decoder.u64()

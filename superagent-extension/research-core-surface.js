@@ -127,9 +127,23 @@ const failureOf = (result) => {
   }
 }
 
+const commandFailureOf = (result) => {
+  const failure = result?.error
+  return {
+    ...error(
+      typeof failure?.code === 'string' ? failure.code : 'invalid-input',
+      typeof failure?.message === 'string' ? failure.message : 'the research command was refused',
+    ),
+    status: Number.isInteger(failure?.status) ? failure.status : 400,
+  }
+}
+
 export function createSurfaceHandlers(options) {
   const settings = options ?? {}
   const executeTool = settings.executeTool
+  const executeCommand = typeof settings.executeCommand === 'function'
+    ? settings.executeCommand
+    : undefined
   const runtime = settings.runtime
   const store = settings.store
   const logger = settings.logger
@@ -238,9 +252,26 @@ export function createSurfaceHandlers(options) {
       if (!started.ok) return started
       return ok({ progress: started.value.progress })
     }
+    const context = await contextOf(name, request, input)
+    if (executeCommand !== undefined) {
+      const bridged = await executeCommand(name, input, {
+        kind: context.actorKind,
+        sessionId: context.sessionId,
+      })
+      if (bridged !== undefined) {
+        if (bridged?.ok !== true) return commandFailureOf(bridged)
+        const value = bridged.value
+        if (name === 'experiment.review' || name === 'aleph_research_review_experiment') {
+          const resumed = await resumeReview(input)
+          if (resumed === undefined) return ok(value)
+          if (!resumed.ok) return resumed
+          return ok({ ...value, progress: resumed.value })
+        }
+        return ok(value)
+      }
+    }
     const legacy = LEGACY_TOOL[name]
     if (legacy === undefined) return error('not-found', `no tool is bound to ${name}`)
-    const context = await contextOf(name, request, input)
     const clean = { ...input }
     if (legacy === 'implementer_submit_implementation') {
       delete clean.experimentId

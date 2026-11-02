@@ -1,4 +1,3 @@
-use std::cell::Cell;
 use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
@@ -36,6 +35,49 @@ pub enum CommandName {
 }
 
 impl CommandName {
+    pub const fn code(self) -> u8 {
+        match self {
+            Self::CreateProgram => 0,
+            Self::PauseProgram => 1,
+            Self::ResumeProgram => 2,
+            Self::StopProgram => 3,
+            Self::SetProgramGoal => 4,
+            Self::SetProgramMethodology => 5,
+            Self::SetProgramExploration => 6,
+            Self::CreateIssue => 7,
+            Self::ClaimIssue => 8,
+            Self::CommentIssue => 9,
+            Self::CloseIssue => 10,
+            Self::ProposeExperiment => 11,
+            Self::ReviewExperiment => 12,
+            Self::CloseExperiment => 13,
+            Self::RequestBenchmark => 14,
+            Self::SubmitTicket => 15,
+        }
+    }
+
+    pub const fn from_code(code: u8) -> Option<Self> {
+        match code {
+            0 => Some(Self::CreateProgram),
+            1 => Some(Self::PauseProgram),
+            2 => Some(Self::ResumeProgram),
+            3 => Some(Self::StopProgram),
+            4 => Some(Self::SetProgramGoal),
+            5 => Some(Self::SetProgramMethodology),
+            6 => Some(Self::SetProgramExploration),
+            7 => Some(Self::CreateIssue),
+            8 => Some(Self::ClaimIssue),
+            9 => Some(Self::CommentIssue),
+            10 => Some(Self::CloseIssue),
+            11 => Some(Self::ProposeExperiment),
+            12 => Some(Self::ReviewExperiment),
+            13 => Some(Self::CloseExperiment),
+            14 => Some(Self::RequestBenchmark),
+            15 => Some(Self::SubmitTicket),
+            _ => None,
+        }
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::CreateProgram => "program.create",
@@ -573,6 +615,49 @@ impl<K: CommandKind> AuthorizedCommand<K> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CommandErrorKind {
+    InvalidDraft,
+    Unauthorized,
+    Forbidden,
+    Ownership,
+    StateConflict,
+    Storage,
+    Clock,
+}
+
+impl CommandErrorKind {
+    pub const fn code(self) -> u8 {
+        match self {
+            Self::InvalidDraft => 0,
+            Self::Unauthorized => 1,
+            Self::Forbidden => 2,
+            Self::Ownership => 3,
+            Self::StateConflict => 4,
+            Self::Storage => 5,
+            Self::Clock => 6,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InvalidDraft => "invalid-draft",
+            Self::Unauthorized => "unauthorized",
+            Self::Forbidden => "forbidden",
+            Self::Ownership => "ownership",
+            Self::StateConflict => "state-conflict",
+            Self::Storage => "storage",
+            Self::Clock => "clock",
+        }
+    }
+}
+
+impl fmt::Display for CommandErrorKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum CommandError {
     InvalidDraft {
@@ -640,6 +725,31 @@ impl fmt::Display for CommandError {
             ),
             Self::Storage(error) => write!(formatter, "command storage error: {error}"),
             Self::Clock(error) => write!(formatter, "command clock error: {error}"),
+        }
+    }
+}
+
+impl CommandError {
+    pub const fn kind(&self) -> CommandErrorKind {
+        match self {
+            Self::InvalidDraft { .. } => CommandErrorKind::InvalidDraft,
+            Self::Unauthorized { .. } => CommandErrorKind::Unauthorized,
+            Self::Forbidden { .. } => CommandErrorKind::Forbidden,
+            Self::Ownership { .. } => CommandErrorKind::Ownership,
+            Self::StateConflict { .. } => CommandErrorKind::StateConflict,
+            Self::Storage(_) => CommandErrorKind::Storage,
+            Self::Clock(_) => CommandErrorKind::Clock,
+        }
+    }
+
+    pub const fn command(&self) -> Option<CommandName> {
+        match self {
+            Self::InvalidDraft { command, .. }
+            | Self::Unauthorized { command, .. }
+            | Self::Forbidden { command, .. }
+            | Self::Ownership { command, .. }
+            | Self::StateConflict { command, .. } => Some(*command),
+            Self::Storage(_) | Self::Clock(_) => None,
         }
     }
 }
@@ -731,15 +841,11 @@ impl<'a, P: Plugin> HostGate<'a, P> {
 
 pub struct CommandExecutor<'a, P: Plugin> {
     plugin: &'a P,
-    audits: Cell<u64>,
 }
 
 impl<'a, P: Plugin> CommandExecutor<'a, P> {
     pub fn new(plugin: &'a P) -> Self {
-        Self {
-            plugin,
-            audits: Cell::new(0),
-        }
+        Self { plugin }
     }
 
     pub async fn execute<K: CommandKind>(
@@ -995,17 +1101,13 @@ impl<'a, P: Plugin> CommandExecutor<'a, P> {
         subject: CommandSubject,
         detail: String,
     ) -> Result<(), CommandError> {
-        let next = self
-            .audits
-            .get()
-            .checked_add(1)
-            .ok_or_else(|| CommandError::InvalidDraft {
-                command: name,
-                detail: "audit counter overflowed".to_string(),
-            })?;
-        self.audits.set(next);
-        let audit_id =
-            AuditId::new(format!("audit-{next}")).map_err(|error| invalid_error(name, error))?;
+        let created_at = self.plugin.clock().now().await?;
+        let audit_id = AuditId::new(format!(
+            "audit-{}-{}",
+            created_at.as_millis(),
+            request_id.as_str()
+        ))
+        .map_err(|error| invalid_error(name, error))?;
         let entry = AuditEntry::new(
             audit_id,
             actor.id().clone(),
@@ -1013,7 +1115,7 @@ impl<'a, P: Plugin> CommandExecutor<'a, P> {
             subject.to_string(),
             detail,
             request_id,
-            self.plugin.clock().now().await?,
+            created_at,
         )
         .map_err(|error| invalid_error(name, error))?;
         self.plugin.storage().append_audit(&entry).await?;

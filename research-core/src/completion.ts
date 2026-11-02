@@ -29,7 +29,7 @@ export const COMPLETION: Readonly<Record<CompletionFeature, CompletionState>> = 
   'researcher-session-tools': 'done',
   'case-migration-live-run': 'todo',
   'wasm-core-loading': 'done',
-  'rust-command-bridge': 'todo',
+  'rust-command-bridge': 'done',
 }
 
 export function pendingFeatures(): readonly CompletionFeature[] {

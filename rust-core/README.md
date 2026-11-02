@@ -82,5 +82,12 @@ functions use UTF-8 pointer/length pairs into wasm linear memory.
 - `aleph_bridge_version() -> u32`
 - `aleph_alloc(length) -> ptr` and `aleph_free(ptr, length)`
 - `aleph_start(ptr, len) -> u32` and `aleph_resume(ptr, len) -> u32`
+- `aleph_command_start(ptr, len) -> u32` and
+  `aleph_command_resume(ptr, len) -> u32`
 - `aleph_response_len() -> u32` and
   `aleph_response_write(ptr, capacity) -> u32`
+
+The command entry points run `HostGate` and `CommandExecutor` inside wasm.
+Draft validation, capability, ownership, aggregate-state checks and audit
+writes stay in Rust. Storage load/save, audit append and clock reads are
+effects the TypeScript adapter executes before resuming the command.
