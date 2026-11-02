@@ -107,6 +107,93 @@ async function runResearchFlow(loop: ResearchFlow, start: ExperimentProposedRece
 Passing `start` to `openTicket`, or calling `buildEnvironment` before `submitCommit`, is a
 compile error. There is no `any` or optional stage in the production interface.
 
+## Typestate refinement
+
+A plain `ResearchFlow` interface plus free-floating receipts is still weaker than a
+typestate: a receipt can be stored, passed around or handed to the wrong builder, and
+the interface exposes every step at once. The proposal is to make the **flow itself**
+the typestate, with receipts kept only as internal/serialisable facts.
+
+Each node is a class that exposes exactly one next operation:
+
+```ts
+class ExperimentProposedFlow {
+  deliverTrigger(): Promise<Result<TriggerAcceptedFlow, DomainError>>
+}
+class TriggerAcceptedFlow {
+  openTicket(): Promise<Result<TicketOpenedFlow, DomainError>>
+}
+class TicketOpenedFlow {
+  startWorker(): Promise<Result<WorkerStartedFlow, DomainError>>
+}
+class WorkerStartedFlow {
+  submitCommit(): Promise<Result<CommitSubmittedFlow, DomainError>>
+}
+class CommitSubmittedFlow {
+  buildEnvironment(): Promise<Result<EnvironmentBuiltFlow, DomainError>>
+}
+class EnvironmentBuiltFlow {
+  runCI(): Promise<Result<CIPassedFlow | CIFailedFlow, DomainError>>
+}
+class CIPassedFlow {
+  recordResult(): Promise<Result<ResultRecordedFlow, DomainError>>
+}
+class CIFailedFlow {
+  closeFailed(): Promise<Result<ResearchCompletedFlow, DomainError>>
+}
+class ResultRecordedFlow {
+  reviewResult(): Promise<Result<ReviewRecordedFlow, DomainError>>
+}
+class ReviewRecordedFlow {
+  closePassed(): Promise<Result<ResearchCompletedFlow, DomainError>>
+}
+class ResearchCompletedFlow {
+  receipt(): ResearchCompletedReceipt
+}
+```
+
+Consequences:
+
+- `openTicket()` does not exist on `ExperimentProposedFlow`; a caller cannot skip the
+  trigger step even if it has a receipt value.
+- `CIPassedFlow` and `CIFailedFlow` are different types; the branch must be handled.
+- The terminal `ResearchCompletedFlow` exposes no further transition and only yields a
+  receipt for persistence/audit.
+- Constructors are private; `startExperimentFlow(wiring, receipt)` is the only entry.
+
+### Typestate wiring builder
+
+Wiring completeness becomes a typestate too, so an adapter cannot build a partial flow:
+
+```ts
+type Wired = 'trigger' | 'ticket' | 'worker' | 'commit' | 'environment' | 'ci' | 'result' | 'review' | 'close'
+
+class WiringBuilder<W extends Wired = never> {
+  withTrigger(fn: TriggerStep): WiringBuilder<W | 'trigger'>
+  withTicket(fn: TicketStep): WiringBuilder<W | 'ticket'>
+  // ...
+  build(this: WiringBuilder<Wired>): CompleteWiring
+}
+```
+
+`build()` is only callable when every capability is present. There is no `run` on a
+partial builder, so the "optional stage" failure of the old design cannot recur.
+
+### Authorization as a typestate
+
+`CommandDraft<K>` has no executor; `.authorize(principal, hostProof)` returns
+`AuthorizedCommand<K>`, and only that type can be passed to `CommandExecutor`. The
+aggregate classes remain typestate as before: `OpenIssue.claim()` exists only on the
+open variant, `CIPassedExperiment.close()` only on the passed variant.
+
+### Limits
+
+TypeScript has no move semantics: a previous flow object still exists after the next
+flow is produced. Typestate does not prevent holding a stale object, but it does remove
+the methods that would let a caller advance from it, so the only way forward is the
+current node. External side effects are still trusted at the single wiring boundary.
+
+
 ## Authorization is receipt too
 
 A command from a model is not executable until a Host gate has checked principal,
