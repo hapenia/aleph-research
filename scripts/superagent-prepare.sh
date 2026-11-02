@@ -49,6 +49,11 @@ git init -q -b "ticket/$name" "$dir"
 git -C "$dir" remote add origin "$repo"
 git -C "$dir" fetch -q --no-tags origin "$template"
 git -C "$dir" reset -q --hard FETCH_HEAD
+# The sandbox has no HOME/.gitconfig and cannot see the host's, so give the ticket a
+# local identity. Without it the worker cannot commit and aleph_submit_result refuses
+# the dirty tree.
+git -C "$dir" config user.name "AlephResearch Worker"
+git -C "$dir" config user.email "aleph-worker@localhost"
 
 # The data a Worker may read is copied in, not linked: a write through the link
 # would reach the source directory.
@@ -111,6 +116,10 @@ instead of \`ps\`; a running job is not a dead job.
 The sandbox also gives each command a fresh \`/tmp\`. Scripts or artifacts written to
 \`/tmp\` are gone by the next command. Keep analysis scripts and outputs in the ticket
 worktree (for example \`scratch/\` or \`experiments/\`), never in \`/tmp\`.
+
+This deployment caps one \`job_output\` wait at about five seconds. A still-running
+result only means the job is not finished; do not infer elapsed time from repeated
+calls. End the turn and let the job's completion wake you.
 
 ## Environment limits
 
