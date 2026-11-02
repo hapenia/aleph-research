@@ -14,7 +14,9 @@
     "test": "node --import tsx --test \"test/*.test.ts\"",
     "test:one": "node --import tsx --test",
     "test:dist": "node --test test/dist.test.mjs",
-    "lint:fixtures": "bash scripts/lint-fixtures.sh"
+    "lint:fixtures": "bash scripts/lint-fixtures.sh",
+    "check:completion": "node scripts/check-completion.mjs",
+    "check:release": "tsc -p tsconfig.release.json"
   },
   "exports": {
     ".": {

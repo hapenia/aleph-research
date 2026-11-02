@@ -79,3 +79,14 @@ and the evidence the phase must produce.
 - Operator closes an Issue only after the assignee (or explicit takeover) — decide the rule.
 
 These are Phase 1 decisions; the blueprint currently has no type for them.
+
+
+## Completion ledger
+
+Features that are not wired end to end are listed as `'todo'` in
+`research-core/src/completion.ts` and marked with `TODO(@feature)` at the missing seam.
+`npm run check:completion` validates the markers and prints the pending features; it runs
+in `verify.sh` and CI. `npm run check:release` compiles `src/release-gate.ts` and fails
+while any feature remains `'todo'`, so a release cannot ignore the gap. The current
+pending features are the experiment-to-ticket path, implementer execution, CI writeback,
+researcher review, session tools, live case migration and sampler wiring.

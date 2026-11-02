@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "src/completion.ts",
+    "src/release-gate.ts"
+  ],
+  "exclude": []
+}

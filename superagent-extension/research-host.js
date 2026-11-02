@@ -1,3 +1,5 @@
+// TODO(@ci-evaluation-writeback): the experiment-to-CIRecord writeback is not verified end to end.
+// TODO(@implementer-ticket-execution): this seam is not part of a verified end-to-end path yet; do not claim completion.
 /**
  * AlephResearch Host plugin: the compiled research runtime behind the DSH web server.
  *
