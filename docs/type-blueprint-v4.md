@@ -194,7 +194,7 @@ the methods that would let a caller advance from it, so the only way forward is 
 current node. External side effects are still trusted at the single wiring boundary.
 
 
-## Authorization is receipt too
+## Authorization is a separate proof
 
 A command from a model is not executable until a Host gate has checked principal,
 capability and ownership. The gate returns a proof:
