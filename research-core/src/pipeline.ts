@@ -89,19 +89,19 @@ export function createUnimplementedPipeline(): ResearchPipeline {
   // Researcher review is recorded and the Issue/Experiment have transitioned.
   return {
     experimentToTrigger: {
-      run: async () => unimplemented('experiment-to-ticket', 'Source Eval delivery is not wired'),
+      run: () => unimplemented('experiment-to-ticket', 'Source Eval delivery is not wired'),
     },
     triggerToTicket: {
-      run: async () => unimplemented('experiment-to-ticket', 'Ticket creation after Eval accept is not wired'),
+      run: () => unimplemented('experiment-to-ticket', 'Ticket creation after Eval accept is not wired'),
     },
     ticketToWorker: {
-      run: async () => unimplemented('implementer-ticket-execution', 'Executor/Worker start is not wired'),
+      run: () => unimplemented('implementer-ticket-execution', 'Executor/Worker start is not wired'),
     },
     workerToCIRecord: {
-      run: async () => unimplemented('ci-evaluation-writeback', 'CI execution and CIRecord writeback are not wired'),
+      run: () => unimplemented('ci-evaluation-writeback', 'CI execution and CIRecord writeback are not wired'),
     },
     ciRecordToReview: {
-      run: async () => unimplemented('researcher-review-loop', 'Researcher review loop is not wired'),
+      run: () => unimplemented('researcher-review-loop', 'Researcher review loop is not wired'),
     },
   }
 }
