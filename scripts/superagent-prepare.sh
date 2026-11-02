@@ -54,6 +54,9 @@ git -C "$dir" reset -q --hard FETCH_HEAD
 # the dirty tree.
 git -C "$dir" config user.name "AlephResearch Worker"
 git -C "$dir" config user.email "aleph-worker@localhost"
+# A ticket is self-contained; do not leave an origin pointing at a host path the
+# sandbox cannot reach. Fetches and pushes are not part of the Worker contract.
+git -C "$dir" remote remove origin
 
 # The data a Worker may read is copied in, not linked: a write through the link
 # would reach the source directory.
