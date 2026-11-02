@@ -8,6 +8,8 @@
 
 #![deny(unsafe_code)]
 
+pub mod concepts;
+
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +39,28 @@ impl fmt::Display for FlowError {
 }
 
 impl std::error::Error for FlowError {}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConceptError {
+    Storage(String),
+    Trigger(String),
+    Ticket(String),
+}
+
+impl fmt::Display for ConceptError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Storage(message) => write!(f, "storage: {message}"),
+            Self::Trigger(message) => write!(f, "trigger: {message}"),
+            Self::Ticket(message) => write!(f, "ticket: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for ConceptError {}
+
+// Concept implementations live in `concepts`; they are the only host boundary. TODO(@wasm-core-migration): expose the complete concept set through wasm-bindgen.
+
 
 /// Stage 1: the Researcher has proposed an Experiment plan.
 #[derive(Debug)]
