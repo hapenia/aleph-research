@@ -659,12 +659,12 @@ impl BenchmarkFailed {
         &self.record
     }
 
-    pub fn close_failed<P: Plugin>(
+    pub async fn close_failed<P: Plugin>(
         self,
         context: &PipelineContext<'_, P>,
     ) -> Result<ResearchCompleted, DomainError> {
         let benchmark_run = Some(self.record.id().clone());
-        let completed_at = context.plugin().clock().now();
+        let completed_at = context.plugin().clock().now().await?;
         Ok(ResearchCompleted {
             ids: self.ids,
             outcome: ResearchOutcome::Failed,
@@ -752,12 +752,12 @@ impl BenchmarkRetryable {
         })
     }
 
-    pub fn close_failed<P: Plugin>(
+    pub async fn close_failed<P: Plugin>(
         self,
         context: &PipelineContext<'_, P>,
     ) -> Result<ResearchCompleted, DomainError> {
         let benchmark_run = Some(self.record.id().clone());
-        let completed_at = context.plugin().clock().now();
+        let completed_at = context.plugin().clock().now().await?;
         Ok(ResearchCompleted {
             ids: self.ids,
             outcome: ResearchOutcome::Failed,
@@ -814,12 +814,12 @@ impl ReviewRecorded {
         self.decision
     }
 
-    pub fn close_passed<P: Plugin>(
+    pub async fn close_passed<P: Plugin>(
         self,
         context: &PipelineContext<'_, P>,
     ) -> Result<ResearchCompleted, DomainError> {
         let benchmark_run = Some(self.benchmark.id().clone());
-        let completed_at = context.plugin().clock().now();
+        let completed_at = context.plugin().clock().now().await?;
         Ok(ResearchCompleted {
             ids: self.ids,
             outcome: ResearchOutcome::Concluded,

@@ -269,7 +269,7 @@ pub trait Artifacts {
 }
 
 pub trait Clock {
-    fn now(&self) -> Timestamp;
+    async fn now(&self) -> Result<Timestamp, crate::error::ClockError>;
 }
 
 pub trait Tools {

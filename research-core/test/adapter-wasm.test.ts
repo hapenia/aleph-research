@@ -1,122 +1,51 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { UnimplementedError } from '../src/completion.js'
-import { createHostPrincipal } from '../src/factories.js'
 import {
   CORE_BOUNDARY_VERSION,
   loadBundledResearchCore,
   loadResearchCore,
 } from '../src/adapter/wasm.js'
-import type {
-  CoreCommandInput,
-  CoreExports,
-  CoreImports,
-  CoreStartInput,
-  WasmRuntime,
-} from '../src/adapter/wasm.js'
-import {
-  createPluginFixture,
-  experimentId,
-  issueId,
-  ok,
-  programId,
-} from './adapter-fixture.js'
+import type { CoreConcepts, CoreWasmExports, WasmRuntime } from '../src/adapter/wasm.js'
 
-interface CoreCalls {
-  readonly starts: CoreStartInput[]
-  readonly executes: CoreCommandInput[]
-}
-
-function createCore(calls: CoreCalls, boundaryVersion = CORE_BOUNDARY_VERSION): CoreExports {
+function exportsFor(version: number): CoreWasmExports {
   return {
-    boundaryVersion,
-    start: async (input) => {
-      calls.starts.push(input)
-      return ok({
-        experimentId: input.experimentId,
-        outcome: 'concluded',
-        audit: [],
-      })
-    },
-    execute: async (input) => {
-      calls.executes.push(input)
-      return ok({ value: 'accepted', audit: [] })
-    },
+    memory: { buffer: new ArrayBuffer(0) },
+    aleph_bridge_version: () => version,
+    aleph_alloc: () => 0,
+    aleph_free: () => {},
+    aleph_start: () => 0,
+    aleph_resume: () => 0,
+    aleph_response_len: () => 0,
+    aleph_response_write: () => 0,
   }
 }
 
-test('the loader instantiates with the plugin and forwards both entry points', async () => {
-  const fixture = createPluginFixture()
-  const calls: CoreCalls = { starts: [], executes: [] }
-  const received: { imports?: CoreImports; module?: Uint8Array } = {}
-  const runtime: WasmRuntime = {
-    instantiate: async (module, imports) => {
-      received.module = module
-      received.imports = imports
-      return { exports: createCore(calls) }
-    },
+function runtimeFor(exports: CoreWasmExports): WasmRuntime {
+  return {
+    instantiate: async () => ({ exports }),
   }
-  const source = { module: new Uint8Array([0, 97, 115, 109]) }
+}
 
-  const loaded = await loadResearchCore({
-    source,
-    plugin: fixture.plugin,
-    runtime,
+function unusedConcepts(): CoreConcepts {
+  const unavailable = async () => ({
+    ok: false as const,
+    error: { kind: 'unavailable' as const, message: 'unused' },
   })
-
-  assert.equal(loaded.ok, true)
-  assert.equal(received.module, source.module)
-  assert.deepEqual(received.imports, {
-    storage: fixture.plugin.storage,
-    trigger: fixture.plugin.trigger,
-    executor: fixture.plugin.executor,
-    sessions: fixture.plugin.sessions,
-    benchmark: fixture.plugin.benchmark,
-    artifacts: fixture.plugin.artifacts,
-    clock: fixture.plugin.clock,
-    tools: fixture.plugin.tools,
-    http: fixture.plugin.http,
-    surface: fixture.plugin.surface,
-  })
-  if (!loaded.ok) return
-
-  assert.equal(loaded.value.boundaryVersion, CORE_BOUNDARY_VERSION)
-  const start: CoreStartInput = {
-    programId: programId('program:1'),
-    issueId: issueId('issue:1'),
-    experimentId: experimentId('experiment:1'),
+  return {
+    storage: { loadProgram: unavailable, appendBenchmarkRecord: unavailable },
+    trigger: { deliver: unavailable },
+    executor: { open: unavailable },
+    sessions: { startWorker: unavailable, submitCommit: unavailable, review: unavailable },
+    benchmark: { specHash: unavailable, buildEnvironment: unavailable, run: unavailable },
+    clock: { now: () => '2026-01-01T00:00:00.000Z' },
   }
-  const started = await loaded.value.start(start)
-  assert.deepEqual(started, ok({
-    experimentId: start.experimentId,
-    outcome: 'concluded',
-    audit: [],
-  }))
-
-  const command: CoreCommandInput = {
-    type: 'program.create',
-    actor: createHostPrincipal(),
-    body: { name: 'fixture' },
-  }
-  const executed = await loaded.value.execute(command)
-  assert.deepEqual(executed, ok({ value: 'accepted', audit: [] }))
-
-  assert.deepEqual(calls.starts, [start])
-  assert.deepEqual(calls.executes, [command])
-})
+}
 
 test('the loader refuses a module with a different boundary version', async () => {
-  const fixture = createPluginFixture()
-  const runtime: WasmRuntime = {
-    instantiate: async () => ({
-      exports: createCore({ starts: [], executes: [] }, CORE_BOUNDARY_VERSION + 1),
-    }),
-  }
-
   const loaded = await loadResearchCore({
-    source: { module: new Uint8Array() },
-    plugin: fixture.plugin,
-    runtime,
+    source: { module: new Uint8Array([0, 97, 115, 109]) },
+    concepts: unusedConcepts(),
+    runtime: runtimeFor(exportsFor(CORE_BOUNDARY_VERSION + 1)),
   })
 
   assert.deepEqual(loaded, {
@@ -129,9 +58,30 @@ test('the loader refuses a module with a different boundary version', async () =
   })
 })
 
-test('the bundled loader is a typed unimplemented seam', () => {
-  assert.throws(
-    () => loadBundledResearchCore(),
-    (cause) => cause instanceof UnimplementedError && cause.feature === 'wasm-core-loading',
-  )
+test('the loader refuses a module without the bridge exports', async () => {
+  const exports = exportsFor(CORE_BOUNDARY_VERSION)
+  const missing = {
+    ...exports,
+    aleph_start: undefined,
+  } as unknown as CoreWasmExports
+  const loaded = await loadResearchCore({
+    source: { module: new Uint8Array() },
+    concepts: unusedConcepts(),
+    runtime: runtimeFor(missing),
+  })
+
+  assert.deepEqual(loaded, {
+    ok: false,
+    error: { kind: 'missing-export', name: 'aleph_start' },
+  })
+})
+
+test('the bundled loader instantiates the real wasm artifact', async () => {
+  const loaded = await loadBundledResearchCore(unusedConcepts())
+  assert.equal(loaded.ok, true)
+  if (!loaded.ok) return
+  assert.equal(loaded.value.boundaryVersion, CORE_BOUNDARY_VERSION)
+  assert.equal(typeof loaded.value.start, 'function')
+  assert.equal(typeof loaded.value.resume, 'function')
+  assert.equal(typeof loaded.value.run, 'function')
 })

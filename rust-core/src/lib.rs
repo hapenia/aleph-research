@@ -1,6 +1,7 @@
 #![deny(unsafe_code)]
 #![allow(async_fn_in_trait)]
 
+pub mod bridge;
 pub mod domain;
 pub mod error;
 pub mod id;
@@ -9,6 +10,7 @@ pub mod pipeline;
 pub mod plugin;
 pub mod stage;
 pub mod time;
+pub mod wire;
 
 #[cfg(target_arch = "wasm32")]
 #[allow(unsafe_code)]
@@ -25,7 +27,7 @@ pub use domain::{
 };
 pub use error::{
     Aggregate, ArtifactError, AuditError, BenchmarkError, BenchmarkRecordError, BenchmarkSpecError,
-    DomainError, HttpError, IdError, IdReason, IssueError, LineageError, NumericError,
+    ClockError, DomainError, HttpError, IdError, IdReason, IssueError, LineageError, NumericError,
     ProgramError, ResearchPolicyError, SessionError, StorageError, SurfaceError, TicketError,
     TimestampError, ToolError, TriggerError,
 };

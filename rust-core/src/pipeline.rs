@@ -23,14 +23,14 @@ pub async fn run_pipeline<P: Plugin>(
             BenchmarkOutcome::Passed(passed) => {
                 let recorded = passed.record_result(&context)?;
                 let reviewed = recorded.review_result(&context).await?;
-                return reviewed.close_passed(&context);
+                return reviewed.close_passed(&context).await;
             }
-            BenchmarkOutcome::Failed(failed) => return failed.close_failed(&context),
+            BenchmarkOutcome::Failed(failed) => return failed.close_failed(&context).await,
             BenchmarkOutcome::Retryable(retryable) => {
                 if retryable.can_retry(&context) {
                     environment = retryable.retry_benchmark(&context).await?;
                 } else {
-                    return retryable.close_failed(&context);
+                    return retryable.close_failed(&context).await;
                 }
             }
         }

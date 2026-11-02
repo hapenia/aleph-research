@@ -178,6 +178,7 @@ host_error!(SessionError);
 host_error!(BenchmarkError);
 host_error!(ToolError);
 host_error!(HttpError);
+host_error!(ClockError);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactError {
@@ -510,6 +511,7 @@ pub enum DomainError {
     Artifact(ArtifactError),
     Tool(ToolError),
     Http(HttpError),
+    Clock(ClockError),
     Surface(SurfaceError),
 }
 
@@ -534,6 +536,7 @@ impl fmt::Display for DomainError {
             Self::Artifact(error) => write!(formatter, "artifact error: {error}"),
             Self::Tool(error) => write!(formatter, "tool error: {error}"),
             Self::Http(error) => write!(formatter, "http error: {error}"),
+            Self::Clock(error) => write!(formatter, "clock error: {error}"),
             Self::Surface(error) => write!(formatter, "surface error: {error}"),
         }
     }
@@ -569,6 +572,7 @@ domain_from!(Benchmark, BenchmarkError);
 domain_from!(Artifact, ArtifactError);
 domain_from!(Tool, ToolError);
 domain_from!(Http, HttpError);
+domain_from!(Clock, ClockError);
 domain_from!(Surface, SurfaceError);
 
 impl std::error::Error for IdError {}
@@ -582,6 +586,7 @@ impl std::error::Error for BenchmarkError {}
 impl std::error::Error for ArtifactError {}
 impl std::error::Error for ToolError {}
 impl std::error::Error for HttpError {}
+impl std::error::Error for ClockError {}
 impl std::error::Error for SurfaceError {}
 impl std::error::Error for ProgramError {}
 impl std::error::Error for IssueError {}

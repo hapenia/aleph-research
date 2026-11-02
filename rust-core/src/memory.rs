@@ -562,8 +562,8 @@ impl InMemoryClock {
 }
 
 impl Clock for InMemoryClock {
-    fn now(&self) -> Timestamp {
-        self.now
+    async fn now(&self) -> Result<Timestamp, crate::error::ClockError> {
+        Ok(self.now)
     }
 }
 
@@ -694,6 +694,15 @@ impl Plugin for InMemoryPlugin {
 mod tests {
     use super::*;
 
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        let mut future = std::pin::pin!(future);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        match future.as_mut().poll(&mut context) {
+            std::task::Poll::Ready(output) => output,
+            std::task::Poll::Pending => panic!("in-memory future suspended"),
+        }
+    }
+
     #[test]
     fn in_memory_storage_requires_unique_programs() {
         let storage = InMemoryStorage::default();
@@ -763,6 +772,9 @@ mod tests {
         assert_eq!(manifest.tools().len(), 1);
         assert_eq!(manifest.presets().len(), 1);
         assert_eq!(manifest.settings().len(), 1);
-        assert_eq!(plugin.clock().now(), Timestamp::UNIX_EPOCH);
+        assert_eq!(
+            block_on(plugin.clock().now()).unwrap(),
+            Timestamp::UNIX_EPOCH
+        );
     }
 }

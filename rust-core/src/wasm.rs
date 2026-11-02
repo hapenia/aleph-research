@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use crate::id::{
     ActorId, ArtifactId, Attempt, AuditId, BenchmarkRunId, BenchmarkSpecId, BranchName, CommentId,
     CommitSha, EnvironmentDigest, EnvironmentFile, ExperimentId, IssueId, PipelineRunId, ProgramId,
@@ -5,8 +7,23 @@ use crate::id::{
 };
 use crate::stage::StageName;
 
+thread_local! {
+    static RESPONSE: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+}
+
 fn validity(value: bool) -> u32 {
     u32::from(value)
+}
+
+fn input<'a>(pointer: *const u8, length: usize) -> Option<&'a [u8]> {
+    if pointer.is_null() {
+        return None;
+    }
+    Some(unsafe { std::slice::from_raw_parts(pointer, length) })
+}
+
+fn respond(bytes: Vec<u8>) {
+    RESPONSE.with(|buffer| *buffer.borrow_mut() = bytes);
 }
 
 fn text<'a>(pointer: *const u8, length: usize) -> Option<&'a str> {
@@ -52,6 +69,76 @@ validator!(aleph_environment_digest_is_valid, EnvironmentDigest);
 #[unsafe(no_mangle)]
 pub extern "C" fn aleph_core_version() -> u32 {
     crate::CORE_ABI_VERSION
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn aleph_bridge_version() -> u32 {
+    crate::bridge::version()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn aleph_alloc(length: u32) -> *mut u8 {
+    if length == 0 {
+        return std::ptr::null_mut();
+    }
+    let mut buffer = vec![0u8; length as usize];
+    let pointer = buffer.as_mut_ptr();
+    std::mem::forget(buffer);
+    pointer
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn aleph_free(pointer: *mut u8, length: u32) {
+    if pointer.is_null() || length == 0 {
+        return;
+    }
+    unsafe {
+        drop(Vec::from_raw_parts(
+            pointer,
+            length as usize,
+            length as usize,
+        ));
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn aleph_start(pointer: *const u8, length: usize) -> u32 {
+    let Some(request) = input(pointer, length) else {
+        return 0;
+    };
+    respond(crate::bridge::start(request));
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn aleph_resume(pointer: *const u8, length: usize) -> u32 {
+    let Some(request) = input(pointer, length) else {
+        return 0;
+    };
+    respond(crate::bridge::resume(request));
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn aleph_response_len() -> u32 {
+    RESPONSE.with(|buffer| buffer.borrow().len() as u32)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn aleph_response_write(pointer: *mut u8, capacity: usize) -> u32 {
+    if pointer.is_null() {
+        return 0;
+    }
+    RESPONSE.with(|buffer| {
+        let buffer = buffer.borrow();
+        if buffer.len() > capacity {
+            return 0;
+        }
+        unsafe {
+            std::ptr::copy_nonoverlapping(buffer.as_ptr(), pointer, buffer.len());
+        }
+        buffer.len() as u32
+    })
 }
 
 #[unsafe(no_mangle)]
