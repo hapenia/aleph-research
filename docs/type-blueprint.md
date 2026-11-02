@@ -1,258 +1,538 @@
-# Type blueprint v3: nominal research domain, explicit trust boundaries
+# AlephResearch type blueprint
 
-Status: **frozen type contract + runtime safety contract, approved for Phase 1.** Five
-independent adversarial reviews established that TypeScript and lint cannot enforce
-construction, ownership or untrusted-input safety inside a types-only package. The
-blueprint therefore guarantees the typed shape and the API/state contracts; every
-remaining safety rule is in `docs/runtime-safety-contract.md`, implemented and tested in
-Phase 1. No further adversarial type-review gate: the runtime tests are the gate.
-`research-core/src/types/` is the blueprint; the package contains types plus compile-time
-negative tests only. The JavaScript extension stays the runtime until the phased rewrite
-reaches parity.
+Status: **proposed rewrite; implementation starts after review.** This document replaces
+the frozen TypeScript blueprint. It covers the whole plugin: domain state, commands, the
+research pipeline, DSH integration, tool and route surfaces, completion tracking and
+verification.
 
-v2 claimed more than TypeScript can enforce: the executor was defeated by widening,
-nominal classes had no factory or hydration boundary, cancellation and failed CI could
-not be expressed, and ownership was unchecked. v3 keeps the nominal model but narrows its
-claims, adds the missing states and tokens, and states the one trust boundary honestly.
+## Goals
 
-## Mechanism
+The plugin must be **complete by construction**, not by convention:
 
-Mechanism v5 (`docs/research-mechanism.md`): no best, no quota, no merge. The Host samples
-each new Experiment's base by Boltzmann weight `exp(utility / temperature)` over previous
-Experiments with a valid CI record, or takes a fresh start from the scaffold. Fixed
-levels: `low` 0.2/2%, `normal` 1.0/10%, `high` 3.0/25%. Utility is the Operator's weighted
-sum of min-max normalized metrics. CI records are raw and multi-metric. Experiments are
-snapshots; iteration reuses one Experiment; CI is requested explicitly.
+- every research step consumes the previous stage state and returns the next one;
+- a pipeline cannot be started unless every step is wired;
+- a command cannot reach the executor without a Host authorization proof;
+- every concept the plugin needs is declared in Rust and implemented by the thin
+  TypeScript adapter;
+- an unimplemented path fails compilation or the release gate, never a silent no-op.
 
-## Nominal states and the trust boundary
+The type system is split by responsibility:
 
-`Program`, `Issue` and `Experiment` states are nominal classes: private
-constructors, private brand fields, fields owned by their variant. Variants cannot be
-assigned to each other, and the spread lookalike that supplies every field of another
-state is rejected by the private brand (compile-time test).
+| Layer | Owns | Does not own |
+| --- | --- | --- |
+| Rust core (`wasm32`) | IDs, states, commands, authorization, pipeline order, validation, completeness traits | DSH/Cordis lifecycle, network, filesystem, sessions |
+| TypeScript adapter | DSH/Cordis binding, concept implementations, HTTP/tool/session adapters, wasm loading | research decisions, state machines, stage order |
+| Client panel | rendering and interaction | domain state transitions |
 
-A class cannot prevent `JSON.parse`, `any` or `as`. The blueprint therefore declares a
-single construction/hydration boundary instead of pretending there is none:
+## Core purpose
 
-- `src/factories.ts` declares the only constructible factory functions (principals,
-  tokens, Program, Issue, Experiment, lineages, artifacts, CI completion/request tokens);
-- `src/hydration.ts` declares the only functions that turn storage rows or JSON into
-  domain states, and `src/parsers.ts` the only functions that turn untrusted input into
-  branded ids, timestamps, versions, metric names and schemas; every function returns a
-  `Result` and validates at runtime;
-- ESLint and ast-grep ban imports of those modules outside the composition root, ban
-  type predicates, `JSON`/`globalThis` parsing, assertions, `any`, global clocks and
-  dynamic imports outside the boundary; the adapter must run the same rules (listed as an
-  outstanding composition-root task, because the adapter package is separate);
-- aggregate repositories accept constructed state classes; structural records (CI
-  records, Tickets, comments, reviews, attention) are documented contracts validated at
-  the repository boundary (runtime contract);
-- `DomainFailureMapper.toFailure` is the single place mapping a refusal code to its HTTP
-  status.
+The framework lets an agent research autonomously against an explicit, immutable
+benchmark.
 
-The negative tests, lint rules and eight mutation checks prove the boundary is
-load-bearing where the tools can see it. They cannot prove that a module which is
-allowlisted (composition root, boundary module, adapter) does not fabricate state with
-`as`; this is a checked convention, not an unforgeable capability, and the document says
-so explicitly.
+- The Operator creates a Program with a goal, a benchmark contract, a utility definition
+  and a budget.
+- The Researcher proposes and revises Experiments from recorded BenchmarkRecords.
+- The Implementer works a Ticket and submits a commit; the Host runs the benchmark.
+- The Host scheduler, not an unrestricted model loop, decides when to propose again, when
+  to stop, and when the budget is exhausted.
+- The benchmark belongs to the Operator. The agent cannot edit it, and every run pins its
+  spec hash and environment digest.
 
-## State machines
+Autonomy is therefore bounded and auditable: the agent chooses hypotheses and
+implementations, while the benchmark and budget define success.
 
-```ts
-RunningProgram.pause(OperatorPrincipal) / pauseForBudget(HostPrincipal) / stop / complete
-PausedProgram.resume / setGoal / setMethodology / setExploration / recordUsage
-AssignedIssue.authorize(ResearcherPrincipal): Result<IssueAssignment, DomainError>
-AssignedIssue.addExperiment(IssueAssignment, ExperimentId)
-OpenExperiment.submit(TicketBinding, head, environment): ReadyExperiment
-ReadyExperiment.requestCI(IssueAssignment, CIRunId): CIPendingExperiment
-CIPendingExperiment.startCI(HostPrincipal, digest): CIRunningExperiment
-CIRunningExperiment.passCI(HostPrincipal, PassedCICompletion): CIPassedExperiment
-CIRunningExperiment.failCI(HostPrincipal, FailedCICompletion): CIFailedExperiment
-CIPendingExperiment.cancel(HostPrincipal) / CIRunningExperiment.cancel(HostPrincipal)
-CIPassedExperiment.close(IssueAssignment) / CIFailedExperiment.revise(TicketBinding) / close
+## Live validation boundary
+
+The implementation is validated by a real DSH lab with the embedded wasm, the real
+command bridge and a synthetic benchmark command. The actual 24-hour case run is out of
+scope: it is an acceptance run for the framework, not an implementation step.
+
+## Out of scope
+
+The old Boltzmann sampler, quota, merge and best-result tracker are not part of this
+design. Exploration remains Program metadata; the Researcher proposes hypotheses from
+recorded BenchmarkRecords, and ResearchPolicy bounds the search. There is no separate
+sampler to wire.
+
+## Naming
+
+Standard names only. Types describe states; functions describe actions; traits describe a
+capability. Do not add a second vocabulary for the same idea: no `Receipt`, `Evidence`,
+`Concept`, `FlowStep` or `Complete*` suffixes.
+
+Rust and TypeScript use the same domain names. IDs are newtypes, never bare strings. A
+state type has one successor operation; a wiring interface has one field per step.
+
+## Architecture
+
+```
+Cordis plugin (TypeScript)
+  webServer routes, tools, session pool, panel, settings
+  concept adapters implementing the effect-backed Rust traits
+  raw C ABI effect bridge
+        |
+        v
+Rust core (wasm32-unknown-unknown)
+  IDs, validation, command authorization
+  domain states and transitions
+  typestate pipeline and Plugin completeness
 ```
 
-- `ReadyExperiment` is the readiness gate: CI cannot be requested before the Implementer
-  submits.
-- Cancellation is a Host transition on ready, pending and running Experiments; a
-  cancelled Experiment closes with `outcome: 'cancelled'`.
-- CI evidence comes from `PassedCICompletion` / `FailedCICompletion` tokens that only the
-  Host CI runner mints; a bare run object cannot be passed.
-- Program has `CompletedProgram`; closing the last Issue lets the Host complete it.
-- Budget usage is a `UsageDelta` of non-negative counters recorded by the Host; there is
-  no way to decrease usage or record it as a model.
+The dependency direction is one-way: TypeScript imports generated Rust declarations; Rust
+does not import JavaScript. The adapter supplies concept implementations to the Rust
+plugin at construction. The adapter performs effects and maps their results into the
+concept methods; the Rust core decides what may happen next.
 
-## Ownership tokens
+## Effect bridge
 
-A role class alone does not prove ownership. Two nominal tokens express it:
+The wasm module has no JavaScript imports. Rust returns an effect frame
+`{name, sequence, payload}`; TypeScript performs the effect, then calls `aleph_resume`
+with the encoded result. Rust validates the pending effect kind and sequence, owns the
+stage order, and advances only on a matching result. TypeScript never selects a stage.
 
-- `IssueAssignment` is produced by the factory boundary; the implementation calls
-  `AssignedIssue.authorize(actor)`, which compares the actor Session with the assignee.
-  `addExperiment`, `close`, `requestCI` and Experiment closes require it and return
-  `Result`; the implementation must compare `assignment.issueId` and the assignee before
-  moving state.
-- `TicketBinding` is minted from a `Ticket` record and carries ticket, experiment and
-  Implementer Session. `submit` and `revise` require the Implementer principal and the
-  binding and return `Result`; the implementation must compare all three.
-- `CIRequestToken` is minted by the Host for one Experiment/commit; `requestCI` takes it
-  instead of a caller-chosen run id.
-- `PassedCICompletion` / `FailedCICompletion` carry `ciRunId` and the raw record as their
-  only duplication; the implementation compares the record's experiment, commit and run
-  id with the Experiment before recording the result.
+The bridge exposes the six concepts the pipeline actually uses: storage, trigger,
+executor, sessions, benchmark and clock. Rust's ten-trait `Plugin` remains the internal
+composition; artifacts, tools, HTTP and surface are manifest/registry concerns rather
+than pipeline effects.
 
-The type surface makes the comparisons possible and forces a `Result` return; the
-comparisons themselves are runtime implementation requirements, listed in the runtime
-section rather than claimed as compiler guarantees.
+## IDs and primitives
 
-## Executor, commands and audit
+All identifiers are newtypes validated at the boundary:
 
-- The executor is one method per command literal (`executor['program.pause']`), not a
-  generic function; a widened `UserCommand`, a generic `CommandType` or a mismatched
-  context does not typecheck.
-- Each command maps at compile time to its capability, actor and result type.
-- `CommandOutcome<K>` carries a non-empty audit array on both success and refusal.
-- `TriggerKindForAction` is a total map from audit actions to trigger kinds, so a new
-  action forces a trigger decision.
-- `AuditEntry` is a mapped union: action fixes allowed actor kinds and subject id type.
+```
+ProgramId, IssueId, ExperimentId, TicketId, BenchmarkRunId, CommitSha, ArtifactId, AuditId
+```
 
-## Storage and metrics
+`CommitSha` accepts a 40-character hex SHA or the documented zero value for a fresh
+experiment. Timestamps are ISO-8601 UTC at the boundary and typed timestamps internally.
+Versions are monotonic integers used by storage compare-and-swap.
 
-- Versioned, nominal repositories: `get(id: ProgramId)`, `listAssignedTo(ResearcherSessionId)`,
-  `save(expected: Version, next)`.
-- `UnitOfWork` covers programs, issues, experiments, CI records, tickets, artifacts,
-  attention and audit.
-- `CIRecord` is a status union (`requested/running/passed/failed`) with metrics, artifacts,
-  duration and environment digest where they exist; failed runs are persisted.
-- `Ticket` is a discriminated status union (open/running/submitted/cancelled/failed) owned by the Host;
-  `TicketBinding` is minted from it and the repository only returns Tickets, never raw
-  tuples.
-- `CIPassedExperiment` stores the CI run reference, not a duplicated metrics/artifact
-  snapshot, so the raw record remains the single source.
-- Only passed records with the required metrics feed the sampler (`listPassed`); validity
-  is computed by query, not stored.
-- No best record exists.
+Errors are typed enums. A domain refusal is not a panic; a contract violation may panic
+only in a test or a `todo!()` stub.
 
-## Tools and API
+## Durable state
 
-- `Schema<T>` is a plain interface with `parse` and `toJsonSchema`; the adapter supplies both.
-- The index-route parser table and the runtime checklist are the remaining link between
-  route bodies and commands.
-- Command tools carry the command literal; Implementer submit input omits `binding`;
-  output is `ReadyExperiment`.
-- Writes have one route family: a route only parses (`ApiWriteRoutes` maps each command
-  to a parser). `executeRoute` owns executor access and Host injection; Phase 1 tests
-  that a route cannot return an outcome or call another command's executor slot.
-- The panel is the only non-write route family and reads `ProgramSnapshot` (current state,
-  raw CI records, audit, artifacts, attention); no replay.
-- Responses are `ApiResponse<T>` = value or `DomainFailure`, both carrying audit; parsers
-  accept raw `unknown` and return commands.
+Durable state is separate from pipeline stage state. It is stored in the `aleph_research`
+DSH domain as versioned envelopes with CAS.
 
-## DSH and dsh-superagent integration
+### Program
 
-`research-core` is DSH-independent. `superagent-extension` becomes the TypeScript adapter
-with the same bundle name, bootstrap and profile composition. It maps DSH services to the
-ports: webServer routes, tool registration, sessions/agentPresets for Researcher sessions,
-`ctx.orchestrator` for the Trigger seam, the `aleph_research` DSH storage domain for state,
-subprocess/shell for uv and CI, filesystem for artifacts, effects for attention, fiber for
-hot reload. Researcher Sessions are DSH sessions with a research preset; Implementer work
-stays a prototype Ticket/Worker with the existing sandbox. The submit tool delegates to
-the Host CI runner and records raw metrics and artifacts; the Main Session keeps routing
-attention.
+```
+id, name, goal, methodology
+benchmark: BenchmarkSpec
+utility: metrics[name, direction, weight]
+exploration: low | normal | high
+policy: ResearchPolicy
+usage: experiments, computeMinutes, tokens
+status: running | paused | stopped
+createdAt, version
+```
 
-## Static analysis beyond TypeScript
+### Issue
 
-The third review showed that TypeScript alone cannot keep a construction boundary honest:
-`static create` is public, so any module can call it. The blueprint therefore adds a
-second static layer, wired into `verify.sh` and CI:
+```
+id, programId, title, body, labels
+author, createdAt
+status: open | assigned | closed
+assignee: researcher session id
+experimentIds
+```
 
-- **ESLint** (`research-core/eslint.config.js`): type-aware recommended rules; bans `as`,
-  `any`, non-null assertions, unsafe `any` flows, floating promises and non-exhaustive
-  switches; `no-restricted-syntax` bans calls to `.create(` / `.fromRow(` and
-  `JSON.parse` outside the boundary modules, and bans global clocks (`Date.now`), dynamic
-  imports and process/fetch/timeout globals.
-- **ast-grep** (`research-core/ast-grep/`): the same boundary rules at AST level for
-  files the ESLint parser does not cover: type assertions, `any`, `create(...)` and
-  `JSON.parse` outside `src/factories.ts`, `src/hydration.ts` and `src/type-tests.ts`.
-- Factory/hydration modules are the only allowlisted places for assertions, casts and
-  row parsing. The type tests are allowlisted because they deliberately probe the
-  boundary.
-- The checks are part of `npm run lint`, `scripts/verify.sh` and the CI job, so a new
-  bypass fails the build even when `tsc` accepts it.
+### Experiment
 
-There is no separate authority token: the boundary is the pair of modules above. Static
-analysis can prove that no other module calls a factory or parses rows, but it cannot
-prove that a rogue module fabricated state with `as` inside the boundary; this limit is
-stated rather than hidden.
+```
+id, programId, issueId
+branch, head
+environment: requirements | uv-lock
+lineage: strategy, baseCommit, freshStartProbability
+planCommentId
+createdBy, createdAt
+status: open | concluded | failed | cancelled
+```
 
-## Compile-time guarantees and tests
+### Ticket
 
-`research-core/src/type-tests.ts` covers: widened command rejection, per-command actor
-mismatch, executor host actor rejection, spread/status lookalike rejection, variant
-assignment rejection, failed-CI to passed assignment rejection, DomainFailure construction
-and status correlation, nominal id mixing, ownership-token substitution, Host-only
-cancellation, completed-Program transitions, empty audit rejection, wrong audit action,
-the capability map, and lineage separation.
+```
+id, experimentId, assignment
+status: open | running | succeeded | failed | abandoned
+commit, workerSessionId
+```
 
-`research-core/scripts/type-mutation-check.sh` removes a guarantee in a throwaway copy and
-requires `tsc` to fail **at the type tests with the expected diagnostic**, not from an
-unrelated error: deleting a private brand, widening the success or refusal audit, allowing
-a Researcher to pause, mapping `program.pause` to the wrong capability, dropping the
-ownership `Result` from `requestCI`, closing a passed Experiment with a principal and
-swapping the `ci.passed` trigger kind are all killed. It runs in `verify.sh` and CI.
-Tool input shapes are adapter contracts, not a compile-time security boundary; the Host
-injects `binding` at execution time.
+### BenchmarkRecord
 
-Third-review fixes already applied: the factory/hydration boundary moved out of the state
-classes after the lint layer made per-class factories redundant; `ciRunId` on completion
-tokens; CI failure duration;
-command audit entries parameterized by the action map and moved into `commands.ts`; audit
-on API responses; `RouteSpec`; public `Schema` constructor taking a validator; a
-`program.budget-paused` action; and negative tests for success/refusal audit
-non-emptiness and wrong audit action.
+```
+id, experimentId, ticketId, commit
+specHash, environmentDigest
+metrics: raw named values, no aggregate score
+status: passed | failed | retryable
+attempt, maxAttempts
+stdout, stderr, artifacts
+createdAt
+```
 
-Typed contracts already in place: transitions return `Result` so ownership association
-can be checked; `Ticket` is a discriminated status union; write routes only parse and
-`executeRoute` is the single executor entry; the trigger kind table is per-action literal;
-tool outputs derive from `CommandResultMap`; the capability map is load-bearing in a type
-test; and `scripts/type-mutation-check.sh` kills eight targeted mutations with expected
-diagnostics. The runtime contract lists the associated implementation tests that complete
-these guarantees.
+### PipelineRun
 
-Remaining runtime-only rules: the Session comparison behind `authorize`, the token
-association comparisons inside transitions, the Ticket to Session binding, candidate
-deduplication and required-metric validation, trigger delivery to the prototype Eval,
-budget counter arithmetic, DSH tool registration, storage hydration inside the boundary
-modules, and the adapter's use of the same lint rules (the adapter package is outside
-`research-core`'s ESLint scope until the composition-root lint lands).
+```
+id, experimentId, stage, attempt
+benchmarkRunId?
+stateVersion, updatedAt
+```
 
-Known limits, stated instead of hidden:
+`PipelineRun` persists progress, not the nominal stage token. On resume the Host reads the
+stage name and ids, rebuilds the stage state after checking the durable aggregate, and
+continues. This survives a Host restart without making stage types serialisable.
 
-- `as`, `any`, `JSON.parse` and reflection can defeat any TypeScript guarantee; the only
-  defence is the single `fromRow`/factory boundary and runtime validation there.
-- Class instances lose methods on JSON round-trip; storage must hydrate through `fromRow`.
-- Ownership tokens prove a runtime check happened, not Session equality at compile time.
-- Gossip of compile-time maps (`CapabilityForCommand`, `CommandAuditMap`) is checked by
-  tests only where used; adding a command requires touching the maps, which the compiler
-  enforces for the handler and audit maps.
+### Audit
 
-## Phases
+Every command appends an audit entry with actor, action, subject, detail and request id.
+The audit log is append-only and is the source of truth for replay and evidence.
 
-1. Runtime safety contract first: factory/hydration/parser implementations with the
-   ownership, association, structural-record, route-injection, parser-coverage and
-   preset tests; then command handlers/audit, DSH storage-domain repositories, management
-   routes, negative tests kept green.
-2. Host services: uv builder, CI runner, artifact store, sampler with injected RNG,
-   session pool, attention, cancellation.
-3. Adapter: tool registration, Trigger seam, Researcher preset, panel.
-4. Case migration and 24-hour run.
+## Benchmark contract
 
-## Non-goals
+```
+BenchmarkSpec {
+  id, entry, timeoutMs
+  metrics: [{ name, direction, required, tolerance? }]
+  maxRetries
+  baseline?: { [metric: string]: number }
+  dataset?: string
+}
+```
 
-No missions, machines, batches, merge/mainline semantics, scheduling, GitHub integration,
-stored best/aggregates, event replay or panel controls in v1.
+The spec is read-only input to the Host. The benchmark adapter hashes it, builds the
+declared environment, runs the entry and records raw metrics. The agent never writes
+benchmark files, tests or expected values. A run whose spec hash or environment digest
+does not match the Program contract is invalid and cannot be recorded as passed.
 
-## Approval and next step
+`BenchmarkRecord` holds the raw metrics and artifacts. It has no aggregate score; the
+Program utility, not the adapter, defines how metrics are weighted.
 
-The scope decision is: **type contract + runtime safety contract**. Phase 1 starts with
-the runtime checks in `docs/runtime-safety-contract.md` and their tests. The type-review
-gate is closed; runtime evidence is the acceptance criterion.
+`BenchmarkSpec.maxRetries` is advisory. `ResearchPolicy.maxAttemptsPerExperiment` is the
+authoritative retry bound; the policy wins when they disagree.
+
+## Commands and authorization
+
+A model-facing command is a draft:
+
+```
+CommandDraft =
+  program.create | program.pause | program.resume | program.stop
+  | program.goal | program.methodology | program.exploration
+  | issue.create | issue.claim | issue.comment | issue.close
+  | experiment.propose | experiment.review | experiment.close
+  | benchmark.request | ticket.submit
+```
+
+The Host gate checks principal, capability, ownership and current state, then returns:
+
+```
+AuthorizedCommand<K> {
+  command: CommandOf<K>
+  actor: ActorOf<K>
+  authorization: AuthorizationProof<K>
+}
+```
+
+`CommandExecutor` accepts only `AuthorizedCommand<K>`. A route, tool or session cannot
+call the executor with a bare command. `AuthorizationProof` is minted by the gate; it is
+not constructible by the adapter.
+
+## Autonomy
+
+A Program-level loop drives repeated Experiments:
+
+```
+Program running
+  -> Issue assigned
+  -> Experiment proposed
+  -> Trigger accepted
+  -> Ticket opened
+  -> Worker started and commit submitted
+  -> Environment built
+  -> Benchmark passed | failed | retryable
+  -> Result recorded
+  -> Review recorded: propose | revise | stop
+       propose / revise -> new Experiment proposed
+       stop             -> Research completed
+```
+
+`ResearchPolicy` bounds the loop: maximum experiments, compute minutes, tokens and
+attempts per experiment. A retryable benchmark failure returns to `EnvironmentBuilt` only
+while the attempt budget allows it; otherwise it becomes terminal. The Researcher chooses
+the next hypothesis from recorded results; the Host enforces the policy and owns the stop
+condition.
+
+## Stage states
+
+The pipeline is a sequence of nominal states. Each state carries only the ids and facts
+the next step needs. Durable state lives in storage.
+
+```
+IssueAssigned
+ExperimentProposed
+TriggerAccepted
+TicketOpened
+WorkerStarted
+CommitSubmitted
+EnvironmentBuilt
+BenchmarkPassed | BenchmarkFailed | BenchmarkRetryable
+ResultRecorded
+ReviewRecorded
+ResearchCompleted
+```
+
+Invariants:
+
+- `TriggerAccepted` exists only after the Source Eval accepted the trigger.
+- `TicketOpened` exists only with a real Ticket id from the Executor.
+- `WorkerStarted` exists only with a started Worker session.
+- `CommitSubmitted` exists only with a commit reachable by the benchmark.
+- `EnvironmentBuilt` exists only after the declared environment was built.
+- `BenchmarkPassed`, `BenchmarkFailed` and `BenchmarkRetryable` carry the raw
+  BenchmarkRecord; no aggregate score hides metrics.
+- `ReviewRecorded` carries the Researcher decision: propose, revise or stop.
+- `ResearchCompleted` is terminal and carries the outcome.
+
+Constructors are private. A single factory creates each state after the real effect, or in
+the in-memory implementation used by tests. The factory is the trust boundary: it makes
+the call site explicit and testable, but it does not prove that a network call happened.
+
+## Pipeline
+
+```
+Step<In, Out> = (input: In) => Promise<Result<Out, DomainError>>
+
+interface Pipeline {
+  deliverTrigger: Step<ExperimentProposed, TriggerAccepted>
+  openTicket: Step<TriggerAccepted, TicketOpened>
+  startWorker: Step<TicketOpened, WorkerStarted>
+  submitCommit: Step<WorkerStarted, CommitSubmitted>
+  buildEnvironment: Step<CommitSubmitted, EnvironmentBuilt>
+  runBenchmark: Step<EnvironmentBuilt, BenchmarkPassed | BenchmarkFailed | BenchmarkRetryable>
+  retryBenchmark: Step<BenchmarkRetryable, EnvironmentBuilt>
+  recordResult: Step<BenchmarkPassed, ResultRecorded>
+  reviewResult: Step<ResultRecorded, ReviewRecorded>
+  closePassed: Step<ReviewRecorded, ResearchCompleted>
+  closeFailed: Step<BenchmarkFailed | BenchmarkRetryable, ResearchCompleted>
+}
+```
+
+`runBenchmark` returns a union; every branch must be consumed. `retryBenchmark` is allowed
+only while `ResearchPolicy.maxAttemptsPerExperiment` permits it; otherwise the state is
+terminal and goes to `closeFailed`. `runPipeline` chains the steps in order and cannot
+skip one. The production `Pipeline` has no optional step and no `any`.
+
+## Typestate public API
+
+The public API is typestate. Each state exposes only its successor:
+
+```
+ExperimentProposed.deliverTrigger(): Result<TriggerAccepted, DomainError>
+TriggerAccepted.openTicket(): Result<TicketOpened, DomainError>
+TicketOpened.startWorker(): Result<WorkerStarted, DomainError>
+WorkerStarted.submitCommit(): Result<CommitSubmitted, DomainError>
+CommitSubmitted.buildEnvironment(): Result<EnvironmentBuilt, DomainError>
+EnvironmentBuilt.runBenchmark(): Result<BenchmarkPassed | BenchmarkFailed | BenchmarkRetryable, DomainError>
+BenchmarkRetryable.retryBenchmark(): Result<EnvironmentBuilt, DomainError>
+BenchmarkPassed.recordResult(): Result<ResultRecorded, DomainError>
+BenchmarkFailed.closeFailed(): Result<ResearchCompleted, DomainError>
+ResultRecorded.reviewResult(): Result<ReviewRecorded, DomainError>
+ReviewRecorded.closePassed(): Result<ResearchCompleted, DomainError>
+ResearchCompleted.outcome: concluded | failed | cancelled
+```
+
+`openTicket` does not exist on `ExperimentProposed`; the trigger step cannot be skipped
+even when the caller holds a state value. `BenchmarkPassed`, `BenchmarkFailed` and
+`BenchmarkRetryable` are distinct types. `ResearchCompleted` has no successor.
+`startPipeline(pipeline, initial)` is the only entry.
+
+TypeScript has no move semantics: a previous object still exists after a transition. It
+has no successor method, so the only way forward is the current state. Rust consumes
+`self`, so the old value cannot be used at all.
+
+## Wiring
+
+Wiring is a typestate builder:
+
+```
+type Capability =
+  trigger | ticket | worker | commit | environment | benchmark | retry | result | review | close
+
+PipelineBuilder<W extends Capability = never>
+  withTrigger(...): PipelineBuilder<W | trigger>
+  withTicket(...): PipelineBuilder<W | ticket>
+  withWorker(...): PipelineBuilder<W | worker>
+  withCommit(...): PipelineBuilder<W | commit>
+  withEnvironment(...): PipelineBuilder<W | environment>
+  withBenchmark(...): PipelineBuilder<W | benchmark>
+  withRetry(...): PipelineBuilder<W | retry>
+  withResult(...): PipelineBuilder<W | result>
+  withReview(...): PipelineBuilder<W | review>
+  withClose(...): PipelineBuilder<W | close>
+  build(this: PipelineBuilder<Capability>): Pipeline
+```
+
+A partial builder has no `build()`. There is no default production wiring and no factory
+that returns a complete-looking pipeline whose steps throw.
+
+Tests implement a `FakePipeline` with real in-memory behavior. A specific unimplemented
+seam may throw `unimplemented(feature)`, but it cannot be wrapped into a whole pipeline.
+
+## Plugin completeness
+
+Rust declares the concepts the adapter must supply:
+
+```
+trait Storage
+trait TriggerSource
+trait TicketExecutor
+trait Sessions
+trait BenchmarkRunner
+trait Artifacts
+trait Clock
+trait Tools
+trait Http
+trait Surface
+```
+
+`Plugin` has one associated type per concept:
+
+```
+trait Plugin {
+  type Storage: Storage
+  type Trigger: TriggerSource
+  type Executor: TicketExecutor
+  type Sessions: Sessions
+  type Benchmark: BenchmarkRunner
+  type Artifacts: Artifacts
+  type Clock: Clock
+  type Tools: Tools
+  type Http: Http
+  type Surface: Surface
+  fn storage(&self) -> &Self::Storage
+  fn trigger(&self) -> &Self::Trigger
+  fn executor(&self) -> &Self::Executor
+  fn sessions(&self) -> &Self::Sessions
+  fn benchmark(&self) -> &Self::Benchmark
+  fn artifacts(&self) -> &Self::Artifacts
+  fn clock(&self) -> &Self::Clock
+  fn tools(&self) -> &Self::Tools
+  fn http(&self) -> &Self::Http
+  fn surface(&self) -> &Self::Surface
+}
+```
+
+`runPipeline` accepts only `P: Plugin`. A plugin missing a concept does not satisfy the
+trait, so the pipeline entry point is unreachable. The concept methods are the only host
+boundary; the wasm effect bridge surfaces the six pipeline concepts, while the remaining
+traits are manifest/registry contracts. A missing concept implementation fails the Rust
+trait bound; a missing effect handler fails the TypeScript union exhaustive check.
+
+`Surface` is the whole-plugin manifest: required HTTP routes, model-facing tools, session
+presets and settings. The TypeScript layer binds every entry with a mapped
+`Record<SurfaceName, Handler>`; a missing binding is a type error. This is how plugin
+completeness covers more than the research pipeline.
+
+## Storage contract
+
+Repositories expose versioned reads and CAS writes. A transition that changes a durable
+aggregate returns the new version; a concurrent write returns a conflict, never a lost
+update. The storage domain has one envelope table per aggregate and an append-only audit
+table. Stage states are ephemeral; PipelineRuns, BenchmarkRecords, Tickets, Experiments and
+audit entries are persistent.
+
+## DSH integration
+
+The TypeScript adapter owns only the DSH/Cordis mechanics:
+
+- `webServer` routes map requests to typed commands and `AuthorizedCommand` entries;
+- tools expose the model-facing command schemas and call the same command layer;
+- the session pool hosts the Operator/Researcher/Implementer presets;
+- the executor starts Ticket work and reports Worker events;
+- the benchmark adapter builds the declared environment, runs the entry and records raw results;
+- the trigger adapter delivers the Experiment trigger to the prototype Source Eval;
+- the client panel consumes generated DTOs and never derives domain transitions.
+
+No adapter contains stage order, stage-state validity or domain decisions.
+
+## Completion and release gate
+
+`completion.ts` is a checked ledger: every feature that is not verified end to end is
+`'todo'`. `check:completion` prints the pending list; `check:release` fails compilation
+while any entry is `'todo'`. Rust stubs use the standard `todo!()` macro. There are no
+explanatory TODO comments and no comment-scanning gate.
+
+The release gate is the deployment gate. Health reports the ledger, but health is not a
+completion claim.
+
+## Verification
+
+Rust:
+
+- unit tests for IDs, transitions and invariants;
+- compile-fail tests for consumed typestate values;
+- integration tests with in-memory `Storage`, `TriggerSource` and `TicketExecutor`;
+- `cargo clippy`, `cargo fmt --check`, release wasm build.
+
+TypeScript:
+
+- typecheck of generated wasm bindings and the adapter;
+- negative type tests for wrong stage values and partial wiring;
+- route/tool/surface completeness tests against `Surface`;
+- benchmark integrity tests: spec hash, environment digest, read-only benchmark files;
+- policy tests: experiment, compute, token and attempt limits;
+- existing domain, parser, handler, storage and tool tests until parity.
+
+End to end:
+
+- a fixture lab drives `ExperimentProposed` through `ResearchCompleted` with fake
+  concepts, including a retryable benchmark failure and policy-bounded retry;
+- a real DSH lab then repeats the same path with the concrete adapters;
+- the completion ledger is empty before a test DSH is started.
+
+## Migration
+
+1. Add the Rust crate with IDs, errors, states and traits; generate wasm bindings.
+2. Move validation and command authorization into Rust; keep the TS routes as adapters.
+3. Implement the concept adapters against DSH storage, sessions, tools and the benchmark runner.
+4. Replace the TS pipeline with the typestate `Pipeline`; delete optional ports.
+5. Add `Surface` and bind routes/tools/presets exhaustively.
+6. Run the fixture lab, then the real DSH lab; empty the ledger; only then start a test DSH.
+
+The legacy TypeScript core stays until the Rust path passes parity tests. `docs/rust-wasm-core.md`
+records the spike commands and the wasm packaging constraints.
+
+## Guarantees and limits
+
+Compile time guarantees:
+
+- stage order cannot be skipped or reordered;
+- a later step cannot receive an earlier stage state;
+- a benchmark failure or retryable branch must be handled;
+- a command cannot reach the executor without an authorization proof;
+- a missing concept, route, tool or preset binding is a type error;
+- the release gate refuses incomplete features.
+
+Runtime limits:
+
+- the factory can still lie about an external effect; integration tests are required;
+- WASM is not a security boundary and does not sandbox DSH;
+- async JS effects must map errors explicitly;
+- serialized boundary types must stay versioned and generated;
+- TypeScript cannot enforce move semantics, only the absence of successor methods.
+
+## Decisions
+
+1. **Stage-state persistence.** Persist a `PipelineRun` (stage, attempt, ids, benchmark
+   run id, state version) plus the durable aggregate and audit log. Stage states stay
+   ephemeral and are rebuilt on resume. This gives restart recovery without serialising
+   nominal tokens.
+2. **Failure branches.** `BenchmarkRetryable` is explicit. It returns to
+   `EnvironmentBuilt` only while `ResearchPolicy.maxAttemptsPerExperiment` allows it;
+   otherwise it goes to `closeFailed`. `BenchmarkFailed` is always terminal.
+3. **Step granularity.** Keep `startWorker` and `submitCommit` separate. A Worker can start
+   without committing, and the two failures need different remediation; merging them
+   would hide a partial progress state.
+
+These choices favour autonomous operation with bounded policy over an unrestricted retry
+loop.

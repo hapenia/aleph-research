@@ -108,6 +108,20 @@ test('npm run build emits the packaged JavaScript and declarations', async () =>
     'adapter/composition.d.ts',
     'adapter/storage-domain.js',
     'adapter/storage-domain.d.ts',
+    'adapter/boundary.js',
+    'adapter/boundary.d.ts',
+    'adapter/plugin.js',
+    'adapter/plugin.d.ts',
+    'adapter/runtime.js',
+    'adapter/runtime.d.ts',
+    'adapter/surface.js',
+    'adapter/surface.d.ts',
+    'adapter/wasm.js',
+    'adapter/wasm.d.ts',
+    'adapter/wasm-codec.js',
+    'adapter/wasm-codec.d.ts',
+    'adapter/wasm-core.js',
+    'adapter/wasm-core.d.ts',
   ]) {
     assertEmitted(entry)
   }
@@ -131,10 +145,18 @@ test('the built modules expose the adapter entry points', async () => {
   const adapterComposition = await importDist('adapter/composition.js')
   const runtimeStorage = await importDist('runtime/storage.js')
   const adapterStorageDomain = await importDist('adapter/storage-domain.js')
+  const adapterRuntime = await importDist('adapter/runtime.js')
+  const adapterSurface = await importDist('adapter/surface.js')
+  const adapterWasm = await importDist('adapter/wasm.js')
+  const adapterCoreRuntime = await importDist('adapter/core-runtime.js')
 
   assert.equal(typeof adapterComposition.createResearchHost, 'function')
   assert.equal(typeof runtimeStorage.createInMemoryStore, 'function')
   assert.equal(typeof adapterStorageDomain.createStorageDomainUnitOfWork, 'function')
+  assert.equal(typeof adapterRuntime.createPlugin, 'function')
+  assert.equal(typeof adapterSurface.bindSurface, 'function')
+  assert.equal(typeof adapterWasm.loadResearchCore, 'function')
+  assert.equal(typeof adapterCoreRuntime.createCoreRuntime, 'function')
 })
 
 test('createResearchHost from dist creates a Program over the HTTP route and snapshots it', async () => {

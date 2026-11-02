@@ -339,13 +339,17 @@ export {
   expectedAuditActions,
 }
 
-// ---------------------------------------------------------------------------------------
-// Typed pipeline chain: a stage cannot accept the evidence of an earlier stage.
-// ---------------------------------------------------------------------------------------
 declare const researchPipeline: import('./pipeline.js').ResearchPipeline
-declare const proposedEvidence: import('./pipeline.js').ExperimentProposedEvidence
-// @ts-expect-error triggerToTicket requires TriggerAcceptedEvidence, not ExperimentProposedEvidence
-researchPipeline.triggerToTicket.run(proposedEvidence)
-declare const acceptedEvidence: import('./pipeline.js').TriggerAcceptedEvidence
-// @ts-expect-error ticketToWorker requires TicketCreatedEvidence
-researchPipeline.ticketToWorker.run(acceptedEvidence)
+declare const proposed: import('./pipeline.js').ExperimentProposed
+// @ts-expect-error openTicket requires TriggerAccepted, not ExperimentProposed
+researchPipeline.openTicket(proposed)
+declare const accepted: import('./pipeline.js').TriggerAccepted
+// @ts-expect-error startWorker requires TicketOpened
+researchPipeline.startWorker(accepted)
+
+declare const surfaceHandlers: import('./adapter/surface.js').SurfaceHandlers
+declare const surfacePorts: import('./adapter/surface.js').SurfacePorts
+declare const bindSurface: typeof import('./adapter/surface.js').bindSurface
+// @ts-expect-error a surface binding must cover every surface name
+void bindSurface({ 'program.create': surfaceHandlers['program.create'] }, surfacePorts)
+void bindSurface(surfaceHandlers, surfacePorts)

@@ -1,107 +1,124 @@
-/**
- * Typed research pipeline: each stage's output is the only accepted input of the next.
- * A stage cannot be skipped or reordered, and a composition that has not implemented a
- * stage cannot fabricate its evidence type. This is the compile-time shape of the
- * experiment -> trigger -> Ticket -> Worker -> CI -> review chain.
- *
- * The evidence classes are nominal; their constructors are intentionally private. They
- * are produced only by the corresponding stage and consumed by the next one.
- */
 import type { DomainError, Result } from './types/errors.js'
-import type { CIRunId, CommitSha, ExperimentId, IssueId, ProgramId, TicketId } from './types/ids.js'
-import { unimplemented } from './completion.js'
+import type { CommitSha, ExperimentId, IssueId, ProgramId, TicketId } from './types/ids.js'
+import type { BenchmarkRecord, ResearcherDecision } from './benchmark.js'
 
-export declare class ExperimentProposedEvidence {
+export declare class IssueAssigned {
+  private constructor()
+  private readonly __issueAssigned: true
+  readonly programId: ProgramId
+  readonly issueId: IssueId
+  readonly assigneeSessionId: string
+}
+
+export declare class ExperimentProposed {
   private constructor()
   private readonly __experimentProposed: true
   readonly programId: ProgramId
   readonly issueId: IssueId
   readonly experimentId: ExperimentId
+  readonly planCommentId: string
 }
 
-export declare class TriggerAcceptedEvidence {
+export declare class TriggerAccepted {
   private constructor()
   private readonly __triggerAccepted: true
   readonly programId: ProgramId
   readonly experimentId: ExperimentId
+  readonly triggerId: string
   readonly threadId: string
 }
 
-export declare class TicketCreatedEvidence {
+export declare class TicketOpened {
   private constructor()
-  private readonly __ticketCreated: true
+  private readonly __ticketOpened: true
   readonly programId: ProgramId
   readonly experimentId: ExperimentId
   readonly ticketId: TicketId
 }
 
-export declare class WorkerStartedEvidence {
+export declare class WorkerStarted {
   private constructor()
   private readonly __workerStarted: true
   readonly ticketId: TicketId
-  readonly sessionId: string
+  readonly workerSessionId: string
+}
+
+export declare class CommitSubmitted {
+  private constructor()
+  private readonly __commitSubmitted: true
+  readonly ticketId: TicketId
   readonly commit: CommitSha
 }
 
-export declare class CIRecordedEvidence {
+export declare class EnvironmentBuilt {
   private constructor()
-  private readonly __ciRecorded: true
+  private readonly __environmentBuilt: true
   readonly ticketId: TicketId
-  readonly experimentId: ExperimentId
-  readonly ciRunId: CIRunId
+  readonly commit: CommitSha
+  readonly environmentDigest: string
 }
 
-export declare class ReviewCompletedEvidence {
+export declare class BenchmarkPassed {
   private constructor()
-  private readonly __reviewCompleted: true
+  private readonly __benchmarkPassed: true
+  readonly record: BenchmarkRecord
+}
+
+export declare class BenchmarkFailed {
+  private constructor()
+  private readonly __benchmarkFailed: true
+  readonly record: BenchmarkRecord
+  readonly reason: string
+}
+
+export declare class BenchmarkRetryable {
+  private constructor()
+  private readonly __benchmarkRetryable: true
+  readonly record: BenchmarkRecord
+  readonly benchmarkRunId: string
+  readonly attempt: number
+  readonly maxAttempts: number
+  readonly reason: string
+}
+
+export declare class ResultRecorded {
+  private constructor()
+  private readonly __resultRecorded: true
+  readonly record: BenchmarkRecord
+}
+
+export declare class ReviewRecorded {
+  private constructor()
+  private readonly __reviewRecorded: true
   readonly experimentId: ExperimentId
   readonly issueId: IssueId
+  readonly decision: ResearcherDecision
 }
 
-/** One typed step; the input evidence cannot be constructed by a caller. */
-export interface PipelineStage<From, To> {
+export declare class ResearchCompleted {
+  private constructor()
+  private readonly __researchCompleted: true
+  readonly experimentId: ExperimentId
+  readonly issueId: IssueId
+  readonly outcome: 'concluded' | 'failed' | 'cancelled'
+}
+
+export interface Step<From, To> {
   run(input: From): Promise<Result<To, DomainError>>
 }
 
-/** The complete chain. Every stage is required; missing wiring is a compile error. */
 export interface ResearchPipeline {
-  readonly experimentToTrigger: PipelineStage<ExperimentProposedEvidence, TriggerAcceptedEvidence>
-  readonly triggerToTicket: PipelineStage<TriggerAcceptedEvidence, TicketCreatedEvidence>
-  readonly ticketToWorker: PipelineStage<TicketCreatedEvidence, WorkerStartedEvidence>
-  readonly workerToCIRecord: PipelineStage<WorkerStartedEvidence, CIRecordedEvidence>
-  readonly ciRecordToReview: PipelineStage<CIRecordedEvidence, ReviewCompletedEvidence>
+  readonly deliverTrigger: Step<ExperimentProposed, TriggerAccepted>
+  readonly openTicket: Step<TriggerAccepted, TicketOpened>
+  readonly startWorker: Step<TicketOpened, WorkerStarted>
+  readonly submitCommit: Step<WorkerStarted, CommitSubmitted>
+  readonly buildEnvironment: Step<CommitSubmitted, EnvironmentBuilt>
+  readonly runBenchmark: Step<EnvironmentBuilt, BenchmarkPassed | BenchmarkFailed | BenchmarkRetryable>
+  readonly retryBenchmark: Step<BenchmarkRetryable, EnvironmentBuilt>
+  readonly recordResult: Step<BenchmarkPassed, ResultRecorded>
+  readonly reviewResult: Step<ResultRecorded, ReviewRecorded>
+  readonly closePassed: Step<ReviewRecorded, ResearchCompleted>
+  readonly closeFailed: Step<BenchmarkFailed | BenchmarkRetryable, ResearchCompleted>
 }
 
-export type PipelineStageName = keyof ResearchPipeline
-
-/**
- * The honest default while the chain is unfinished: calling any stage throws
- * UnimplementedError instead of pretending to proceed. Once a stage is implemented it
- * returns the nominal evidence of the next stage.
- */
-export function createUnimplementedPipeline(): ResearchPipeline {
-  // TODO(@experiment-to-ticket): deliver experiment.proposed to the Source Eval and
-  // return TriggerAcceptedEvidence only after the trigger is accepted.
-  // TODO(@implementer-ticket-execution): create the Implementer Ticket and return
-  // TicketCreatedEvidence only after the executor assigns a Worker.
-  // TODO(@ci-evaluation-writeback): run the environment/CI and return CIRecordedEvidence.
-  // TODO(@researcher-review-loop): return ReviewCompletedEvidence only after the
-  // Researcher review is recorded and the Issue/Experiment have transitioned.
-  return {
-    experimentToTrigger: {
-      run: () => unimplemented('experiment-to-ticket', 'Source Eval delivery is not wired'),
-    },
-    triggerToTicket: {
-      run: () => unimplemented('experiment-to-ticket', 'Ticket creation after Eval accept is not wired'),
-    },
-    ticketToWorker: {
-      run: () => unimplemented('implementer-ticket-execution', 'Executor/Worker start is not wired'),
-    },
-    workerToCIRecord: {
-      run: () => unimplemented('ci-evaluation-writeback', 'CI execution and CIRecord writeback are not wired'),
-    },
-    ciRecordToReview: {
-      run: () => unimplemented('researcher-review-loop', 'Researcher review loop is not wired'),
-    },
-  }
-}
+export type StepName = keyof ResearchPipeline
