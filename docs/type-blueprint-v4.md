@@ -66,7 +66,7 @@ A stage is a function whose input is the previous receipt and whose output is th
 ```ts
 type FlowStep<In extends Receipt, Out extends Receipt> = (
   input: In,
-  ctx: StageContext,
+  ctx: FlowContext,
 ) => Promise<Result<Out, DomainError>>
 ```
 
@@ -88,12 +88,12 @@ interface ResearchFlow {
 ```
 
 `runCI` returns a union, so the caller must handle both branches; a failed CI cannot be
-silently dropped. Stages return `DomainError` only for refusals that are meaningful to
+silently dropped. Steps return `DomainError` only for refusals that are meaningful to
 the loop (for example an Eval refusal); infrastructure failures are receipt of failure
 and must also be consumed by `closeFailed` or a retry stage.
 
 A central `runResearchFlow` receives the wiring and an initial `ExperimentProposedReceipt`
-and can only chain stages in the declared order. The compiler enforces the order:
+and can only chain steps in the declared order. The compiler enforces the order:
 
 ```ts
 async function runResearchFlow(loop: ResearchFlow, start: ExperimentProposedReceipt) {
@@ -128,7 +128,7 @@ bag; the proof is minted only by the authorizer.
 ## Wiring and completion ledger
 
 `createResearchHost` takes a complete `ResearchFlow`; there is no default production
-wiring. Tests may use `createUnimplementedFlow()` whose stages throw
+wiring. Tests may use `createUnimplementedFlow()` whose steps throw
 `UnimplementedError(feature)`.
 
 The completion ledger (`research-core/src/completion.ts`) lists every stage that is not
@@ -181,10 +181,10 @@ DSH lab, and the ledger/release gate tracks what is still missing.
 | nominal state classes | stay; they are the durable aggregate shape |
 | command handlers returning state | return receipt after the durable write |
 | `CommandContext` bag | `AuthorizedCommand` proof from the auth gate |
-| optional service ports | required loop stages; unimplemented loop for dev |
+| optional service ports | required loop steps; unimplemented loop for dev |
 | `TriggerFactory` mapping | `deliverTrigger` stage returns `TriggerAcceptedReceipt` |
 | `triggerPort` / bridge | `openTicket` stage; no fire-and-forget bridge |
-| `createResearchHost` optional pipeline | `ResearchFlow` required; health reports ledger |
+| `createResearchHost` optional flow | `ResearchFlow` required; health reports ledger |
 | TODO comments | `TODO(@feature)` + completion checker + release gate |
 | type/mutation tests | plus loop-order and authorization negative tests |
 
@@ -205,5 +205,5 @@ DSH lab, and the ledger/release gate tracks what is still missing.
 2. **Failure branches.** Should the loop model explicit `CIFailedReceipt` (proposed),
    retryable failure receipt, or both? A retry should be a loop edge, not a hidden retry
    inside `runCI`.
-3. **Stage granularity.** Is `submitCommit` separate from `startWorker`, or should the
+3. **Step granularity.** Is `submitCommit` separate from `startWorker`, or should the
    Worker stage own prepare → commit and return `CommitSubmittedReceipt` directly?
