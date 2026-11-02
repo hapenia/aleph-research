@@ -1,11 +1,10 @@
 /**
- * Typed research flow: each step consumes the previous step's nominal receipt and
- * returns the next receipt. A receipt can only be minted by the step that performed the
- * action, so a caller cannot skip, reorder or replace a step.
+ * Typed research flow: each step consumes the previous stage value and returns the next stage value.
+ * A stage value can only be created by the step that performed the action, so a caller cannot skip, reorder or replace a step.
  *
- * A receipt proves that the Host step completed; it does not prove that an external
+ * A stage value proves that the Host step completed; it does not prove that an external
  * service really performed the side effect. That trust boundary is explicit in the
- * factory that mints receipts.
+ * factory that creates the value.
  */
 import type { DomainError, Result } from './types/errors.js'
 import type {
@@ -16,9 +15,8 @@ import type {
   ProgramId,
   TicketId,
 } from './types/ids.js'
-import { unimplemented } from './completion.js'
 
-export declare class IssueAssignedReceipt {
+export declare class IssueAssigned {
   private constructor()
   private readonly __issueAssigned: true
   readonly programId: ProgramId
@@ -26,7 +24,7 @@ export declare class IssueAssignedReceipt {
   readonly assigneeSessionId: string
 }
 
-export declare class ExperimentProposedReceipt {
+export declare class ExperimentProposed {
   private constructor()
   private readonly __experimentProposed: true
   readonly programId: ProgramId
@@ -35,7 +33,7 @@ export declare class ExperimentProposedReceipt {
   readonly planCommentId: string
 }
 
-export declare class TriggerAcceptedReceipt {
+export declare class TriggerAccepted {
   private constructor()
   private readonly __triggerAccepted: true
   readonly programId: ProgramId
@@ -44,7 +42,7 @@ export declare class TriggerAcceptedReceipt {
   readonly threadId: string
 }
 
-export declare class TicketOpenedReceipt {
+export declare class TicketOpened {
   private constructor()
   private readonly __ticketOpened: true
   readonly programId: ProgramId
@@ -52,21 +50,21 @@ export declare class TicketOpenedReceipt {
   readonly ticketId: TicketId
 }
 
-export declare class WorkerStartedReceipt {
+export declare class WorkerStarted {
   private constructor()
   private readonly __workerStarted: true
   readonly ticketId: TicketId
   readonly workerSessionId: string
 }
 
-export declare class CommitSubmittedReceipt {
+export declare class CommitSubmitted {
   private constructor()
   private readonly __commitSubmitted: true
   readonly ticketId: TicketId
   readonly commit: CommitSha
 }
 
-export declare class EnvironmentBuiltReceipt {
+export declare class EnvironmentBuilt {
   private constructor()
   private readonly __environmentBuilt: true
   readonly ticketId: TicketId
@@ -74,7 +72,7 @@ export declare class EnvironmentBuiltReceipt {
   readonly environmentDigest: string
 }
 
-export declare class CIPassedReceipt {
+export declare class CIPassed {
   private constructor()
   private readonly __ciPassed: true
   readonly ticketId: TicketId
@@ -83,7 +81,7 @@ export declare class CIPassedReceipt {
   readonly commit: CommitSha
 }
 
-export declare class CIFailedReceipt {
+export declare class CIFailed {
   private constructor()
   private readonly __ciFailed: true
   readonly ticketId: TicketId
@@ -93,14 +91,14 @@ export declare class CIFailedReceipt {
   readonly reason: string
 }
 
-export declare class ResultRecordedReceipt {
+export declare class ResultRecorded {
   private constructor()
   private readonly __resultRecorded: true
   readonly experimentId: ExperimentId
   readonly ciRunId: CIRunId
 }
 
-export declare class ReviewRecordedReceipt {
+export declare class ReviewRecorded {
   private constructor()
   private readonly __reviewRecorded: true
   readonly experimentId: ExperimentId
@@ -108,7 +106,7 @@ export declare class ReviewRecordedReceipt {
   readonly verdict: 'approve' | 'request-changes' | 'comment'
 }
 
-export declare class ResearchCompletedReceipt {
+export declare class ResearchCompleted {
   private constructor()
   private readonly __researchCompleted: true
   readonly experimentId: ExperimentId
@@ -117,47 +115,34 @@ export declare class ResearchCompletedReceipt {
 }
 
 /** One typed step; its input receipt cannot be constructed by a caller. */
-export interface FlowStep<From, To> {
+export interface Step<From, To> {
   run(input: From): Promise<Result<To, DomainError>>
 }
 
 /** The complete chain. Every step is required; missing wiring is a compile error. */
-export interface ResearchFlow {
-  readonly deliverTrigger: FlowStep<ExperimentProposedReceipt, TriggerAcceptedReceipt>
-  readonly openTicket: FlowStep<TriggerAcceptedReceipt, TicketOpenedReceipt>
-  readonly startWorker: FlowStep<TicketOpenedReceipt, WorkerStartedReceipt>
-  readonly submitCommit: FlowStep<WorkerStartedReceipt, CommitSubmittedReceipt>
-  readonly buildEnvironment: FlowStep<CommitSubmittedReceipt, EnvironmentBuiltReceipt>
-  readonly runCI: FlowStep<EnvironmentBuiltReceipt, CIPassedReceipt | CIFailedReceipt>
-  readonly recordResult: FlowStep<CIPassedReceipt, ResultRecordedReceipt>
-  readonly reviewResult: FlowStep<ResultRecordedReceipt, ReviewRecordedReceipt>
-  readonly closePassed: FlowStep<ReviewRecordedReceipt, ResearchCompletedReceipt>
-  readonly closeFailed: FlowStep<CIFailedReceipt, ResearchCompletedReceipt>
+export interface ResearchPipeline {
+  readonly deliverTrigger: Step<ExperimentProposed, TriggerAccepted>
+  readonly openTicket: Step<TriggerAccepted, TicketOpened>
+  readonly startWorker: Step<TicketOpened, WorkerStarted>
+  readonly submitCommit: Step<WorkerStarted, CommitSubmitted>
+  readonly buildEnvironment: Step<CommitSubmitted, EnvironmentBuilt>
+  readonly runCI: Step<EnvironmentBuilt, CIPassed | CIFailed>
+  readonly recordResult: Step<CIPassed, ResultRecorded>
+  readonly reviewResult: Step<ResultRecorded, ReviewRecorded>
+  readonly closePassed: Step<ReviewRecorded, ResearchCompleted>
+  readonly closeFailed: Step<CIFailed, ResearchCompleted>
 }
 
-export type FlowStepName = keyof ResearchFlow
+export type StepName = keyof ResearchPipeline
 
-/**
- * Honest placeholder wiring for development: every step throws UnimplementedError with
- * the completion-ledger feature instead of returning a fabricated receipt.
+/*
+ * There is deliberately no unimplemented pipeline factory here.
+ *
+ * A complete `ResearchPipeline` is a production requirement, and tests must supply an
+ * in-memory `FakePipeline` that actually implements every step. A factory that returns a
+ * complete-looking object whose methods throw would let incomplete wiring pass the type
+ * check and only fail at runtime, which is exactly what this blueprint is preventing.
+ *
+ * A specific unimplemented seam may throw `unimplemented(feature)` at its own call site;
+ * it must not be wrapped into a whole pipeline.
  */
-export function createUnimplementedFlow(): ResearchFlow {
-  // TODO(@experiment-to-ticket): deliver experiment.proposed to the Source Eval and
-  // return TriggerAcceptedReceipt only after the Eval accepts.
-  // TODO(@implementer-ticket-execution): open a Ticket and return TicketOpenedReceipt.
-  // TODO(@ci-evaluation-writeback): build the environment, run CI and return the
-  // matching CIPassedReceipt/CIFailedReceipt.
-  // TODO(@researcher-review-loop): record the review and close the Issue/Experiment.
-  return {
-    deliverTrigger: { run: () => unimplemented('experiment-to-ticket', 'Source Eval delivery is not wired') },
-    openTicket: { run: () => unimplemented('experiment-to-ticket', 'Ticket opening is not wired') },
-    startWorker: { run: () => unimplemented('implementer-ticket-execution', 'Worker start is not wired') },
-    submitCommit: { run: () => unimplemented('implementer-ticket-execution', 'Commit submission is not wired') },
-    buildEnvironment: { run: () => unimplemented('ci-evaluation-writeback', 'Environment build is not wired') },
-    runCI: { run: () => unimplemented('ci-evaluation-writeback', 'CI execution is not wired') },
-    recordResult: { run: () => unimplemented('ci-evaluation-writeback', 'Result writeback is not wired') },
-    reviewResult: { run: () => unimplemented('researcher-review-loop', 'Researcher review is not wired') },
-    closePassed: { run: () => unimplemented('researcher-review-loop', 'Passed close is not wired') },
-    closeFailed: { run: () => unimplemented('researcher-review-loop', 'Failed close is not wired') },
-  }
-}

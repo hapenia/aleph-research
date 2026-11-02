@@ -1,296 +1,233 @@
-# Type blueprint v4 proposal: receipt-chained research loop
+# Type blueprint v4 proposal: typestate research pipeline
 
-Status: **design proposal only. Do not implement until reviewed.** The current
-`research-core` types are frozen at the previous blueprint; this document proposes the
-next whole-system shape after the live test showed that typecheck passing did not mean
-the research workflow existed.
+Status: **design proposal only. Do not implement until reviewed.** The previous
+blueprint typed nouns; this one types the ordered pipeline that connects them.
 
 ## What failed
 
-The previous blueprint typed **nouns**: Program/Issue/Experiment states, command payloads,
-repository ports and API responses. Those types were internally consistent, but nothing
-forced the system to connect the nouns into a running loop:
+The old types made every individual state and command valid, but did not require the next
+step to run:
 
-- `experiment.propose` could return a valid `OpenExperiment` even though no Trigger was
-  delivered, no Source Eval accepted it, no Ticket was opened, no Worker ran and no
-  CIRecord was written.
-- Ports were optional/defaulted; a composition could omit a stage and still compile.
-- `Result<T, DomainError>` let a caller ignore the next step.
-- Type tests proved that wrong data could not be constructed, not that a workflow step
-  was called at all.
+- `experiment.propose` could return a valid `OpenExperiment` without a Trigger, Source
+  Eval, Ticket, Worker or CIRecord.
+- Service ports were optional, so a composition could omit a step and still compile.
+- `Result<T, DomainError>` let callers ignore the next step.
+- Type tests checked data shape, not that a step was called.
 
-The missing rule is: **each step must take the previous step's proof as a parameter and
-return the next step's proof as its result.** A caller cannot skip, reorder or replace a
-step, because the proof type is nominal and only the previous stage can produce it.
+The new rule: **each step consumes the previous stage state and returns the next stage
+state.** The next state is nominal and only the previous step creates it.
 
-## The receipt algebra
+## Stage states
 
-Every completed step returns a nominal receipt value. Receipt carries only the facts
-needed by the next step; the durable aggregate state remains in storage.
+A stage state carries only the facts the next step needs. Durable aggregate state stays
+in storage.
 
 ```ts
-declare class Receipt<Kind extends string> {
-  private constructor()
-  private readonly __receipt: Kind
-  readonly kind: Kind
-  readonly at: IsoTimestamp
-  readonly programId: ProgramId
-}
+IssueAssigned          // assignee is known and authorized
+ExperimentProposed     // plan and environment exist
+TriggerAccepted        // Source Eval accepted the trigger
+TicketOpened           // Executor owns a Ticket
+WorkerStarted          // Worker Session started
+CommitSubmitted        // Worker committed a head for CI
+EnvironmentBuilt       // uv built the declared environment
+CIPassed | CIFailed
+ResultRecorded         // CIRecord and artifacts persisted
+ReviewRecorded         // Researcher verdict persisted
+ResearchCompleted      // Issue/Experiment closed with an outcome
 ```
 
-Concrete receipt (sketch):
+Constructors are private. A single factory creates each state after the real side effect
+(or in the in-memory implementation used by tests). The factory is the trust boundary: it
+does not prove that a network call happened, but it makes the call site explicit.
+
+## Pipeline steps
 
 ```ts
-IssueAssignedReceipt          // the assignee is known and authorized
-ExperimentProposedReceipt     // a typed plan and environment exist
-TriggerAcceptedReceipt        // the prototype Source Eval accepted the trigger
-TicketOpenedReceipt           // the Executor owns a Ticket for the Experiment
-WorkerStartedReceipt          // a Worker Session actually started
-CommitSubmittedReceipt        // the Worker committed a head for CI
-EnvironmentBuiltReceipt       // uv built the declared environment
-CIPassedReceipt / CIFailedReceipt
-ResultRecordedReceipt         // the raw CIRecord and artifacts are persisted
-ReviewRecordedReceipt         // the Researcher's verdict is persisted
-ResearchCompletedReceipt      // the Issue/Experiment are closed with an outcome
-```
-
-Receipt constructors are private. A single factory boundary mints them after the real
-side effect (or in the in-memory implementation used by tests). The factory is the only
-trusted boundary; it does not prove the network call happened, but it makes the call site
-explicit and testable.
-
-## The loop as types
-
-A stage is a function whose input is the previous receipt and whose output is the next:
-
-```ts
-type FlowStep<In extends Receipt, Out extends Receipt> = (
+type Step<In, Out> = (
   input: In,
-  ctx: FlowContext,
+  ctx: Context,
 ) => Promise<Result<Out, DomainError>>
-```
 
-The production composition must satisfy the whole interface:
-
-```ts
-interface ResearchFlow {
-  deliverTrigger: FlowStep<ExperimentProposedReceipt, TriggerAcceptedReceipt>
-  openTicket: FlowStep<TriggerAcceptedReceipt, TicketOpenedReceipt>
-  startWorker: FlowStep<TicketOpenedReceipt, WorkerStartedReceipt>
-  submitCommit: FlowStep<WorkerStartedReceipt, CommitSubmittedReceipt>
-  buildEnvironment: FlowStep<CommitSubmittedReceipt, EnvironmentBuiltReceipt>
-  runCI: FlowStep<EnvironmentBuiltReceipt, CIPassedReceipt | CIFailedReceipt>
-  recordResult: FlowStep<CIPassedReceipt, ResultRecordedReceipt>
-  reviewResult: FlowStep<ResultRecordedReceipt, ReviewRecordedReceipt>
-  closePassed: FlowStep<ReviewRecordedReceipt, ResearchCompletedReceipt>
-  closeFailed: FlowStep<CIFailedReceipt, ResearchCompletedReceipt>
+interface ResearchPipeline {
+  deliverTrigger: Step<ExperimentProposed, TriggerAccepted>
+  openTicket: Step<TriggerAccepted, TicketOpened>
+  startWorker: Step<TicketOpened, WorkerStarted>
+  submitCommit: Step<WorkerStarted, CommitSubmitted>
+  buildEnvironment: Step<CommitSubmitted, EnvironmentBuilt>
+  runCI: Step<EnvironmentBuilt, CIPassed | CIFailed>
+  recordResult: Step<CIPassed, ResultRecorded>
+  reviewResult: Step<ResultRecorded, ReviewRecorded>
+  closePassed: Step<ReviewRecorded, ResearchCompleted>
+  closeFailed: Step<CIFailed, ResearchCompleted>
 }
 ```
 
-`runCI` returns a union, so the caller must handle both branches; a failed CI cannot be
-silently dropped. Steps return `DomainError` only for refusals that are meaningful to
-the loop (for example an Eval refusal); infrastructure failures are receipt of failure
-and must also be consumed by `closeFailed` or a retry stage.
-
-A central `runResearchFlow` receives the wiring and an initial `ExperimentProposedReceipt`
-and can only chain steps in the declared order. The compiler enforces the order:
+`runCI` returns a union, so both branches must be handled. `runPipeline` chains the steps
+in order:
 
 ```ts
-async function runResearchFlow(loop: ResearchFlow, start: ExperimentProposedReceipt) {
-  const accepted = await loop.deliverTrigger(start, ctx)
+async function runPipeline(pipeline: ResearchPipeline, start: ExperimentProposed) {
+  const accepted = await pipeline.deliverTrigger(start, ctx)
   if (!accepted.ok) return accepted
-  const ticket = await loop.openTicket(accepted.value, ctx)
+  const ticket = await pipeline.openTicket(accepted.value, ctx)
   // ...
 }
 ```
 
-Passing `start` to `openTicket`, or calling `buildEnvironment` before `submitCommit`, is a
-compile error. There is no `any` or optional stage in the production interface.
+Passing `start` to `openTicket`, or calling `buildEnvironment` before `submitCommit`, does
+not compile. The production interface has no optional step and no `any`.
 
-## Typestate refinement
+## Typestate API
 
-A plain `ResearchFlow` interface plus free-floating receipts is still weaker than a
-typestate: a receipt can be stored, passed around or handed to the wrong builder, and
-the interface exposes every step at once. The proposal is to make the **flow itself**
-the typestate, with receipts kept only as internal/serialisable facts.
-
-Each node is a class that exposes exactly one next operation:
+The pipeline interface is for wiring. The public API is typestate: each class exposes
+only the next operation.
 
 ```ts
-class ExperimentProposedFlow {
-  deliverTrigger(): Promise<Result<TriggerAcceptedFlow, DomainError>>
+class ExperimentProposed {
+  deliverTrigger(): Promise<Result<TriggerAccepted, DomainError>>
 }
-class TriggerAcceptedFlow {
-  openTicket(): Promise<Result<TicketOpenedFlow, DomainError>>
+class TriggerAccepted {
+  openTicket(): Promise<Result<TicketOpened, DomainError>>
 }
-class TicketOpenedFlow {
-  startWorker(): Promise<Result<WorkerStartedFlow, DomainError>>
+class TicketOpened {
+  startWorker(): Promise<Result<WorkerStarted, DomainError>>
 }
-class WorkerStartedFlow {
-  submitCommit(): Promise<Result<CommitSubmittedFlow, DomainError>>
+class WorkerStarted {
+  submitCommit(): Promise<Result<CommitSubmitted, DomainError>>
 }
-class CommitSubmittedFlow {
-  buildEnvironment(): Promise<Result<EnvironmentBuiltFlow, DomainError>>
+class CommitSubmitted {
+  buildEnvironment(): Promise<Result<EnvironmentBuilt, DomainError>>
 }
-class EnvironmentBuiltFlow {
-  runCI(): Promise<Result<CIPassedFlow | CIFailedFlow, DomainError>>
+class EnvironmentBuilt {
+  runCI(): Promise<Result<CIPassed | CIFailed, DomainError>>
 }
-class CIPassedFlow {
-  recordResult(): Promise<Result<ResultRecordedFlow, DomainError>>
+class CIPassed {
+  recordResult(): Promise<Result<ResultRecorded, DomainError>>
 }
-class CIFailedFlow {
-  closeFailed(): Promise<Result<ResearchCompletedFlow, DomainError>>
+class CIFailed {
+  closeFailed(): Promise<Result<ResearchCompleted, DomainError>>
 }
-class ResultRecordedFlow {
-  reviewResult(): Promise<Result<ReviewRecordedFlow, DomainError>>
+class ResultRecorded {
+  reviewResult(): Promise<Result<ReviewRecorded, DomainError>>
 }
-class ReviewRecordedFlow {
-  closePassed(): Promise<Result<ResearchCompletedFlow, DomainError>>
+class ReviewRecorded {
+  closePassed(): Promise<Result<ResearchCompleted, DomainError>>
 }
-class ResearchCompletedFlow {
-  receipt(): ResearchCompletedReceipt
+class ResearchCompleted {
+  readonly outcome: 'concluded' | 'failed' | 'cancelled'
 }
 ```
 
-Consequences:
+- `openTicket()` does not exist on `ExperimentProposed`, so the trigger step cannot be
+  skipped even if the caller holds a state value.
+- `CIPassed` and `CIFailed` are distinct types; the branch must be handled.
+- `ResearchCompleted` has no next operation.
+- Constructors are private; `startPipeline(pipeline, initial)` is the only entry.
 
-- `openTicket()` does not exist on `ExperimentProposedFlow`; a caller cannot skip the
-  trigger step even if it has a receipt value.
-- `CIPassedFlow` and `CIFailedFlow` are different types; the branch must be handled.
-- The terminal `ResearchCompletedFlow` exposes no further transition and only yields a
-  receipt for persistence/audit.
-- Constructors are private; `startExperimentFlow(wiring, receipt)` is the only entry.
+TypeScript has no move semantics: a previous object still exists after the next state is
+returned. It has no methods that advance the pipeline, so the only way forward is the
+current state.
 
-### Typestate wiring builder
+## Wiring builder
 
-Wiring completeness becomes a typestate too, so an adapter cannot build a partial flow:
+Wiring completeness is also a typestate:
 
 ```ts
-type Wired = 'trigger' | 'ticket' | 'worker' | 'commit' | 'environment' | 'ci' | 'result' | 'review' | 'close'
+type Capability =
+  | 'trigger' | 'ticket' | 'worker' | 'commit' | 'environment'
+  | 'ci' | 'result' | 'review' | 'close'
 
-class WiringBuilder<W extends Wired = never> {
-  withTrigger(fn: TriggerStep): WiringBuilder<W | 'trigger'>
-  withTicket(fn: TicketStep): WiringBuilder<W | 'ticket'>
+class PipelineBuilder<W extends Capability = never> {
+  withTrigger(fn: Step<ExperimentProposed, TriggerAccepted>): PipelineBuilder<W | 'trigger'>
+  withTicket(fn: Step<TriggerAccepted, TicketOpened>): PipelineBuilder<W | 'ticket'>
   // ...
-  build(this: WiringBuilder<Wired>): CompleteWiring
+  build(this: PipelineBuilder<Capability>): ResearchPipeline
 }
 ```
 
-`build()` is only callable when every capability is present. There is no `run` on a
-partial builder, so the "optional stage" failure of the old design cannot recur.
+`build()` exists only when every capability is present. A partial builder has no way to
+start a pipeline.
 
-### Authorization as a typestate
+## Authorization
 
-`CommandDraft<K>` has no executor; `.authorize(principal, hostProof)` returns
-`AuthorizedCommand<K>`, and only that type can be passed to `CommandExecutor`. The
-aggregate classes remain typestate as before: `OpenIssue.claim()` exists only on the
-open variant, `CIPassedExperiment.close()` only on the passed variant.
+`CommandDraft<K>` has no executor. `.authorize(principal, hostProof)` returns
+`AuthorizedCommand<K>`, and only that type is accepted by `CommandExecutor`. The
+aggregate classes stay typestate as before: `OpenIssue.claim()` only on the open variant,
+`CIPassedExperiment.close()` only on the passed variant.
 
-### Limits
+## Completion gate
 
-TypeScript has no move semantics: a previous flow object still exists after the next
-flow is produced. Typestate does not prevent holding a stale object, but it does remove
-the methods that would let a caller advance from it, so the only way forward is the
-current node. External side effects are still trusted at the single wiring boundary.
+`createResearchHost` takes a complete `ResearchPipeline`; there is no default production
+wiring. Tests supply an in-memory `FakePipeline` that actually implements every step.
+There is no `createUnimplementedPipeline`: a complete-looking object whose methods throw
+would let incomplete wiring pass typecheck and fail only at runtime.
 
-
-## Authorization is a separate proof
-
-A command from a model is not executable until a Host gate has checked principal,
-capability and ownership. The gate returns a proof:
-
-```ts
-interface AuthorizedCommand<K extends CommandType> {
-  readonly command: CommandOf<K>
-  readonly actor: ActorOfCommand<K>
-  readonly authorization: AuthorizationProof<K>
-}
-```
-
-`CommandExecutor` accepts only `AuthorizedCommand<K>`, not a bare command plus context.
-The route/parser layer cannot call the executor without calling the authorizer first.
-This is stronger than the previous `CommandContext<K>` because the context was just a
-bag; the proof is minted only by the authorizer.
-
-## Wiring and completion ledger
-
-`createResearchHost` takes a complete `ResearchFlow`; there is no default production
-wiring. Tests may use `createUnimplementedFlow()` whose steps throw
-`UnimplementedError(feature)`.
-
-The completion ledger (`research-core/src/completion.ts`) lists every stage that is not
-verified end to end. `npm run check:completion` validates that each pending feature has a
-`TODO(@feature)` marker at its seam. `npm run check:release` compiles `release-gate.ts`
-and fails while any feature is `'todo'`.
-
-The loop must not be exposed as working merely because types compile. Health reports the
-ledger, and the release gate is the deployment gate.
+The completion ledger (`research-core/src/completion.ts`) lists every feature that is not
+verified end to end. `npm run check:completion` validates the `TODO(@feature)` markers and
+prints pending work. `npm run check:release` fails to compile while any feature is `'todo'`.
+Health reports the ledger; the release gate is the deployment gate.
 
 ## Storage and DSH seam
 
-Storage remains the durable source of truth for aggregate state. Receipt is ephemeral:
-it proves that a step happened, while the corresponding CIRecord, Ticket and state
-versions are persisted. Each receipt contains the ids and versions needed by the next
-stage, so no stage needs to guess or re-read optional data.
+Storage remains the source of truth for aggregate state. Stage states are ephemeral: they
+prove that a step happened, while the CIRecord, Ticket and state versions are persisted.
+Each state contains the ids and versions needed by the next step.
 
-The DSH/prototype seam is represented by concrete stage interfaces, not optional ports:
+The DSH/prototype seam is concrete steps, not optional ports:
 
 - `deliverTrigger` calls `ctx.orchestrator.context(aleph).receive` and returns
-  `TriggerAcceptedReceipt` only when the Source accepts;
-- `openTicket` returns `TicketOpenedReceipt` only with a real Ticket id;
-- `startWorker`, `buildEnvironment`, `runCI`, etc. likewise return receipt only after the
+  `TriggerAccepted` only when the Source accepts;
+- `openTicket` returns `TicketOpened` only with a real Ticket id;
+- `startWorker`, `buildEnvironment`, `runCI` likewise return their state only after the
   corresponding action.
 
-A fake implementation for tests is allowed, but it must implement the same loop. A
-production adapter that has not implemented a stage must either fail the release gate or
-expose `UnimplementedError`; it cannot silently skip.
+A fake implementation may implement the same pipeline for tests. A production adapter
+that has not implemented a step must fail the release gate or throw `UnimplementedError`
+at that step; it cannot silently skip and cannot wrap the gap in a fake complete pipeline.
 
-## Compile-time guarantees and limits
+## Guarantees and limits
 
-Guaranteed by the loop types:
+The types guarantee:
 
-- a stage cannot be skipped or called out of order;
-- an earlier receipt cannot be passed to a later stage;
+- a step cannot be skipped or called out of order;
+- an earlier stage state cannot be passed to a later step;
 - a CI failure cannot be ignored because the union must be consumed;
 - a raw command cannot reach the executor without an authorization proof;
-- a missing stage in the production wiring is a type error;
+- a missing step in production wiring is a type error;
 - the release gate refuses to compile while the ledger has todos.
 
-Not guaranteed by types: the external side effect actually happened, the actor really is
-the Session, the Source really accepted the trigger, or the CI really ran. The receipt
-factory is the single trust boundary; integration tests must exercise it with the real
-DSH lab, and the ledger/release gate tracks what is still missing.
+They do not prove that the external side effect happened, that the actor is the real
+Session, that the Source accepted the trigger, or that CI ran. The factory is the single
+trust boundary; integration tests must exercise it with the real DSH lab.
 
-## Mapping from the current modules
+## Mapping and migration
 
 | Current | v4 |
 | --- | --- |
-| nominal state classes | stay; they are the durable aggregate shape |
-| command handlers returning state | return receipt after the durable write |
-| `CommandContext` bag | `AuthorizedCommand` proof from the auth gate |
-| optional service ports | required loop steps; unimplemented loop for dev |
-| `TriggerFactory` mapping | `deliverTrigger` stage returns `TriggerAcceptedReceipt` |
-| `triggerPort` / bridge | `openTicket` stage; no fire-and-forget bridge |
-| `createResearchHost` optional flow | `ResearchFlow` required; health reports ledger |
+| nominal state classes | stay as durable aggregate shape |
+| command handlers returning state | return the stage state after the durable write |
+| `CommandContext` bag | `AuthorizedCommand` from the auth gate |
+| optional service ports | required pipeline steps; tests implement the full fake pipeline |
+| `TriggerFactory` | `deliverTrigger` returns `TriggerAccepted` |
+| `triggerPort` / bridge | `openTicket`; no fire-and-forget bridge |
+| `createResearchHost` optional pipeline | `ResearchPipeline` required; health reports ledger |
 | TODO comments | `TODO(@feature)` + completion checker + release gate |
-| type/mutation tests | plus loop-order and authorization negative tests |
+| type/mutation tests | add pipeline-order and authorization negative tests |
 
-## Migration plan (after approval)
+Migration after approval:
 
-1. Define receipt classes and the `ResearchFlow` interface; update type tests.
-2. Change each handler to return its receipt after the durable write.
+1. Define stage states and `ResearchPipeline`; update type tests.
+2. Change each handler to return its stage state after the durable write.
 3. Implement the auth gate and `AuthorizedCommand`; executor accepts only it.
-4. Rewire `research-host` and the DSH adapter to call the loop; delete optional ports.
-5. Add loop-order negative tests and a lab integration test that drives
-   `ExperimentProposedReceipt` to `ResearchCompletedReceipt`.
+4. Rewire `research-host` and the DSH adapter to call the pipeline; delete optional ports.
+5. Add pipeline-order negative tests and a lab integration test.
 6. Empty the completion ledger; only then restart a test DSH.
 
 ## Review questions
 
-1. **Receipt persistence.** Keep receipt ephemeral (proposed) or persist it for audit?
-   Ephemeral keeps state and proof separate; audit already records the durable facts.
-2. **Failure branches.** Should the loop model explicit `CIFailedReceipt` (proposed),
-   retryable failure receipt, or both? A retry should be a loop edge, not a hidden retry
-   inside `runCI`.
+1. **Stage state persistence.** Keep stage states ephemeral (proposed) or persist them
+   for audit? Ephemeral keeps state and proof separate; audit already records facts.
+2. **Failure branches.** Model explicit `CIFailed` (proposed), retryable failure, or both?
+   A retry should be a pipeline edge, not a hidden retry inside `runCI`.
 3. **Step granularity.** Is `submitCommit` separate from `startWorker`, or should the
-   Worker stage own prepare → commit and return `CommitSubmittedReceipt` directly?
+   Worker step own prepare → commit and return `CommitSubmitted` directly?
