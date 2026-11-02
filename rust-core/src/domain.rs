@@ -720,6 +720,7 @@ impl MetricWeight {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     id: ProgramId,
+    owner: ActorId,
     name: String,
     goal: String,
     methodology: String,
@@ -735,6 +736,7 @@ pub struct Program {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProgramInput {
     pub id: ProgramId,
+    pub owner: ActorId,
     pub name: String,
     pub goal: String,
     pub methodology: String,
@@ -767,6 +769,7 @@ impl Program {
         }
         Ok(Self {
             id: input.id,
+            owner: input.owner,
             name,
             goal: input.goal,
             methodology: input.methodology,
@@ -782,6 +785,10 @@ impl Program {
 
     pub fn id(&self) -> &ProgramId {
         &self.id
+    }
+
+    pub fn owner(&self) -> &ActorId {
+        &self.owner
     }
 
     pub fn name(&self) -> &str {
@@ -822,6 +829,22 @@ impl Program {
 
     pub const fn created_at(&self) -> Timestamp {
         self.created_at
+    }
+
+    pub fn set_status(&mut self, status: ProgramStatus) {
+        self.status = status;
+    }
+
+    pub fn set_goal(&mut self, goal: String) {
+        self.goal = goal;
+    }
+
+    pub fn set_methodology(&mut self, methodology: String) {
+        self.methodology = methodology;
+    }
+
+    pub fn set_exploration(&mut self, exploration: Exploration) {
+        self.exploration = exploration;
     }
 }
 
@@ -918,6 +941,12 @@ impl Issue {
     pub fn close(mut self) -> Self {
         self.status = IssueStatus::Closed;
         self
+    }
+
+    pub fn add_experiment(&mut self, experiment: ExperimentId) {
+        if !self.experiments.contains(&experiment) {
+            self.experiments.push(experiment);
+        }
     }
 }
 
@@ -1050,6 +1079,10 @@ impl Experiment {
     pub const fn status(&self) -> ExperimentStatus {
         self.status
     }
+
+    pub fn set_status(&mut self, status: ExperimentStatus) {
+        self.status = status;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1137,6 +1170,12 @@ impl Ticket {
 
     pub fn worker_session_id(&self) -> Option<&SessionId> {
         self.worker_session_id.as_ref()
+    }
+
+    pub fn submit(mut self, commit: CommitSha) -> Self {
+        self.status = TicketStatus::Succeeded;
+        self.commit = Some(commit);
+        self
     }
 }
 
@@ -1313,6 +1352,7 @@ mod tests {
     fn program_input() -> ProgramInput {
         ProgramInput {
             id: ProgramId::new("program-1").unwrap(),
+            owner: ActorId::new("operator-1").unwrap(),
             name: "Program".to_string(),
             goal: "goal".to_string(),
             methodology: "method".to_string(),

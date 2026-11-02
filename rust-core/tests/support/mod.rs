@@ -1,10 +1,12 @@
+#![allow(dead_code)]
+
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::task::{Context, Poll, Waker};
 
 use aleph_research_core::memory::InMemoryPlugin;
 use aleph_research_core::{
-    BenchmarkMetric, BenchmarkSpec, BenchmarkSpecId, BranchName, CommitSha, DomainError,
+    ActorId, BenchmarkMetric, BenchmarkSpec, BenchmarkSpecId, BranchName, CommitSha, DomainError,
     Environment, EnvironmentFile, ExperimentId, ExperimentProposed, IssueId, Metric,
     MetricDirection, MetricWeight, Program, ProgramId, ProgramInput, ProgramStatus,
     ResearchCompleted, ResearchPolicy, Timestamp, Usage, run_pipeline,
@@ -43,6 +45,7 @@ pub fn program(policy: ResearchPolicy) -> Program {
 pub fn program_with_usage(policy: ResearchPolicy, usage: Usage) -> Program {
     Program::new(ProgramInput {
         id: ProgramId::new("program-1").unwrap(),
+        owner: ActorId::new("operator-1").unwrap(),
         name: "Program".to_string(),
         goal: "Improve the benchmark".to_string(),
         methodology: "Propose, run, review".to_string(),

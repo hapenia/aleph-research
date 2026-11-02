@@ -1,6 +1,7 @@
 #![deny(unsafe_code)]
 #![allow(async_fn_in_trait)]
 
+pub mod command;
 pub mod domain;
 pub mod error;
 pub mod id;
@@ -16,6 +17,7 @@ mod wasm;
 
 pub const CORE_ABI_VERSION: u32 = 1;
 
+pub use command::*;
 pub use domain::{
     Artifact, AuditEntry, BenchmarkMetric, BenchmarkRecord, BenchmarkRecordInput, BenchmarkSpec,
     BenchmarkStatus, Environment, Experiment, ExperimentInput, ExperimentStatus, Exploration,
