@@ -44,6 +44,7 @@ jobs:
           npm install --no-audit --no-fund
           npm run typecheck
           npm run lint
+          npm run check:completion
           npm run test:mutation
           npm test
           bash scripts/lint-fixtures.sh

@@ -8,6 +8,14 @@
     "declarationMap": false,
     "sourceMap": false
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["test/**", "src/type-tests.ts", "src/__*", "src/**/__*"]
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "test/**",
+    "src/type-tests.ts",
+    "src/__*",
+    "src/**/__*",
+    "src/release-gate.ts"
+  ]
 }

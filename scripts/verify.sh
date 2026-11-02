@@ -29,6 +29,8 @@ if [ -f research-core/package.json ]; then
   (cd research-core && npm install --no-audit --no-fund --silent && npm run -s typecheck)
   echo "== lint: research core blueprint"
   (cd research-core && npm run -s lint)
+  echo "== completion ledger"
+  (cd research-core && npm run -s check:completion)
   echo "== mutation: research core guarantees"
   (cd research-core && npm run -s test:mutation)
   echo "== build: research core package"

@@ -30,7 +30,7 @@
  *   `FreshLineage` with the Program's fixed fresh-start probability. The provisional
  *   scaffold commit is replaced by the real head in `ticket.submit`; the sampling layer
  *   replaces the lineage when it is wired in.
- *   TODO(phase-2 sampler wiring): pass the Host `BaseChoice` into this layer and record the
+ *   TODO(@sampler-wiring): pass the Host `BaseChoice` into this layer and record the
  *   sampled lineage; until then this handler never fabricates a derived base or a "best"
  *   previous Experiment.
  * - **`program.set-goal` / `set-methodology` / `set-exploration` need a running program.**
@@ -159,7 +159,7 @@ const INITIAL_VERSION: Version = mintVersion(0)
  * placeholder. `ticket.submit` replaces the Experiment head with the submitted commit, and
  * the Host sampling layer replaces `lineage.baseCommit` before CI runs.
  *
- * TODO(phase-2 sampler wiring): resolve the real scaffold commit through `RepositoryService`
+ * TODO(@sampler-wiring): resolve the real scaffold commit through `RepositoryService`
  * instead of this sentinel.
  */
 const PENDING_SCAFFOLD_COMMIT = mintId<CommitSha>('0000000000000000000000000000000000000000')
