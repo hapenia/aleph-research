@@ -536,6 +536,22 @@ export function createTriggerPort(logger, fallbackPort) {
       recorded.push(report)
       return { ok: true, value: undefined }
     },
+    async receiveDraft(draft) {
+      if (sink !== null) {
+        try {
+          await sink(draft, null)
+          return { ok: true, value: undefined }
+        } catch (error) {
+          logger?.warn?.(
+            'aleph-research-host: the core trigger sink failed for %s: %s',
+            String(draft?.kind),
+            String(error?.message ?? error),
+          )
+          return serviceFailure('internal', 'the core trigger sink failed')
+        }
+      }
+      return { ok: true, value: undefined }
+    },
     onTrigger(callback) {
       if (callback !== null && callback !== undefined && typeof callback !== 'function') {
         throw new TypeError('onTrigger requires a function or null')
@@ -1009,6 +1025,11 @@ export function createResearchHostService(options) {
         )
         return serviceFailure('internal', `the research host failed to execute ${String(toolName)}`)
       }
+    },
+    host,
+    store: host.store,
+    deliverDraft(draft) {
+      return triggerPort.receiveDraft(draft)
     },
     triggerPort,
     onTrigger(callback) {

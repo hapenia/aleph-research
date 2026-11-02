@@ -17,6 +17,7 @@ import {
   apply,
   createResearchSessionPool,
   HOST_SERVICE_NAME,
+  IMPLEMENTER_PRESET,
   inject,
   name,
   OPERATOR_PRESET,
@@ -490,4 +491,13 @@ test('apply rejects malformed config but does not create the default pool', asyn
   await apply(empty.ctx, {})
   assert.equal(empty.controller.calls.create.length, 0)
   assert.equal(empty.provided.get(SERVICE_NAME).status().configuredPoolSize, 0)
+})
+
+test('the pool creates a deterministic implementer session for a ticket', async () => {
+  const context = setup()
+  const sessionId = await context.pool.ensureImplementer('ticket:experiment-1')
+  assert.equal(sessionId, 'aleph-implementer-ticket:experiment-1')
+  const created = context.controller.calls.create.at(-1)
+  assert.equal(created.agentPreset, IMPLEMENTER_PRESET)
+  assert.equal(created.sessionId, 'aleph-implementer-ticket:experiment-1')
 })

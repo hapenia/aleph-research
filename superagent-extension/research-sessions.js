@@ -71,12 +71,14 @@ export const HOST_SERVICE_NAME = 'alephResearchHost'
 /** Preset ids declared in `cordis.patch.yml`; they must match `PRESET_ROLES` in research-tools.js. */
 export const OPERATOR_PRESET = 'aleph-operator'
 export const RESEARCHER_PRESET = 'aleph-researcher'
+export const IMPLEMENTER_PRESET = 'aleph-implementer'
 
 /** Fixed Session id prefix; the suffix is the deterministic workspace hash. */
 export const OPERATOR_ID_PREFIX = 'aleph-operator-'
 
 /** Fixed researcher id prefix; the pool uses `aleph-researcher-<n>`. */
 export const RESEARCHER_ID_PREFIX = 'aleph-researcher-'
+export const IMPLEMENTER_ID_PREFIX = 'aleph-implementer-'
 
 /** Offset so pool index 1 is the first Session, not the zeroth. */
 const FIRST_POOL_INDEX = 1
@@ -397,6 +399,21 @@ export function createResearchSessionPool(ctx, config) {
     return agent
   }
 
+  const implementerIdFor = (ticketId) => {
+    const suffix = String(ticketId).replace(/[^A-Za-z0-9._:-]/gu, '-').slice(-80)
+    return `${IMPLEMENTER_ID_PREFIX}${suffix}`
+  }
+
+  const ensureImplementerSession = async (ticketId) => {
+    assertActive('ensure an implementer session')
+    if (typeof ticketId !== 'string' || ticketId.length === 0) {
+      throw new TypeError('aleph-research-sessions: ensureImplementer needs a ticketId')
+    }
+    const sessionId = assertSessionId(implementerIdFor(ticketId))
+    await ensureSession(sessionId, IMPLEMENTER_PRESET)
+    return sessionId
+  }
+
   /** Drop expired wake entries and return the live map for one Session, if any. */
   const liveWakes = (sessionId, now) => {
     const entries = pendingWakes.get(sessionId)
@@ -567,6 +584,8 @@ export function createResearchSessionPool(ctx, config) {
     settings,
     ensureOperatorSession,
     ensureResearcherSession,
+    ensureImplementer: ensureImplementerSession,
+    startWorker: ensureImplementerSession,
     wakeResearcher,
     ensurePool,
     status,

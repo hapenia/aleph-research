@@ -100,7 +100,7 @@ class WasmCore implements ResearchCore {
       }
       let pending: CoreEffectResume
       try {
-        pending = await this.perform(frame.sequence, effect.value)
+        pending = await performEffect(this.concepts, frame.sequence, effect.value)
       } catch (error) {
         return {
           ok: false,
@@ -114,140 +114,6 @@ class WasmCore implements ResearchCore {
       frame = resumed.value
     }
     return { ok: true, value: { outcome: frame.outcome, stages: frame.stages } }
-  }
-
-  private async perform(sequence: number, effect: CoreEffect): Promise<CoreEffectResume> {
-    switch (effect.name) {
-      case 'storage.loadProgram': {
-        const result = await attempt(() =>
-          this.concepts.storage.loadProgram(effect.programId),
-        )
-        return result.ok
-          ? { effect: 'storage.loadProgram', sequence, result: { ok: true, value: result.value } }
-          : { effect: 'storage.loadProgram', sequence, result: { ok: false, failure: result.error } }
-      }
-      case 'trigger.deliver': {
-        const result = await attempt(() =>
-          this.concepts.trigger.deliver({
-            experimentId: effect.experimentId,
-            branch: effect.branch,
-            baseCommit: effect.baseCommit,
-          }),
-        )
-        return result.ok
-          ? { effect: 'trigger.deliver', sequence, result: { ok: true, value: result.value } }
-          : { effect: 'trigger.deliver', sequence, result: { ok: false, failure: result.error } }
-      }
-      case 'executor.open': {
-        const result = await attempt(() =>
-          this.concepts.executor.open({
-            programId: effect.programId,
-            issueId: effect.issueId,
-            experimentId: effect.experimentId,
-          }),
-        )
-        return result.ok
-          ? { effect: 'executor.open', sequence, result: { ok: true, value: result.value } }
-          : { effect: 'executor.open', sequence, result: { ok: false, failure: result.error } }
-      }
-      case 'sessions.startWorker': {
-        const result = await attempt(() =>
-          this.concepts.sessions.startWorker({
-            ticketId: effect.ticketId,
-            experimentId: effect.experimentId,
-          }),
-        )
-        return result.ok
-          ? { effect: 'sessions.startWorker', sequence, result: { ok: true, value: result.value } }
-          : { effect: 'sessions.startWorker', sequence, result: { ok: false, failure: result.error } }
-      }
-      case 'sessions.submitCommit': {
-        const result = await attempt(() =>
-          this.concepts.sessions.submitCommit({
-            ticketId: effect.ticketId,
-            workerSessionId: effect.workerSessionId,
-          }),
-        )
-        return result.ok
-          ? { effect: 'sessions.submitCommit', sequence, result: { ok: true, value: result.value } }
-          : { effect: 'sessions.submitCommit', sequence, result: { ok: false, failure: result.error } }
-      }
-      case 'benchmark.buildEnvironment': {
-        const result = await attempt(() =>
-          this.concepts.benchmark.buildEnvironment({
-            commit: effect.commit,
-            environment: effect.environment,
-          }),
-        )
-        return result.ok
-          ? {
-              effect: 'benchmark.buildEnvironment',
-              sequence,
-              result: { ok: true, value: result.value },
-            }
-          : {
-              effect: 'benchmark.buildEnvironment',
-              sequence,
-              result: { ok: false, failure: result.error },
-            }
-      }
-      case 'benchmark.specHash': {
-        const result = await attempt(() => this.concepts.benchmark.specHash(effect.spec))
-        return result.ok
-          ? { effect: 'benchmark.specHash', sequence, result: { ok: true, value: result.value } }
-          : { effect: 'benchmark.specHash', sequence, result: { ok: false, failure: result.error } }
-      }
-      case 'benchmark.run': {
-        const result = await attempt(() =>
-          this.concepts.benchmark.run({
-            experimentId: effect.experimentId,
-            ticketId: effect.ticketId,
-            spec: effect.spec,
-            commit: effect.commit,
-            environmentDigest: effect.environmentDigest,
-            attempt: effect.attempt,
-            maxAttempts: effect.maxAttempts,
-          }),
-        )
-        return result.ok
-          ? { effect: 'benchmark.run', sequence, result: { ok: true, value: result.value } }
-          : { effect: 'benchmark.run', sequence, result: { ok: false, failure: result.error } }
-      }
-      case 'storage.appendBenchmarkRecord': {
-        const result = await attempt(() =>
-          this.concepts.storage.appendBenchmarkRecord(effect.record),
-        )
-        return result.ok
-          ? {
-              effect: 'storage.appendBenchmarkRecord',
-              sequence,
-              result: { ok: true, value: result.value },
-            }
-          : {
-              effect: 'storage.appendBenchmarkRecord',
-              sequence,
-              result: { ok: false, failure: result.error },
-            }
-      }
-      case 'sessions.review': {
-        const result = await attempt(() =>
-          this.concepts.sessions.review({
-            experimentId: effect.experimentId,
-            benchmark: effect.benchmark,
-          }),
-        )
-        return result.ok
-          ? { effect: 'sessions.review', sequence, result: { ok: true, value: result.value } }
-          : { effect: 'sessions.review', sequence, result: { ok: false, failure: result.error } }
-      }
-      case 'clock.now': {
-        return {
-          effect: 'clock.now',
-          sequence,
-          result: { ok: true, value: this.concepts.clock.now() },
-        }
-      }
-    }
   }
 
   private invoke(
@@ -273,6 +139,144 @@ class WasmCore implements ResearchCore {
     this.exports.aleph_free(responsePointer, length)
     if (written !== length) return transport('the core produced an incomplete response')
     return decodeFrame(response)
+  }
+}
+
+export async function performEffect(
+  concepts: CoreConcepts,
+  sequence: number,
+  effect: CoreEffect,
+): Promise<CoreEffectResume> {
+  switch (effect.name) {
+    case 'storage.loadProgram': {
+      const result = await attempt(() =>
+        concepts.storage.loadProgram(effect.programId),
+      )
+      return result.ok
+        ? { effect: 'storage.loadProgram', sequence, result: { ok: true, value: result.value } }
+        : { effect: 'storage.loadProgram', sequence, result: { ok: false, failure: result.error } }
+    }
+    case 'trigger.deliver': {
+      const result = await attempt(() =>
+        concepts.trigger.deliver({
+          experimentId: effect.experimentId,
+          branch: effect.branch,
+          baseCommit: effect.baseCommit,
+        }),
+      )
+      return result.ok
+        ? { effect: 'trigger.deliver', sequence, result: { ok: true, value: result.value } }
+        : { effect: 'trigger.deliver', sequence, result: { ok: false, failure: result.error } }
+    }
+    case 'executor.open': {
+      const result = await attempt(() =>
+        concepts.executor.open({
+          programId: effect.programId,
+          issueId: effect.issueId,
+          experimentId: effect.experimentId,
+        }),
+      )
+      return result.ok
+        ? { effect: 'executor.open', sequence, result: { ok: true, value: result.value } }
+        : { effect: 'executor.open', sequence, result: { ok: false, failure: result.error } }
+    }
+    case 'sessions.startWorker': {
+      const result = await attempt(() =>
+        concepts.sessions.startWorker({
+          ticketId: effect.ticketId,
+          experimentId: effect.experimentId,
+        }),
+      )
+      return result.ok
+        ? { effect: 'sessions.startWorker', sequence, result: { ok: true, value: result.value } }
+        : { effect: 'sessions.startWorker', sequence, result: { ok: false, failure: result.error } }
+    }
+    case 'sessions.submitCommit': {
+      const result = await attempt(() =>
+        concepts.sessions.submitCommit({
+          ticketId: effect.ticketId,
+          workerSessionId: effect.workerSessionId,
+        }),
+      )
+      return result.ok
+        ? { effect: 'sessions.submitCommit', sequence, result: { ok: true, value: result.value } }
+        : { effect: 'sessions.submitCommit', sequence, result: { ok: false, failure: result.error } }
+    }
+    case 'benchmark.buildEnvironment': {
+      const result = await attempt(() =>
+        concepts.benchmark.buildEnvironment({
+          commit: effect.commit,
+          environment: effect.environment,
+        }),
+      )
+      return result.ok
+        ? {
+            effect: 'benchmark.buildEnvironment',
+            sequence,
+            result: { ok: true, value: result.value },
+          }
+        : {
+            effect: 'benchmark.buildEnvironment',
+            sequence,
+            result: { ok: false, failure: result.error },
+          }
+    }
+    case 'benchmark.specHash': {
+      const result = await attempt(() => concepts.benchmark.specHash(effect.spec))
+      return result.ok
+        ? { effect: 'benchmark.specHash', sequence, result: { ok: true, value: result.value } }
+        : { effect: 'benchmark.specHash', sequence, result: { ok: false, failure: result.error } }
+    }
+    case 'benchmark.run': {
+      const result = await attempt(() =>
+        concepts.benchmark.run({
+          experimentId: effect.experimentId,
+          ticketId: effect.ticketId,
+          spec: effect.spec,
+          commit: effect.commit,
+          environmentDigest: effect.environmentDigest,
+          attempt: effect.attempt,
+          maxAttempts: effect.maxAttempts,
+        }),
+      )
+      return result.ok
+        ? { effect: 'benchmark.run', sequence, result: { ok: true, value: result.value } }
+        : { effect: 'benchmark.run', sequence, result: { ok: false, failure: result.error } }
+    }
+    case 'storage.appendBenchmarkRecord': {
+      const result = await attempt(() =>
+        concepts.storage.appendBenchmarkRecord(effect.record),
+      )
+      return result.ok
+        ? {
+            effect: 'storage.appendBenchmarkRecord',
+            sequence,
+            result: { ok: true, value: result.value },
+          }
+        : {
+            effect: 'storage.appendBenchmarkRecord',
+            sequence,
+            result: { ok: false, failure: result.error },
+          }
+    }
+    case 'sessions.review': {
+      const result = await attempt(() =>
+        concepts.sessions.review({
+          experimentId: effect.experimentId,
+          benchmark: effect.benchmark,
+        }),
+      )
+      return result.ok
+        ? { effect: 'sessions.review', sequence, result: { ok: true, value: result.value } }
+        : { effect: 'sessions.review', sequence, result: { ok: false, failure: result.error } }
+    }
+    case 'clock.now': {
+      return {
+        effect: 'clock.now',
+        sequence,
+        result: { ok: true, value: concepts.clock.now() },
+      }
+    }
   }
 }
 

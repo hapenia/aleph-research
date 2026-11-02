@@ -639,3 +639,11 @@ test('cleanup releases the host service listener', () => {
   assert.equal(harness.listeners.get('internal/service').size, 0)
   assert.equal(harness.registrations.size, 0)
 })
+
+test('apply skips the legacy catalog when the core surface owns the tools', () => {
+  const harness = fakeContext({ services: new Map([['alephResearchCore', { tools: ['aleph_research_create_program'] }]]) })
+  const result = apply(harness.ctx, {})
+  assert.deepEqual(result.tools, [])
+  assert.deepEqual(result.catalog, [])
+  assert.equal(harness.registrations.size, 0)
+})

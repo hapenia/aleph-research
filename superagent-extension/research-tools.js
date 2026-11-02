@@ -711,6 +711,16 @@ const hostServiceOf = (ctx) => {
  *   releases the optional service listener.
  */
 export function apply(ctx, config) {
+  let core
+  try {
+    core = typeof ctx.get === 'function' ? ctx.get('alephResearchCore') : undefined
+  } catch {
+    core = undefined
+  }
+  if (core !== undefined && core !== null) {
+    ctx.logger?.info?.('aleph-research-tools: the core surface owns the tool catalog; skipping the legacy catalog')
+    return { tools: [], catalog: [], hostBound: false, dispose() {} }
+  }
   const options = { ...(config ?? {}) }
   const adapter = registerResearchTools(ctx, options)
 

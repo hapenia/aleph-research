@@ -32,6 +32,8 @@
     # creation by passing `{ poolSize, workspaceId }`; the default creates none.
     - id: aleph-research-sessions
       name: '@local/dsh-aleph-superagent/research-sessions'
+    - id: aleph-research-core-host
+      name: '@local/dsh-aleph-superagent/research-core-host'
     - id: aleph-research-tools
       name: '@local/dsh-aleph-superagent/research-tools'
     # The Watchdog Session is its own agent preset: it receives periodic briefs and
@@ -84,6 +86,38 @@
             disabled: !!js process.platform === 'win32'
           - id: tool-fs
             name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+    - id: aleph-implementer-preset
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: aleph-implementer
+        name: AlephResearch Implementer
+        description: AlephResearch 实现者 Session 专用，在工作区实现 Experiment、提交 commit 并通过 aleph_research_submit_ticket 回报，不供手动选择。
+        order: 98
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                You are an AlephResearch Implementer. Work the Ticket you were given:
+                inspect the experiment inputs, implement the change in the ticket
+                workspace, commit it, and report the commit with
+                aleph_research_submit_ticket. Do not propose Experiments, do not review
+                results, and do not change the benchmark.
+          - id: time-context
+            name: '@deepseek-ai/dsh-time-context'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
           - id: tool-fs-search
             name: '@deepseek-ai/dsh-tool-fs-search'
             config:

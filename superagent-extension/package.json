@@ -17,7 +17,10 @@
     "./research-sessions": "./research-sessions.js",
     "./research-storage": "./research-storage.js",
     "./research-tools": "./research-tools.js",
-    "./research-trigger-bridge": "./research-trigger-bridge.js"
+    "./research-trigger-bridge": "./research-trigger-bridge.js",
+    "./research-core-host": "./research-core-host.js",
+    "./research-core-runtime": "./research-core-runtime.js",
+    "./research-core-surface": "./research-core-surface.js"
   },
   "files": [
     "index.js",
@@ -29,7 +32,10 @@
     "research-sessions.js",
     "research-storage.js",
     "research-tools.js",
-    "research-trigger-bridge.js"
+    "research-trigger-bridge.js",
+    "research-core-host.js",
+    "research-core-runtime.js",
+    "research-core-surface.js"
   ],
   "dsh": {
     "bundle": {

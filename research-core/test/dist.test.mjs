@@ -148,6 +148,7 @@ test('the built modules expose the adapter entry points', async () => {
   const adapterRuntime = await importDist('adapter/runtime.js')
   const adapterSurface = await importDist('adapter/surface.js')
   const adapterWasm = await importDist('adapter/wasm.js')
+  const adapterCoreRuntime = await importDist('adapter/core-runtime.js')
 
   assert.equal(typeof adapterComposition.createResearchHost, 'function')
   assert.equal(typeof runtimeStorage.createInMemoryStore, 'function')
@@ -155,6 +156,7 @@ test('the built modules expose the adapter entry points', async () => {
   assert.equal(typeof adapterRuntime.createPlugin, 'function')
   assert.equal(typeof adapterSurface.bindSurface, 'function')
   assert.equal(typeof adapterWasm.loadResearchCore, 'function')
+  assert.equal(typeof adapterCoreRuntime.createCoreRuntime, 'function')
 })
 
 test('createResearchHost from dist creates a Program over the HTTP route and snapshots it', async () => {
