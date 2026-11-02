@@ -346,3 +346,10 @@ researchPipeline.openTicket(proposed)
 declare const accepted: import('./pipeline.js').TriggerAccepted
 // @ts-expect-error startWorker requires TicketOpened
 researchPipeline.startWorker(accepted)
+
+declare const surfaceHandlers: import('./adapter/surface.js').SurfaceHandlers
+declare const surfacePorts: import('./adapter/surface.js').SurfacePorts
+declare const bindSurface: typeof import('./adapter/surface.js').bindSurface
+// @ts-expect-error a surface binding must cover every surface name
+void bindSurface({ 'program.create': surfaceHandlers['program.create'] }, surfacePorts)
+void bindSurface(surfaceHandlers, surfacePorts)
