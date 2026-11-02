@@ -60,7 +60,8 @@ impl fmt::Display for IdReason {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{field} {reason}")]
 pub struct IdError {
     field: &'static str,
     reason: IdReason,
@@ -80,94 +81,47 @@ impl IdError {
     }
 }
 
-impl fmt::Display for IdError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{} {}", self.field, self.reason)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum NumericError {
+    #[error("{field} must be greater than zero")]
     Zero { field: &'static str },
+    #[error("{field} overflowed")]
     Overflow { field: &'static str },
 }
 
-impl fmt::Display for NumericError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Zero { field } => write!(formatter, "{field} must be greater than zero"),
-            Self::Overflow { field } => write!(formatter, "{field} overflowed"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum TimestampError {
+    #[error("timestamp must be RFC 3339 with a Z suffix")]
     InvalidFormat,
+    #[error("timestamp date is out of range")]
     InvalidDate,
+    #[error("timestamp is out of range")]
     OutOfRange,
 }
 
-impl fmt::Display for TimestampError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidFormat => {
-                formatter.write_str("timestamp must be RFC 3339 with a Z suffix")
-            }
-            Self::InvalidDate => formatter.write_str("timestamp date is out of range"),
-            Self::OutOfRange => formatter.write_str("timestamp is out of range"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum StorageError {
-    NotFound {
-        aggregate: Aggregate,
-    },
+    #[error("{aggregate} was not found")]
+    NotFound { aggregate: Aggregate },
+    #[error("version conflict: expected {expected:?}, actual {actual:?}")]
     Conflict {
         expected: Option<Version>,
         actual: Option<Version>,
     },
-    AlreadyExists {
-        aggregate: Aggregate,
-    },
-    Unavailable {
-        detail: String,
-    },
-}
-
-impl fmt::Display for StorageError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::NotFound { aggregate } => write!(formatter, "{aggregate} was not found"),
-            Self::Conflict { expected, actual } => {
-                write!(
-                    formatter,
-                    "version conflict: expected {expected:?}, actual {actual:?}"
-                )
-            }
-            Self::AlreadyExists { aggregate } => write!(formatter, "{aggregate} already exists"),
-            Self::Unavailable { detail } => write!(formatter, "storage unavailable: {detail}"),
-        }
-    }
+    #[error("{aggregate} already exists")]
+    AlreadyExists { aggregate: Aggregate },
+    #[error("storage unavailable: {detail}")]
+    Unavailable { detail: String },
 }
 
 macro_rules! host_error {
     ($name:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq)]
+        #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
         pub enum $name {
+            #[error("rejected: {detail}")]
             Rejected { detail: String },
+            #[error("unavailable: {detail}")]
             Unavailable { detail: String },
-        }
-
-        impl fmt::Display for $name {
-            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                match self {
-                    Self::Rejected { detail } => write!(formatter, "rejected: {detail}"),
-                    Self::Unavailable { detail } => write!(formatter, "unavailable: {detail}"),
-                }
-            }
         }
     };
 }
@@ -180,369 +134,184 @@ host_error!(ToolError);
 host_error!(HttpError);
 host_error!(ClockError);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ArtifactError {
+    #[error("artifact name must not be empty")]
     EmptyName,
+    #[error("artifact media type must not be empty")]
     EmptyMediaType,
+    #[error("rejected: {detail}")]
     Rejected { detail: String },
+    #[error("unavailable: {detail}")]
     Unavailable { detail: String },
 }
 
-impl fmt::Display for ArtifactError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyName => formatter.write_str("artifact name must not be empty"),
-            Self::EmptyMediaType => formatter.write_str("artifact media type must not be empty"),
-            Self::Rejected { detail } => write!(formatter, "rejected: {detail}"),
-            Self::Unavailable { detail } => write!(formatter, "unavailable: {detail}"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SurfaceError {
+    #[error("{section} entry {index} is empty")]
     EmptyEntry { section: &'static str, index: usize },
+    #[error("{section} entry {name:?} is duplicated")]
     DuplicateEntry { section: &'static str, name: String },
 }
 
-impl fmt::Display for SurfaceError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyEntry { section, index } => {
-                write!(formatter, "{section} entry {index} is empty")
-            }
-            Self::DuplicateEntry { section, name } => {
-                write!(formatter, "{section} entry {name:?} is duplicated")
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum ProgramError {
+    #[error("program name must not be empty")]
     EmptyName,
+    #[error("program utility must not be empty")]
     EmptyUtility,
+    #[error("utility metric name must not be empty")]
     EmptyUtilityMetric,
+    #[error("utility metric {name:?} is duplicated")]
     DuplicateUtilityMetric { name: String },
+    #[error("utility metric {name:?} has invalid weight {weight}")]
     InvalidWeight { name: String, weight: f64 },
 }
 
-impl fmt::Display for ProgramError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyName => formatter.write_str("program name must not be empty"),
-            Self::EmptyUtility => formatter.write_str("program utility must not be empty"),
-            Self::EmptyUtilityMetric => {
-                formatter.write_str("utility metric name must not be empty")
-            }
-            Self::DuplicateUtilityMetric { name } => {
-                write!(formatter, "utility metric {name:?} is duplicated")
-            }
-            Self::InvalidWeight { name, weight } => {
-                write!(
-                    formatter,
-                    "utility metric {name:?} has invalid weight {weight}"
-                )
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum IssueError {
+    #[error("issue title must not be empty")]
     EmptyTitle,
 }
 
-impl fmt::Display for IssueError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyTitle => formatter.write_str("issue title must not be empty"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum LineageError {
+    #[error("fresh start probability {value} must be between zero and one")]
     InvalidProbability { value: f64 },
 }
 
-impl fmt::Display for LineageError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidProbability { value } => {
-                write!(
-                    formatter,
-                    "fresh start probability {value} must be between zero and one"
-                )
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AuditError {
+    #[error("audit action must not be empty")]
     EmptyAction,
+    #[error("audit subject must not be empty")]
     EmptySubject,
 }
 
-impl fmt::Display for AuditError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyAction => formatter.write_str("audit action must not be empty"),
-            Self::EmptySubject => formatter.write_str("audit subject must not be empty"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum BenchmarkSpecError {
+    #[error("benchmark entry must not be empty")]
     EmptyEntry,
+    #[error("benchmark timeout must be greater than zero")]
     ZeroTimeout,
+    #[error("benchmark spec must declare at least one metric")]
     NoMetrics,
+    #[error("benchmark metric name must not be empty")]
     EmptyMetricName,
+    #[error("benchmark metric {name:?} is duplicated")]
     DuplicateMetric { name: String },
+    #[error("benchmark metric {name:?} has invalid tolerance")]
     InvalidTolerance { name: String },
+    #[error("baseline metric {name:?} is not declared")]
     UnknownBaseline { name: String },
+    #[error("baseline metric {name:?} has non-finite value {value}")]
     NonFiniteBaseline { name: String, value: f64 },
+    #[error("benchmark dataset must not be empty")]
     EmptyDataset,
 }
 
-impl fmt::Display for BenchmarkSpecError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyEntry => formatter.write_str("benchmark entry must not be empty"),
-            Self::ZeroTimeout => formatter.write_str("benchmark timeout must be greater than zero"),
-            Self::NoMetrics => {
-                formatter.write_str("benchmark spec must declare at least one metric")
-            }
-            Self::EmptyMetricName => formatter.write_str("benchmark metric name must not be empty"),
-            Self::DuplicateMetric { name } => {
-                write!(formatter, "benchmark metric {name:?} is duplicated")
-            }
-            Self::InvalidTolerance { name } => {
-                write!(formatter, "benchmark metric {name:?} has invalid tolerance")
-            }
-            Self::UnknownBaseline { name } => {
-                write!(formatter, "baseline metric {name:?} is not declared")
-            }
-            Self::NonFiniteBaseline { name, value } => {
-                write!(
-                    formatter,
-                    "baseline metric {name:?} has non-finite value {value}"
-                )
-            }
-            Self::EmptyDataset => formatter.write_str("benchmark dataset must not be empty"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum BenchmarkRecordError {
+    #[error("benchmark metric name must not be empty")]
     EmptyMetricName,
-    DuplicateMetric {
-        name: String,
-    },
-    UnknownMetric {
-        name: String,
-    },
-    MissingMetric {
-        name: String,
-    },
-    NonFiniteMetric {
-        name: String,
-        value: f64,
-    },
+    #[error("benchmark record metric {name:?} is duplicated")]
+    DuplicateMetric { name: String },
+    #[error("benchmark record metric {name:?} is not declared")]
+    UnknownMetric { name: String },
+    #[error("required benchmark metric {name:?} is missing")]
+    MissingMetric { name: String },
+    #[error("benchmark metric {name:?} has non-finite value {value}")]
+    NonFiniteMetric { name: String, value: f64 },
+    #[error("benchmark spec hash does not match the program contract")]
     SpecHashMismatch,
+    #[error("environment digest does not match the built environment")]
     EnvironmentDigestMismatch,
-    AttemptMismatch {
-        expected: Attempt,
-        actual: Attempt,
-    },
-    MaxAttemptsMismatch {
-        expected: Attempt,
-        actual: Attempt,
-    },
+    #[error("benchmark attempt {actual} does not match {expected}")]
+    AttemptMismatch { expected: Attempt, actual: Attempt },
+    #[error("benchmark max attempts {actual} do not match {expected}")]
+    MaxAttemptsMismatch { expected: Attempt, actual: Attempt },
+    #[error("benchmark attempt {attempt} exceeds {max_attempts}")]
     AttemptExceedsMaximum {
         attempt: Attempt,
         max_attempts: Attempt,
     },
+    #[error("benchmark experiment {actual} does not match {expected}")]
     ExperimentMismatch {
         expected: ExperimentId,
         actual: ExperimentId,
     },
+    #[error("benchmark ticket {actual} does not match {expected}")]
     TicketMismatch {
         expected: TicketId,
         actual: TicketId,
     },
+    #[error("benchmark commit does not match the submitted commit")]
     CommitMismatch,
 }
 
-impl fmt::Display for BenchmarkRecordError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::EmptyMetricName => formatter.write_str("benchmark metric name must not be empty"),
-            Self::DuplicateMetric { name } => {
-                write!(formatter, "benchmark record metric {name:?} is duplicated")
-            }
-            Self::UnknownMetric { name } => {
-                write!(
-                    formatter,
-                    "benchmark record metric {name:?} is not declared"
-                )
-            }
-            Self::MissingMetric { name } => {
-                write!(formatter, "required benchmark metric {name:?} is missing")
-            }
-            Self::NonFiniteMetric { name, value } => {
-                write!(
-                    formatter,
-                    "benchmark metric {name:?} has non-finite value {value}"
-                )
-            }
-            Self::SpecHashMismatch => {
-                formatter.write_str("benchmark spec hash does not match the program contract")
-            }
-            Self::EnvironmentDigestMismatch => {
-                formatter.write_str("environment digest does not match the built environment")
-            }
-            Self::AttemptMismatch { expected, actual } => {
-                write!(
-                    formatter,
-                    "benchmark attempt {actual} does not match {expected}"
-                )
-            }
-            Self::MaxAttemptsMismatch { expected, actual } => {
-                write!(
-                    formatter,
-                    "benchmark max attempts {actual} do not match {expected}"
-                )
-            }
-            Self::AttemptExceedsMaximum {
-                attempt,
-                max_attempts,
-            } => write!(
-                formatter,
-                "benchmark attempt {attempt} exceeds {max_attempts}"
-            ),
-            Self::ExperimentMismatch { expected, actual } => {
-                write!(
-                    formatter,
-                    "benchmark experiment {actual} does not match {expected}"
-                )
-            }
-            Self::TicketMismatch { expected, actual } => {
-                write!(
-                    formatter,
-                    "benchmark ticket {actual} does not match {expected}"
-                )
-            }
-            Self::CommitMismatch => {
-                formatter.write_str("benchmark commit does not match the submitted commit")
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ResearchPolicyError {
+    #[error("maximum experiments must be greater than zero")]
     ZeroExperiments,
+    #[error("maximum compute minutes must be greater than zero")]
     ZeroComputeMinutes,
+    #[error("maximum tokens must be greater than zero")]
     ZeroTokens,
+    #[error("maximum attempts per experiment must be greater than zero")]
     ZeroAttempts,
+    #[error("experiment budget exceeded: {used} of {max}")]
     ExperimentsExceeded { max: u32, used: u32 },
+    #[error("compute budget exceeded: {used} of {max} minutes")]
     ComputeMinutesExceeded { max: u64, used: u64 },
+    #[error("token budget exceeded: {used} of {max}")]
     TokensExceeded { max: u64, used: u64 },
+    #[error("retry is not allowed after attempt {attempt} of {max_attempts}")]
     RetryNotAllowed { attempt: Attempt, max_attempts: u32 },
 }
 
-impl fmt::Display for ResearchPolicyError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ZeroExperiments => {
-                formatter.write_str("maximum experiments must be greater than zero")
-            }
-            Self::ZeroComputeMinutes => {
-                formatter.write_str("maximum compute minutes must be greater than zero")
-            }
-            Self::ZeroTokens => formatter.write_str("maximum tokens must be greater than zero"),
-            Self::ZeroAttempts => {
-                formatter.write_str("maximum attempts per experiment must be greater than zero")
-            }
-            Self::ExperimentsExceeded { max, used } => {
-                write!(formatter, "experiment budget exceeded: {used} of {max}")
-            }
-            Self::ComputeMinutesExceeded { max, used } => {
-                write!(
-                    formatter,
-                    "compute budget exceeded: {used} of {max} minutes"
-                )
-            }
-            Self::TokensExceeded { max, used } => {
-                write!(formatter, "token budget exceeded: {used} of {max}")
-            }
-            Self::RetryNotAllowed {
-                attempt,
-                max_attempts,
-            } => write!(
-                formatter,
-                "retry is not allowed after attempt {attempt} of {max_attempts}"
-            ),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum DomainError {
+    #[error("invalid identifier: {0}")]
     Id(IdError),
+    #[error("invalid number: {0}")]
     Number(NumericError),
+    #[error("invalid timestamp: {0}")]
     Time(TimestampError),
+    #[error("invalid program: {0}")]
     Program(ProgramError),
+    #[error("invalid issue: {0}")]
     Issue(IssueError),
+    #[error("invalid lineage: {0}")]
     Lineage(LineageError),
+    #[error("invalid audit entry: {0}")]
     Audit(AuditError),
+    #[error("invalid benchmark spec: {0}")]
     Spec(BenchmarkSpecError),
+    #[error("invalid benchmark record: {0}")]
     Record(BenchmarkRecordError),
+    #[error("research policy refused: {0}")]
     Policy(ResearchPolicyError),
+    #[error("storage error: {0}")]
     Storage(StorageError),
+    #[error("trigger error: {0}")]
     Trigger(TriggerError),
+    #[error("ticket error: {0}")]
     Ticket(TicketError),
+    #[error("session error: {0}")]
     Session(SessionError),
+    #[error("benchmark error: {0}")]
     Benchmark(BenchmarkError),
+    #[error("artifact error: {0}")]
     Artifact(ArtifactError),
+    #[error("tool error: {0}")]
     Tool(ToolError),
+    #[error("http error: {0}")]
     Http(HttpError),
+    #[error("clock error: {0}")]
     Clock(ClockError),
+    #[error("surface error: {0}")]
     Surface(SurfaceError),
 }
-
-impl fmt::Display for DomainError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Id(error) => write!(formatter, "invalid identifier: {error}"),
-            Self::Number(error) => write!(formatter, "invalid number: {error}"),
-            Self::Time(error) => write!(formatter, "invalid timestamp: {error}"),
-            Self::Program(error) => write!(formatter, "invalid program: {error}"),
-            Self::Issue(error) => write!(formatter, "invalid issue: {error}"),
-            Self::Lineage(error) => write!(formatter, "invalid lineage: {error}"),
-            Self::Audit(error) => write!(formatter, "invalid audit entry: {error}"),
-            Self::Spec(error) => write!(formatter, "invalid benchmark spec: {error}"),
-            Self::Record(error) => write!(formatter, "invalid benchmark record: {error}"),
-            Self::Policy(error) => write!(formatter, "research policy refused: {error}"),
-            Self::Storage(error) => write!(formatter, "storage error: {error}"),
-            Self::Trigger(error) => write!(formatter, "trigger error: {error}"),
-            Self::Ticket(error) => write!(formatter, "ticket error: {error}"),
-            Self::Session(error) => write!(formatter, "session error: {error}"),
-            Self::Benchmark(error) => write!(formatter, "benchmark error: {error}"),
-            Self::Artifact(error) => write!(formatter, "artifact error: {error}"),
-            Self::Tool(error) => write!(formatter, "tool error: {error}"),
-            Self::Http(error) => write!(formatter, "http error: {error}"),
-            Self::Clock(error) => write!(formatter, "clock error: {error}"),
-            Self::Surface(error) => write!(formatter, "surface error: {error}"),
-        }
-    }
-}
-
-impl std::error::Error for DomainError {}
 
 macro_rules! domain_from {
     ($variant:ident, $source:ty) => {
@@ -574,27 +343,6 @@ domain_from!(Tool, ToolError);
 domain_from!(Http, HttpError);
 domain_from!(Clock, ClockError);
 domain_from!(Surface, SurfaceError);
-
-impl std::error::Error for IdError {}
-impl std::error::Error for NumericError {}
-impl std::error::Error for TimestampError {}
-impl std::error::Error for StorageError {}
-impl std::error::Error for TriggerError {}
-impl std::error::Error for TicketError {}
-impl std::error::Error for SessionError {}
-impl std::error::Error for BenchmarkError {}
-impl std::error::Error for ArtifactError {}
-impl std::error::Error for ToolError {}
-impl std::error::Error for HttpError {}
-impl std::error::Error for ClockError {}
-impl std::error::Error for SurfaceError {}
-impl std::error::Error for ProgramError {}
-impl std::error::Error for IssueError {}
-impl std::error::Error for LineageError {}
-impl std::error::Error for AuditError {}
-impl std::error::Error for BenchmarkSpecError {}
-impl std::error::Error for BenchmarkRecordError {}
-impl std::error::Error for ResearchPolicyError {}
 
 #[cfg(test)]
 mod tests {

@@ -658,75 +658,41 @@ impl fmt::Display for CommandErrorKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum CommandError {
+    #[error("invalid {command} command: {detail}")]
     InvalidDraft {
         command: CommandName,
         detail: String,
     },
+    #[error("{actor} is not authorized for {command}: {detail}")]
     Unauthorized {
         actor: ActorId,
         command: CommandName,
         detail: String,
     },
+    #[error("{actor} lacks capability {capability} for {command}")]
     Forbidden {
         actor: ActorId,
         command: CommandName,
         capability: Capability,
     },
+    #[error("{actor} does not own {subject} for {command}")]
     Ownership {
         actor: ActorId,
         command: CommandName,
         subject: String,
     },
+    #[error("{command} cannot change {subject} while it is {state}")]
     StateConflict {
         command: CommandName,
         subject: String,
         state: String,
     },
+    #[error("command storage error: {0}")]
     Storage(StorageError),
+    #[error("command clock error: {0}")]
     Clock(ClockError),
-}
-
-impl fmt::Display for CommandError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidDraft { command, detail } => {
-                write!(formatter, "invalid {command} command: {detail}")
-            }
-            Self::Unauthorized {
-                actor,
-                command,
-                detail,
-            } => write!(
-                formatter,
-                "{actor} is not authorized for {command}: {detail}"
-            ),
-            Self::Forbidden {
-                actor,
-                command,
-                capability,
-            } => write!(
-                formatter,
-                "{actor} lacks capability {capability} for {command}"
-            ),
-            Self::Ownership {
-                actor,
-                command,
-                subject,
-            } => write!(formatter, "{actor} does not own {subject} for {command}"),
-            Self::StateConflict {
-                command,
-                subject,
-                state,
-            } => write!(
-                formatter,
-                "{command} cannot change {subject} while it is {state}"
-            ),
-            Self::Storage(error) => write!(formatter, "command storage error: {error}"),
-            Self::Clock(error) => write!(formatter, "command clock error: {error}"),
-        }
-    }
 }
 
 impl CommandError {
@@ -753,8 +719,6 @@ impl CommandError {
         }
     }
 }
-
-impl std::error::Error for CommandError {}
 
 impl From<ClockError> for CommandError {
     fn from(error: ClockError) -> Self {

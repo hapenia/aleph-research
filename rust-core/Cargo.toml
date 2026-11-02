@@ -8,6 +8,7 @@ rust-version = "1.85"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+thiserror = "2"
 
 [dev-dependencies]
 trybuild = "1"
