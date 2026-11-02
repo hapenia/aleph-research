@@ -41,6 +41,13 @@ benchmark.
 Autonomy is therefore bounded and auditable: the agent chooses hypotheses and
 implementations, while the benchmark and budget define success.
 
+## Out of scope
+
+The old Boltzmann sampler, quota, merge and best-result tracker are not part of this
+design. Exploration remains Program metadata; the Researcher proposes hypotheses from
+recorded BenchmarkRecords, and ResearchPolicy bounds the search. There is no separate
+sampler to wire.
+
 ## Naming
 
 Standard names only. Types describe states; functions describe actions; traits describe a
@@ -55,8 +62,8 @@ state type has one successor operation; a wiring interface has one field per ste
 ```
 Cordis plugin (TypeScript)
   webServer routes, tools, session pool, panel, settings
-  concept adapters implementing the Rust traits
-  wasm-bindgen generated bindings
+  concept adapters implementing the effect-backed Rust traits
+  raw C ABI effect bridge
         |
         v
 Rust core (wasm32-unknown-unknown)
@@ -69,6 +76,18 @@ The dependency direction is one-way: TypeScript imports generated Rust declarati
 does not import JavaScript. The adapter supplies concept implementations to the Rust
 plugin at construction. The adapter performs effects and maps their results into the
 concept methods; the Rust core decides what may happen next.
+
+## Effect bridge
+
+The wasm module has no JavaScript imports. Rust returns an effect frame
+`{name, sequence, payload}`; TypeScript performs the effect, then calls `aleph_resume`
+with the encoded result. Rust validates the pending effect kind and sequence, owns the
+stage order, and advances only on a matching result. TypeScript never selects a stage.
+
+The bridge exposes the six concepts the pipeline actually uses: storage, trigger,
+executor, sessions, benchmark and clock. Rust's ten-trait `Plugin` remains the internal
+composition; artifacts, tools, HTTP and surface are manifest/registry concerns rather
+than pipeline effects.
 
 ## IDs and primitives
 
@@ -182,6 +201,9 @@ does not match the Program contract is invalid and cannot be recorded as passed.
 `BenchmarkRecord` holds the raw metrics and artifacts. It has no aggregate score; the
 Program utility, not the adapter, defines how metrics are weighted.
 
+`BenchmarkSpec.maxRetries` is advisory. `ResearchPolicy.maxAttemptsPerExperiment` is the
+authoritative retry bound; the policy wins when they disagree.
+
 ## Commands and authorization
 
 A model-facing command is a draft:
@@ -272,7 +294,7 @@ the call site explicit and testable, but it does not prove that a network call h
 ## Pipeline
 
 ```
-Step<In, Out> = (input: In, ctx: Context) => Promise<Result<Out, DomainError>>
+Step<In, Out> = (input: In) => Promise<Result<Out, DomainError>>
 
 interface Pipeline {
   deliverTrigger: Step<ExperimentProposed, TriggerAccepted>
@@ -396,9 +418,9 @@ trait Plugin {
 
 `runPipeline` accepts only `P: Plugin`. A plugin missing a concept does not satisfy the
 trait, so the pipeline entry point is unreachable. The concept methods are the only host
-boundary; they are async and implemented by the thin TypeScript adapter through
-wasm-bindgen imports. The generated TypeScript declaration requires every method, so a
-missing adapter method fails the TypeScript build as well.
+boundary; the wasm effect bridge surfaces the six pipeline concepts, while the remaining
+traits are manifest/registry contracts. A missing concept implementation fails the Rust
+trait bound; a missing effect handler fails the TypeScript union exhaustive check.
 
 `Surface` is the whole-plugin manifest: required HTTP routes, model-facing tools, session
 presets and settings. The TypeScript layer binds every entry with a mapped

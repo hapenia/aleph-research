@@ -5,7 +5,6 @@ export type CompletionFeature =
   | 'researcher-review-loop'
   | 'researcher-session-tools'
   | 'case-migration-live-run'
-  | 'sampler-wiring'
   | 'wasm-core-loading'
   | 'rust-command-bridge'
 
@@ -16,7 +15,6 @@ export const COMPLETION_FEATURES: readonly CompletionFeature[] = [
   'researcher-review-loop',
   'researcher-session-tools',
   'case-migration-live-run',
-  'sampler-wiring',
   'wasm-core-loading',
   'rust-command-bridge',
 ]
@@ -30,7 +28,6 @@ export const COMPLETION: Readonly<Record<CompletionFeature, CompletionState>> = 
   'researcher-review-loop': 'done',
   'researcher-session-tools': 'done',
   'case-migration-live-run': 'todo',
-  'sampler-wiring': 'todo',
   'wasm-core-loading': 'done',
   'rust-command-bridge': 'todo',
 }
