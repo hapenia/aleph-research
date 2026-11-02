@@ -1,6 +1,6 @@
 # Type blueprint v3: nominal research domain, explicit trust boundaries
 
-Status: **frozen type contract + runtime safety contract, approved for Phase 1.** Five
+Status: **frozen type contract + runtime safety contract; superseded by the v4 proposal in `docs/type-blueprint-v4.md` for the next loop redesign.** Five
 independent adversarial reviews established that TypeScript and lint cannot enforce
 construction, ownership or untrusted-input safety inside a types-only package. The
 blueprint therefore guarantees the typed shape and the API/state contracts; every
