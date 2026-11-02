@@ -95,6 +95,9 @@ ${conventions:-No project conventions were provided.}
 Implement what the ticket asks, verify it with the commands the ticket names, and
 commit your work on this branch with a clear message.
 
+This ticket is a self-contained worktree. Legacy research/mission branches and the
+source project are not available here; inspect this worktree's own history only.
+
 ## Long computations
 
 Start a long command in the background and then end your turn: the job's completion
