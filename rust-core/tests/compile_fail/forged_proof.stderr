@@ -1,0 +1,10 @@
+error[E0624]: associated function `mint` is private
+ --> tests/compile_fail/forged_proof.rs:6:49
+  |
+6 |     let _ = AuthorizationProof::<PauseProgram>::mint(CommandName::PauseProgram);
+  |                                                 ^^^^ private associated function
+  |
+ ::: src/command.rs
+  |
+  |     fn mint(name: CommandName) -> Self {
+  |     ---------------------------------- private associated function defined here

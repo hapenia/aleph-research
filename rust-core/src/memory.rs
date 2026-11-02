@@ -699,6 +699,7 @@ mod tests {
         let storage = InMemoryStorage::default();
         let program = crate::domain::Program::new(crate::domain::ProgramInput {
             id: ProgramId::new("program-1").unwrap(),
+            owner: crate::id::ActorId::new("operator-1").unwrap(),
             name: "Program".to_string(),
             goal: String::new(),
             methodology: String::new(),

@@ -17,11 +17,22 @@ accepts only a complete `Plugin`.
 - `domain`: Program, Issue, Experiment, Ticket, BenchmarkSpec,
   BenchmarkRecord, ResearchPolicy, ResearcherDecision, AuditEntry and their
   value objects.
+- `command`: command drafts, actor capabilities, the Host authorization
+  gate, `AuthorizedCommand`, `AuthorizationProof` and the command executor.
 - `stage`: the stage states and their consuming transitions.
 - `plugin`: the ten host traits and `Plugin`.
 - `pipeline`: `PipelineContext` and `run_pipeline`.
 - `memory`: in-memory host implementations and `InMemoryPlugin`.
 - `wasm`: the wasm32 C ABI facade.
+
+## Commands
+
+`CommandDraft` covers every blueprint command. `HostGate::authorize` checks
+capability, ownership and current aggregate state and mints an
+`AuthorizedCommand<K>` with a private `AuthorizationProof<K>`.
+`CommandExecutor::execute` accepts only `AuthorizedCommand<K>`; a bare draft
+does not compile. Every executed command appends an audit entry, and every
+mutation goes through versioned Storage CAS.
 
 ## Pipeline
 
@@ -46,7 +57,9 @@ cargo build --release --target wasm32-unknown-unknown
 ```
 
 `tests/compile_fail` contains the compile-fail cases for reusing a consumed
-stage and for an incomplete `Plugin`, driven by `trybuild`.
+stage, skipping a stage, an incomplete `Plugin`, passing a bare draft to the
+command executor and minting an authorization proof outside the gate, driven
+by `trybuild`.
 
 ## wasm32 ABI
 
