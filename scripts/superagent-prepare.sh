@@ -105,6 +105,10 @@ The sandbox uses its own PID namespace. \`ps\` inside the workspace may therefor
 no process for a background job that is still running. Trust the \`job_output\` status
 instead of \`ps\`; a running job is not a dead job.
 
+The sandbox also gives each command a fresh \`/tmp\`. Scripts or artifacts written to
+\`/tmp\` are gone by the next command. Keep analysis scripts and outputs in the ticket
+worktree (for example \`scratch/\` or \`experiments/\`), never in \`/tmp\`.
+
 ## Environment limits
 
 The configured runtime is the only trusted Python environment. Do not install
