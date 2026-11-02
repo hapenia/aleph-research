@@ -6,6 +6,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "check:wasm": "node scripts/build-wasm.mjs --check",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.lab.json",
     "typecheck:lab": "tsc -p tsconfig.lab.json",
     "lint": "npm run lint:eslint && npm run lint:ast-grep",

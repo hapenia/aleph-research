@@ -189,7 +189,7 @@ fn stage_transitions_carry_identity_and_facts() {
         reviewed.decision(),
         aleph_research_core::ResearcherDecision::Propose
     );
-    let completed = reviewed.close_passed(&context).unwrap();
+    let completed = block_on(reviewed.close_passed(&context)).unwrap();
     assert_eq!(completed.outcome(), ResearchOutcome::Concluded);
 }
 

@@ -118,6 +118,10 @@ test('npm run build emits the packaged JavaScript and declarations', async () =>
     'adapter/surface.d.ts',
     'adapter/wasm.js',
     'adapter/wasm.d.ts',
+    'adapter/wasm-codec.js',
+    'adapter/wasm-codec.d.ts',
+    'adapter/wasm-core.js',
+    'adapter/wasm-core.d.ts',
   ]) {
     assertEmitted(entry)
   }
