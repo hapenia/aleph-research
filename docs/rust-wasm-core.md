@@ -12,7 +12,7 @@ ordered research flow in a Rust crate compiled to `wasm32-unknown-unknown`.
   HTTP, Artifacts), the flow typestate, receipts, ID validation and stage order.
 - TypeScript only **encapsulates those concepts as adapters**: it maps DSH/Cordis
   services onto the Rust-defined concept methods and owns the actual external I/O.
-- The Rust `CompletePlugin` trait requires every concept type; a plugin missing a concept
+- The Rust `Plugin` trait requires every concept type; a plugin missing a concept
   cannot be started. wasm-bindgen-generated TypeScript declarations make a missing host
   method a TypeScript compile error too.
 - Rust owns completeness of the composition; TypeScript owns transport and effects, not
@@ -29,9 +29,9 @@ of steps, not that a network call happened.
 - `ExperimentProposed -> TriggerAccepted -> TicketOpened` typestate.
 - Each transition consumes `self`; the old value cannot be reused (compile-fail doctest).
 - Empty IDs are refused at the stage boundary.
-- `CompletePlugin` concept traits with Storage/Trigger/Ticket associated types and a
-  `run_research_chain` entry point; a `FakePlugin` drives the chain in tests.
-- A minimal exported symbol `aleph_flow_stage_count` proves the WASM artifact loads.
+- `Plugin` traits with Storage/Trigger/Ticket associated types and a
+  `run` entry point; a `FakePlugin` drives the chain in tests.
+- A minimal exported symbol `aleph_stage_count` proves the WASM artifact loads.
 - `cargo test`: 3 unit tests; `cargo test --doc`: 1 compile-fail test.
 - Release WASM builds to ~398 bytes for this probe and is loaded by Node's
   `WebAssembly.instantiate`.
@@ -47,29 +47,29 @@ cargo build --release --target wasm32-unknown-unknown
 node -e "const b=require('fs').readFileSync('target/wasm32-unknown-unknown/release/aleph_research_core.wasm'); WebAssembly.instantiate(b).then(({instance})=>console.log(Object.keys(instance.exports)))"
 ```
 
-## Concepts own completeness
+## Plugin completeness
 
 Rust declares the plugin concepts as traits and requires a complete bundle:
 
 ```rust
-pub trait StorageConcept { /* save_program, save_ticket, ... */ }
-pub trait TriggerConcept { /* deliver_experiment -> TriggerId */ }
-pub trait TicketConcept  { /* open_ticket -> TicketId */ }
+pub trait Storage { /* save_program, save_ticket, ... */ }
+pub trait TriggerSource { /* deliver_experiment -> TriggerId */ }
+pub trait TicketExecutor  { /* open_ticket -> TicketId */ }
 
-pub trait CompletePlugin {
-    type Storage: StorageConcept;
-    type Trigger: TriggerConcept;
-    type Ticket: TicketConcept;
+pub trait Plugin {
+    type Storage: Storage;
+    type Trigger: TriggerSource;
+    type Ticket: TicketExecutor;
     fn storage(&self) -> &Self::Storage;
     fn trigger(&self) -> &Self::Trigger;
     fn ticket(&self) -> &Self::Ticket;
 }
 
-pub fn run_research_chain<C: CompletePlugin>(plugin: &C, proposed: ExperimentProposed)
-    -> Result<TicketOpened, ConceptError>
+pub fn run<C: Plugin>(plugin: &C, proposed: ExperimentProposed)
+    -> Result<TicketOpened, PluginError>
 ```
 
-A plugin with a missing concept does not satisfy `CompletePlugin`, so the entry point is
+A plugin with a missing concept does not satisfy `Plugin`, so the entry point is
 unreachable. The spike includes a `FakePlugin` implementing all three concepts and a full
 chain test; the remaining concepts follow the same pattern.
 
@@ -77,17 +77,17 @@ The TypeScript layer is generated/handwritten to implement exactly these concept
 
 ```text
 TS concept adapters (thin)
-  ResearchStore      -> StorageConcept
-  ResearchTrigger    -> TriggerConcept
-  ResearchTickets    -> TicketConcept
-  ResearchSessions   -> SessionConcept
-  ResearchCI         -> CIConcept
-  ResearchTools      -> ToolConcept
-  ResearchHttp       -> HttpConcept
+  ResearchStore      -> Storage
+  ResearchTrigger    -> TriggerSource
+  ResearchTickets    -> TicketExecutor
+  ResearchSessions   -> Sessions
+  ResearchCI         -> CI
+  ResearchTools      -> Tools
+  ResearchHttp       -> Http
   ...
         |
         v
-Rust plugin composition (CompletePlugin)
+Rust plugin composition (Plugin)
   - owns flow order, typestate and validation
   - calls concept methods through wasm-bindgen
   - returns receipts/errors

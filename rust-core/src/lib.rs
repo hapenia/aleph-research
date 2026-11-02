@@ -8,7 +8,7 @@
 
 #![deny(unsafe_code)]
 
-pub mod concepts;
+pub mod plugin;
 
 use std::fmt;
 
@@ -41,13 +41,13 @@ impl fmt::Display for FlowError {
 impl std::error::Error for FlowError {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ConceptError {
+pub enum PluginError {
     Storage(String),
     Trigger(String),
     Ticket(String),
 }
 
-impl fmt::Display for ConceptError {
+impl fmt::Display for PluginError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Storage(message) => write!(f, "storage: {message}"),
@@ -57,9 +57,9 @@ impl fmt::Display for ConceptError {
     }
 }
 
-impl std::error::Error for ConceptError {}
+impl std::error::Error for PluginError {}
 
-// Concept implementations live in `concepts`; they are the only host boundary. TODO(@wasm-core-migration): expose the complete concept set through wasm-bindgen.
+// Plugin implementations live in `concepts`; they are the only host boundary. TODO(@wasm-core-migration): expose the complete concept set through wasm-bindgen.
 
 
 /// Stage 1: the Researcher has proposed an Experiment plan.
@@ -184,6 +184,6 @@ mod tests {
 /// Minimal WASM ABI probe; the typed wasm-bindgen facade is the next step.
 #[allow(unsafe_code)]
 #[unsafe(no_mangle)]
-pub extern "C" fn aleph_flow_stage_count() -> u32 {
+pub extern "C" fn aleph_stage_count() -> u32 {
     3
 }
