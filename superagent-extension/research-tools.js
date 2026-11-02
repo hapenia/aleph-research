@@ -1,4 +1,3 @@
-// TODO(@researcher-review-loop): this seam is not part of a verified end-to-end path yet; do not claim completion.
 /**
  * DSH tool-registration adapter for the AlephResearch runtime tool registry.
  *

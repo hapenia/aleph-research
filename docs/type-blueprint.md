@@ -24,6 +24,23 @@ The type system is split by responsibility:
 | TypeScript adapter | DSH/Cordis binding, concept implementations, HTTP/tool/session adapters, wasm loading | research decisions, state machines, stage order |
 | Client panel | rendering and interaction | domain state transitions |
 
+## Core purpose
+
+The framework lets an agent research autonomously against an explicit, immutable
+benchmark.
+
+- The Operator creates a Program with a goal, a benchmark contract, a utility definition
+  and a budget.
+- The Researcher proposes and revises Experiments from recorded BenchmarkRecords.
+- The Implementer works a Ticket and submits a commit; the Host runs the benchmark.
+- The Host scheduler, not an unrestricted model loop, decides when to propose again, when
+  to stop, and when the budget is exhausted.
+- The benchmark belongs to the Operator. The agent cannot edit it, and every run pins its
+  spec hash and environment digest.
+
+Autonomy is therefore bounded and auditable: the agent chooses hypotheses and
+implementations, while the benchmark and budget define success.
+
 ## Naming
 
 Standard names only. Types describe states; functions describe actions; traits describe a
@@ -58,7 +75,7 @@ concept methods; the Rust core decides what may happen next.
 All identifiers are newtypes validated at the boundary:
 
 ```
-ProgramId, IssueId, ExperimentId, TicketId, CIRunId, CommitSha, ArtifactId, AuditId
+ProgramId, IssueId, ExperimentId, TicketId, BenchmarkRunId, CommitSha, ArtifactId, AuditId
 ```
 
 `CommitSha` accepts a 40-character hex SHA or the documented zero value for a fresh
@@ -77,10 +94,10 @@ DSH domain as versioned envelopes with CAS.
 
 ```
 id, name, goal, methodology
-contract: ciEntry, timeoutMs, requiredMetrics
+benchmark: BenchmarkSpec
 utility: metrics[name, direction, weight]
 exploration: low | normal | high
-budget: maxExperiments, maxComputeMinutes, maxTokens
+policy: ResearchPolicy
 usage: experiments, computeMinutes, tokens
 status: running | paused | stopped
 createdAt, version
@@ -116,21 +133,54 @@ status: open | running | succeeded | failed | abandoned
 commit, workerSessionId
 ```
 
-### CIRecord
+### BenchmarkRecord
 
 ```
 id, experimentId, ticketId, commit
-environmentDigest
+specHash, environmentDigest
 metrics: raw named values, no aggregate score
-status: passed | failed
+status: passed | failed | retryable
+attempt, maxAttempts
 stdout, stderr, artifacts
 createdAt
 ```
+
+### PipelineRun
+
+```
+id, experimentId, stage, attempt
+benchmarkRunId?
+stateVersion, updatedAt
+```
+
+`PipelineRun` persists progress, not the nominal stage token. On resume the Host reads the
+stage name and ids, rebuilds the stage state after checking the durable aggregate, and
+continues. This survives a Host restart without making stage types serialisable.
 
 ### Audit
 
 Every command appends an audit entry with actor, action, subject, detail and request id.
 The audit log is append-only and is the source of truth for replay and evidence.
+
+## Benchmark contract
+
+```
+BenchmarkSpec {
+  id, entry, timeoutMs
+  metrics: [{ name, direction, required, tolerance? }]
+  maxRetries
+  baseline?: { [metric: string]: number }
+  dataset?: string
+}
+```
+
+The spec is read-only input to the Host. The benchmark adapter hashes it, builds the
+declared environment, runs the entry and records raw metrics. The agent never writes
+benchmark files, tests or expected values. A run whose spec hash or environment digest
+does not match the Program contract is invalid and cannot be recorded as passed.
+
+`BenchmarkRecord` holds the raw metrics and artifacts. It has no aggregate score; the
+Program utility, not the adapter, defines how metrics are weighted.
 
 ## Commands and authorization
 
@@ -142,7 +192,7 @@ CommandDraft =
   | program.goal | program.methodology | program.exploration
   | issue.create | issue.claim | issue.comment | issue.close
   | experiment.propose | experiment.review | experiment.close
-  | ci.request | ticket.submit
+  | benchmark.request | ticket.submit
 ```
 
 The Host gate checks principal, capability, ownership and current state, then returns:
@@ -159,6 +209,31 @@ AuthorizedCommand<K> {
 call the executor with a bare command. `AuthorizationProof` is minted by the gate; it is
 not constructible by the adapter.
 
+## Autonomy
+
+A Program-level loop drives repeated Experiments:
+
+```
+Program running
+  -> Issue assigned
+  -> Experiment proposed
+  -> Trigger accepted
+  -> Ticket opened
+  -> Worker started and commit submitted
+  -> Environment built
+  -> Benchmark passed | failed | retryable
+  -> Result recorded
+  -> Review recorded: propose | revise | stop
+       propose / revise -> new Experiment proposed
+       stop             -> Research completed
+```
+
+`ResearchPolicy` bounds the loop: maximum experiments, compute minutes, tokens and
+attempts per experiment. A retryable benchmark failure returns to `EnvironmentBuilt` only
+while the attempt budget allows it; otherwise it becomes terminal. The Researcher chooses
+the next hypothesis from recorded results; the Host enforces the policy and owns the stop
+condition.
+
 ## Stage states
 
 The pipeline is a sequence of nominal states. Each state carries only the ids and facts
@@ -172,7 +247,7 @@ TicketOpened
 WorkerStarted
 CommitSubmitted
 EnvironmentBuilt
-CIPassed | CIFailed
+BenchmarkPassed | BenchmarkFailed | BenchmarkRetryable
 ResultRecorded
 ReviewRecorded
 ResearchCompleted
@@ -183,9 +258,11 @@ Invariants:
 - `TriggerAccepted` exists only after the Source Eval accepted the trigger.
 - `TicketOpened` exists only with a real Ticket id from the Executor.
 - `WorkerStarted` exists only with a started Worker session.
-- `CommitSubmitted` exists only with a commit reachable by CI.
+- `CommitSubmitted` exists only with a commit reachable by the benchmark.
 - `EnvironmentBuilt` exists only after the declared environment was built.
-- `CIPassed` and `CIFailed` carry the raw CIRecord; no aggregate score hides metrics.
+- `BenchmarkPassed`, `BenchmarkFailed` and `BenchmarkRetryable` carry the raw
+  BenchmarkRecord; no aggregate score hides metrics.
+- `ReviewRecorded` carries the Researcher decision: propose, revise or stop.
 - `ResearchCompleted` is terminal and carries the outcome.
 
 Constructors are private. A single factory creates each state after the real effect, or in
@@ -203,16 +280,19 @@ interface Pipeline {
   startWorker: Step<TicketOpened, WorkerStarted>
   submitCommit: Step<WorkerStarted, CommitSubmitted>
   buildEnvironment: Step<CommitSubmitted, EnvironmentBuilt>
-  runCI: Step<EnvironmentBuilt, CIPassed | CIFailed>
-  recordResult: Step<CIPassed, ResultRecorded>
+  runBenchmark: Step<EnvironmentBuilt, BenchmarkPassed | BenchmarkFailed | BenchmarkRetryable>
+  retryBenchmark: Step<BenchmarkRetryable, EnvironmentBuilt>
+  recordResult: Step<BenchmarkPassed, ResultRecorded>
   reviewResult: Step<ResultRecorded, ReviewRecorded>
   closePassed: Step<ReviewRecorded, ResearchCompleted>
-  closeFailed: Step<CIFailed, ResearchCompleted>
+  closeFailed: Step<BenchmarkFailed | BenchmarkRetryable, ResearchCompleted>
 }
 ```
 
-`runCI` returns a union; both branches must be consumed. `runPipeline` chains the steps in
-order and cannot skip one. The production `Pipeline` has no optional step and no `any`.
+`runBenchmark` returns a union; every branch must be consumed. `retryBenchmark` is allowed
+only while `ResearchPolicy.maxAttemptsPerExperiment` permits it; otherwise the state is
+terminal and goes to `closeFailed`. `runPipeline` chains the steps in order and cannot
+skip one. The production `Pipeline` has no optional step and no `any`.
 
 ## Typestate public API
 
@@ -224,17 +304,19 @@ TriggerAccepted.openTicket(): Result<TicketOpened, DomainError>
 TicketOpened.startWorker(): Result<WorkerStarted, DomainError>
 WorkerStarted.submitCommit(): Result<CommitSubmitted, DomainError>
 CommitSubmitted.buildEnvironment(): Result<EnvironmentBuilt, DomainError>
-EnvironmentBuilt.runCI(): Result<CIPassed | CIFailed, DomainError>
-CIPassed.recordResult(): Result<ResultRecorded, DomainError>
-CIFailed.closeFailed(): Result<ResearchCompleted, DomainError>
+EnvironmentBuilt.runBenchmark(): Result<BenchmarkPassed | BenchmarkFailed | BenchmarkRetryable, DomainError>
+BenchmarkRetryable.retryBenchmark(): Result<EnvironmentBuilt, DomainError>
+BenchmarkPassed.recordResult(): Result<ResultRecorded, DomainError>
+BenchmarkFailed.closeFailed(): Result<ResearchCompleted, DomainError>
 ResultRecorded.reviewResult(): Result<ReviewRecorded, DomainError>
 ReviewRecorded.closePassed(): Result<ResearchCompleted, DomainError>
 ResearchCompleted.outcome: concluded | failed | cancelled
 ```
 
 `openTicket` does not exist on `ExperimentProposed`; the trigger step cannot be skipped
-even when the caller holds a state value. `CIPassed` and `CIFailed` are distinct types.
-`ResearchCompleted` has no successor. `startPipeline(pipeline, initial)` is the only entry.
+even when the caller holds a state value. `BenchmarkPassed`, `BenchmarkFailed` and
+`BenchmarkRetryable` are distinct types. `ResearchCompleted` has no successor.
+`startPipeline(pipeline, initial)` is the only entry.
 
 TypeScript has no move semantics: a previous object still exists after a transition. It
 has no successor method, so the only way forward is the current state. Rust consumes
@@ -246,7 +328,7 @@ Wiring is a typestate builder:
 
 ```
 type Capability =
-  trigger | ticket | worker | commit | environment | ci | result | review | close
+  trigger | ticket | worker | commit | environment | benchmark | retry | result | review | close
 
 PipelineBuilder<W extends Capability = never>
   withTrigger(...): PipelineBuilder<W | trigger>
@@ -254,7 +336,8 @@ PipelineBuilder<W extends Capability = never>
   withWorker(...): PipelineBuilder<W | worker>
   withCommit(...): PipelineBuilder<W | commit>
   withEnvironment(...): PipelineBuilder<W | environment>
-  withCI(...): PipelineBuilder<W | ci>
+  withBenchmark(...): PipelineBuilder<W | benchmark>
+  withRetry(...): PipelineBuilder<W | retry>
   withResult(...): PipelineBuilder<W | result>
   withReview(...): PipelineBuilder<W | review>
   withClose(...): PipelineBuilder<W | close>
@@ -276,7 +359,7 @@ trait Storage
 trait TriggerSource
 trait TicketExecutor
 trait Sessions
-trait CI
+trait BenchmarkRunner
 trait Artifacts
 trait Clock
 trait Tools
@@ -292,7 +375,7 @@ trait Plugin {
   type Trigger: TriggerSource
   type Executor: TicketExecutor
   type Sessions: Sessions
-  type CI: CI
+  type Benchmark: BenchmarkRunner
   type Artifacts: Artifacts
   type Clock: Clock
   type Tools: Tools
@@ -302,7 +385,7 @@ trait Plugin {
   fn trigger(&self) -> &Self::Trigger
   fn executor(&self) -> &Self::Executor
   fn sessions(&self) -> &Self::Sessions
-  fn ci(&self) -> &Self::CI
+  fn benchmark(&self) -> &Self::Benchmark
   fn artifacts(&self) -> &Self::Artifacts
   fn clock(&self) -> &Self::Clock
   fn tools(&self) -> &Self::Tools
@@ -327,8 +410,8 @@ completeness covers more than the research pipeline.
 Repositories expose versioned reads and CAS writes. A transition that changes a durable
 aggregate returns the new version; a concurrent write returns a conflict, never a lost
 update. The storage domain has one envelope table per aggregate and an append-only audit
-table. Stage states are ephemeral; CIRecords, Tickets, Experiments and audit entries are
-persistent.
+table. Stage states are ephemeral; PipelineRuns, BenchmarkRecords, Tickets, Experiments and
+audit entries are persistent.
 
 ## DSH integration
 
@@ -338,11 +421,11 @@ The TypeScript adapter owns only the DSH/Cordis mechanics:
 - tools expose the model-facing command schemas and call the same command layer;
 - the session pool hosts the Operator/Researcher/Implementer presets;
 - the executor starts Ticket work and reports Worker events;
-- the CI adapter builds the declared environment, runs the entry and records raw results;
+- the benchmark adapter builds the declared environment, runs the entry and records raw results;
 - the trigger adapter delivers the Experiment trigger to the prototype Source Eval;
 - the client panel consumes generated DTOs and never derives domain transitions.
 
-No adapter contains stage order, receipt validity or domain decisions.
+No adapter contains stage order, stage-state validity or domain decisions.
 
 ## Completion and release gate
 
@@ -368,12 +451,14 @@ TypeScript:
 - typecheck of generated wasm bindings and the adapter;
 - negative type tests for wrong stage values and partial wiring;
 - route/tool/surface completeness tests against `Surface`;
+- benchmark integrity tests: spec hash, environment digest, read-only benchmark files;
+- policy tests: experiment, compute, token and attempt limits;
 - existing domain, parser, handler, storage and tool tests until parity.
 
 End to end:
 
 - a fixture lab drives `ExperimentProposed` through `ResearchCompleted` with fake
-  concepts;
+  concepts, including a retryable benchmark failure and policy-bounded retry;
 - a real DSH lab then repeats the same path with the concrete adapters;
 - the completion ledger is empty before a test DSH is started.
 
@@ -381,7 +466,7 @@ End to end:
 
 1. Add the Rust crate with IDs, errors, states and traits; generate wasm bindings.
 2. Move validation and command authorization into Rust; keep the TS routes as adapters.
-3. Implement the concept adapters against DSH storage, sessions, tools and CI.
+3. Implement the concept adapters against DSH storage, sessions, tools and the benchmark runner.
 4. Replace the TS pipeline with the typestate `Pipeline`; delete optional ports.
 5. Add `Surface` and bind routes/tools/presets exhaustively.
 6. Run the fixture lab, then the real DSH lab; empty the ledger; only then start a test DSH.
@@ -395,7 +480,7 @@ Compile time guarantees:
 
 - stage order cannot be skipped or reordered;
 - a later step cannot receive an earlier stage state;
-- a CI failure branch must be handled;
+- a benchmark failure or retryable branch must be handled;
 - a command cannot reach the executor without an authorization proof;
 - a missing concept, route, tool or preset binding is a type error;
 - the release gate refuses incomplete features.
@@ -408,9 +493,18 @@ Runtime limits:
 - serialized boundary types must stay versioned and generated;
 - TypeScript cannot enforce move semantics, only the absence of successor methods.
 
-## Review questions
+## Decisions
 
-1. Keep stage states ephemeral, or persist them for audit in addition to the audit log?
-2. Model only a terminal `CIFailed`, or add retryable failure states and retry edges?
-3. Should `submitCommit` stay a separate step, or should the Worker step own prepare and
-   commit and return `CommitSubmitted` directly?
+1. **Stage-state persistence.** Persist a `PipelineRun` (stage, attempt, ids, benchmark
+   run id, state version) plus the durable aggregate and audit log. Stage states stay
+   ephemeral and are rebuilt on resume. This gives restart recovery without serialising
+   nominal tokens.
+2. **Failure branches.** `BenchmarkRetryable` is explicit. It returns to
+   `EnvironmentBuilt` only while `ResearchPolicy.maxAttemptsPerExperiment` allows it;
+   otherwise it goes to `closeFailed`. `BenchmarkFailed` is always terminal.
+3. **Step granularity.** Keep `startWorker` and `submitCommit` separate. A Worker can start
+   without committing, and the two failures need different remediation; merging them
+   would hide a partial progress state.
+
+These choices favour autonomous operation with bounded policy over an unrestricted retry
+loop.

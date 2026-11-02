@@ -1,7 +1,7 @@
 export type CompletionFeature =
   | 'experiment-to-ticket'
   | 'implementer-ticket-execution'
-  | 'ci-evaluation-writeback'
+  | 'benchmark-evaluation-writeback'
   | 'researcher-review-loop'
   | 'researcher-session-tools'
   | 'case-migration-live-run'
@@ -10,7 +10,7 @@ export type CompletionFeature =
 export const COMPLETION_FEATURES: readonly CompletionFeature[] = [
   'experiment-to-ticket',
   'implementer-ticket-execution',
-  'ci-evaluation-writeback',
+  'benchmark-evaluation-writeback',
   'researcher-review-loop',
   'researcher-session-tools',
   'case-migration-live-run',
@@ -22,7 +22,7 @@ export type CompletionState = 'done' | 'todo'
 export const COMPLETION: Readonly<Record<CompletionFeature, CompletionState>> = {
   'experiment-to-ticket': 'todo',
   'implementer-ticket-execution': 'todo',
-  'ci-evaluation-writeback': 'todo',
+  'benchmark-evaluation-writeback': 'todo',
   'researcher-review-loop': 'todo',
   'researcher-session-tools': 'todo',
   'case-migration-live-run': 'todo',

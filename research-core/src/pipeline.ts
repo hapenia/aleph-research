@@ -1,12 +1,6 @@
 import type { DomainError, Result } from './types/errors.js'
-import type {
-  CIRunId,
-  CommitSha,
-  ExperimentId,
-  IssueId,
-  ProgramId,
-  TicketId,
-} from './types/ids.js'
+import type { CommitSha, ExperimentId, IssueId, ProgramId, TicketId } from './types/ids.js'
+import type { BenchmarkRecord, ResearcherDecision } from './benchmark.js'
 
 export declare class IssueAssigned {
   private constructor()
@@ -64,30 +58,32 @@ export declare class EnvironmentBuilt {
   readonly environmentDigest: string
 }
 
-export declare class CIPassed {
+export declare class BenchmarkPassed {
   private constructor()
-  private readonly __ciPassed: true
-  readonly ticketId: TicketId
-  readonly experimentId: ExperimentId
-  readonly ciRunId: CIRunId
-  readonly commit: CommitSha
+  private readonly __benchmarkPassed: true
+  readonly record: BenchmarkRecord
 }
 
-export declare class CIFailed {
+export declare class BenchmarkFailed {
   private constructor()
-  private readonly __ciFailed: true
-  readonly ticketId: TicketId
-  readonly experimentId: ExperimentId
-  readonly ciRunId: CIRunId
-  readonly commit: CommitSha
+  private readonly __benchmarkFailed: true
+  readonly record: BenchmarkRecord
+  readonly reason: string
+}
+
+export declare class BenchmarkRetryable {
+  private constructor()
+  private readonly __benchmarkRetryable: true
+  readonly benchmarkRunId: string
+  readonly attempt: number
+  readonly maxAttempts: number
   readonly reason: string
 }
 
 export declare class ResultRecorded {
   private constructor()
   private readonly __resultRecorded: true
-  readonly experimentId: ExperimentId
-  readonly ciRunId: CIRunId
+  readonly record: BenchmarkRecord
 }
 
 export declare class ReviewRecorded {
@@ -95,7 +91,7 @@ export declare class ReviewRecorded {
   private readonly __reviewRecorded: true
   readonly experimentId: ExperimentId
   readonly issueId: IssueId
-  readonly verdict: 'approve' | 'request-changes' | 'comment'
+  readonly decision: ResearcherDecision
 }
 
 export declare class ResearchCompleted {
@@ -106,35 +102,22 @@ export declare class ResearchCompleted {
   readonly outcome: 'concluded' | 'failed' | 'cancelled'
 }
 
-/** One typed step; its input receipt cannot be constructed by a caller. */
 export interface Step<From, To> {
   run(input: From): Promise<Result<To, DomainError>>
 }
 
-/** The complete chain. Every step is required; missing wiring is a compile error. */
 export interface ResearchPipeline {
   readonly deliverTrigger: Step<ExperimentProposed, TriggerAccepted>
   readonly openTicket: Step<TriggerAccepted, TicketOpened>
   readonly startWorker: Step<TicketOpened, WorkerStarted>
   readonly submitCommit: Step<WorkerStarted, CommitSubmitted>
   readonly buildEnvironment: Step<CommitSubmitted, EnvironmentBuilt>
-  readonly runCI: Step<EnvironmentBuilt, CIPassed | CIFailed>
-  readonly recordResult: Step<CIPassed, ResultRecorded>
+  readonly runBenchmark: Step<EnvironmentBuilt, BenchmarkPassed | BenchmarkFailed | BenchmarkRetryable>
+  readonly retryBenchmark: Step<BenchmarkRetryable, EnvironmentBuilt>
+  readonly recordResult: Step<BenchmarkPassed, ResultRecorded>
   readonly reviewResult: Step<ResultRecorded, ReviewRecorded>
   readonly closePassed: Step<ReviewRecorded, ResearchCompleted>
-  readonly closeFailed: Step<CIFailed, ResearchCompleted>
+  readonly closeFailed: Step<BenchmarkFailed | BenchmarkRetryable, ResearchCompleted>
 }
 
 export type StepName = keyof ResearchPipeline
-
-/*
- * There is deliberately no unimplemented pipeline factory here.
- *
- * A complete `ResearchPipeline` is a production requirement, and tests must supply an
- * in-memory `FakePipeline` that actually implements every step. A factory that returns a
- * complete-looking object whose methods throw would let incomplete wiring pass the type
- * check and only fail at runtime, which is exactly what this blueprint is preventing.
- *
- * A specific unimplemented seam may throw `unimplemented(feature)` at its own call site;
- * it must not be wrapped into a whole pipeline.
- */

@@ -1,4 +1,3 @@
-// TODO(@experiment-to-ticket): this seam is not part of a verified end-to-end path yet; do not claim completion.
 /**
  * Bridge from the research runtime's trigger stream to the prototype `aleph` Source.
  *

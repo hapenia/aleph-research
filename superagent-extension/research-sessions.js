@@ -1,4 +1,3 @@
-// TODO(@researcher-session-tools): this seam is not part of a verified end-to-end path yet; do not claim completion.
 /**
  * AlephResearch Session pool: the DSH Sessions that run the research presets.
  *
