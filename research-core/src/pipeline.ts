@@ -1,11 +1,3 @@
-/**
- * Typed research flow: each step consumes the previous stage value and returns the next stage value.
- * A stage value can only be created by the step that performed the action, so a caller cannot skip, reorder or replace a step.
- *
- * A stage value proves that the Host step completed; it does not prove that an external
- * service really performed the side effect. That trust boundary is explicit in the
- * factory that creates the value.
- */
 import type { DomainError, Result } from './types/errors.js'
 import type {
   CIRunId,

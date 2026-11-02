@@ -163,9 +163,10 @@ There is no `createUnimplementedPipeline`: a complete-looking object whose metho
 would let incomplete wiring pass typecheck and fail only at runtime.
 
 The completion ledger (`research-core/src/completion.ts`) lists every feature that is not
-verified end to end. `npm run check:completion` validates the `TODO(@feature)` markers and
-prints pending work. `npm run check:release` fails to compile while any feature is `'todo'`.
-Health reports the ledger; the release gate is the deployment gate.
+verified end to end. `npm run check:completion` prints pending work from the ledger;
+`npm run check:release` fails to compile while any feature is `'todo'`. Rust stubs use the
+standard `todo!()` macro; there are no explanatory TODO comments. Health reports the
+ledger; the release gate is the deployment gate.
 
 ## Storage and DSH seam
 
@@ -211,7 +212,7 @@ trust boundary; integration tests must exercise it with the real DSH lab.
 | `TriggerFactory` | `deliverTrigger` returns `TriggerAccepted` |
 | `triggerPort` / bridge | `openTicket`; no fire-and-forget bridge |
 | `createResearchHost` optional pipeline | `ResearchPipeline` required; health reports ledger |
-| TODO comments | `TODO(@feature)` + completion checker + release gate |
+| completion tracking | `completion.ts` ledger + `check:release`; Rust stubs use `todo!()` |
 | type/mutation tests | add pipeline-order and authorization negative tests |
 
 Migration after approval:

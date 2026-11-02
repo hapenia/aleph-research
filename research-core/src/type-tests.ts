@@ -339,13 +339,10 @@ export {
   expectedAuditActions,
 }
 
-// ---------------------------------------------------------------------------------------
-// Typed pipeline chain: a stage cannot accept the evidence of an earlier stage.
-// ---------------------------------------------------------------------------------------
-declare const researchFlow: import('./flow.js').ResearchFlow
-declare const proposedReceipt: import('./flow.js').ExperimentProposedReceipt
-// @ts-expect-error openTicket requires TriggerAcceptedReceipt, not ExperimentProposedReceipt
-researchFlow.openTicket(proposedReceipt)
-declare const acceptedReceipt: import('./flow.js').TriggerAcceptedReceipt
-// @ts-expect-error startWorker requires TicketOpenedReceipt
-researchFlow.startWorker(acceptedReceipt)
+declare const researchPipeline: import('./pipeline.js').ResearchPipeline
+declare const proposed: import('./pipeline.js').ExperimentProposed
+// @ts-expect-error openTicket requires TriggerAccepted, not ExperimentProposed
+researchPipeline.openTicket(proposed)
+declare const accepted: import('./pipeline.js').TriggerAccepted
+// @ts-expect-error startWorker requires TicketOpened
+researchPipeline.startWorker(accepted)
