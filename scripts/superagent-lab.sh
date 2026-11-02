@@ -156,6 +156,14 @@ patch="$DSH_HOME/profiles/$profile/cordis.patch.yml"
 # patch file holds only the blocks appended below, so it is regenerated.
 if [ "$profile_reused" = 1 ]; then printf '' > "$patch"
 elif grep -qx '\[\]' "$patch"; then printf '' > "$patch"; fi
+if [ -d "$run_root/fixtures/research" ]; then
+  additional_writable_roots="[\"$run_root/state\", \"$run_root/fixtures/research\"]"
+else
+  # A case lab has its research repository at $run_root/research, not under fixtures;
+  # only list roots that actually exist so dsh-sandbox-local never sees a missing path.
+  additional_writable_roots="[\"$run_root/state\"]"
+fi
+
 cat >> "$patch" <<YAML
 - id: webserver
   config:
@@ -192,7 +200,7 @@ cat >> "$patch" <<YAML
     # The ticket worktrees live under the state directory; their gitdir points into
     # the fixture repository. The fixture data directory stays outside both, so a
     # Worker cannot read the source data it was only meant to receive a copy of.
-    additionalWritableRoots: ["$run_root/state", "$run_root/fixtures/research"]
+    additionalWritableRoots: $additional_writable_roots
 - id: agent-default-model
   config:
     provider: $role_provider
