@@ -1,4 +1,4 @@
-# Type blueprint v4 proposal: evidence-chained research loop
+# Type blueprint v4 proposal: receipt-chained research loop
 
 Status: **design proposal only. Do not implement until reviewed.** The current
 `research-core` types are frozen at the previous blueprint; this document proposes the
@@ -23,80 +23,80 @@ The missing rule is: **each step must take the previous step's proof as a parame
 return the next step's proof as its result.** A caller cannot skip, reorder or replace a
 step, because the proof type is nominal and only the previous stage can produce it.
 
-## The evidence algebra
+## The receipt algebra
 
-Every completed step returns a nominal evidence value. Evidence carries only the facts
+Every completed step returns a nominal receipt value. Receipt carries only the facts
 needed by the next step; the durable aggregate state remains in storage.
 
 ```ts
-declare class Evidence<Kind extends string> {
+declare class Receipt<Kind extends string> {
   private constructor()
-  private readonly __evidence: Kind
+  private readonly __receipt: Kind
   readonly kind: Kind
   readonly at: IsoTimestamp
   readonly programId: ProgramId
 }
 ```
 
-Concrete evidence (sketch):
+Concrete receipt (sketch):
 
 ```ts
-IssueAssignedEvidence          // the assignee is known and authorized
-ExperimentProposedEvidence     // a typed plan and environment exist
-TriggerAcceptedEvidence        // the prototype Source Eval accepted the trigger
-TicketOpenedEvidence           // the Executor owns a Ticket for the Experiment
-WorkerStartedEvidence          // a Worker Session actually started
-CommitSubmittedEvidence        // the Worker committed a head for CI
-EnvironmentBuiltEvidence       // uv built the declared environment
-CIPassedEvidence / CIFailedEvidence
-ResultRecordedEvidence         // the raw CIRecord and artifacts are persisted
-ReviewRecordedEvidence         // the Researcher's verdict is persisted
-ResearchCompletedEvidence      // the Issue/Experiment are closed with an outcome
+IssueAssignedReceipt          // the assignee is known and authorized
+ExperimentProposedReceipt     // a typed plan and environment exist
+TriggerAcceptedReceipt        // the prototype Source Eval accepted the trigger
+TicketOpenedReceipt           // the Executor owns a Ticket for the Experiment
+WorkerStartedReceipt          // a Worker Session actually started
+CommitSubmittedReceipt        // the Worker committed a head for CI
+EnvironmentBuiltReceipt       // uv built the declared environment
+CIPassedReceipt / CIFailedReceipt
+ResultRecordedReceipt         // the raw CIRecord and artifacts are persisted
+ReviewRecordedReceipt         // the Researcher's verdict is persisted
+ResearchCompletedReceipt      // the Issue/Experiment are closed with an outcome
 ```
 
-Evidence constructors are private. A single factory boundary mints them after the real
+Receipt constructors are private. A single factory boundary mints them after the real
 side effect (or in the in-memory implementation used by tests). The factory is the only
 trusted boundary; it does not prove the network call happened, but it makes the call site
 explicit and testable.
 
 ## The loop as types
 
-A stage is a function whose input is the previous evidence and whose output is the next:
+A stage is a function whose input is the previous receipt and whose output is the next:
 
 ```ts
-type Stage<In extends Evidence, Out extends Evidence> = (
+type FlowStep<In extends Receipt, Out extends Receipt> = (
   input: In,
   ctx: StageContext,
-) => Promise<Result<Out, StageFailure>>
+) => Promise<Result<Out, DomainError>>
 ```
 
 The production composition must satisfy the whole interface:
 
 ```ts
-interface ResearchLoop {
-  deliverTrigger: Stage<ExperimentProposedEvidence, TriggerAcceptedEvidence>
-  openTicket: Stage<TriggerAcceptedEvidence, TicketOpenedEvidence>
-  startWorker: Stage<TicketOpenedEvidence, WorkerStartedEvidence>
-  submitCommit: Stage<WorkerStartedEvidence, CommitSubmittedEvidence>
-  buildEnvironment: Stage<CommitSubmittedEvidence, EnvironmentBuiltEvidence>
-  runCI: Stage<EnvironmentBuiltEvidence, CIPassedEvidence | CIFailedEvidence>
-  recordResult: Stage<CIPassedEvidence, ResultRecordedEvidence>
-  reviewPass: Stage<ResultRecordedEvidence, ReviewRecordedEvidence>
-  closePassed: Stage<ReviewRecordedEvidence, ResearchCompletedEvidence>
-  closeFailed: Stage<CIFailedEvidence, ResearchCompletedEvidence>
+interface ResearchFlow {
+  deliverTrigger: FlowStep<ExperimentProposedReceipt, TriggerAcceptedReceipt>
+  openTicket: FlowStep<TriggerAcceptedReceipt, TicketOpenedReceipt>
+  startWorker: FlowStep<TicketOpenedReceipt, WorkerStartedReceipt>
+  submitCommit: FlowStep<WorkerStartedReceipt, CommitSubmittedReceipt>
+  buildEnvironment: FlowStep<CommitSubmittedReceipt, EnvironmentBuiltReceipt>
+  runCI: FlowStep<EnvironmentBuiltReceipt, CIPassedReceipt | CIFailedReceipt>
+  recordResult: FlowStep<CIPassedReceipt, ResultRecordedReceipt>
+  reviewResult: FlowStep<ResultRecordedReceipt, ReviewRecordedReceipt>
+  closePassed: FlowStep<ReviewRecordedReceipt, ResearchCompletedReceipt>
+  closeFailed: FlowStep<CIFailedReceipt, ResearchCompletedReceipt>
 }
 ```
 
 `runCI` returns a union, so the caller must handle both branches; a failed CI cannot be
-silently dropped. Stages return `StageFailure` only for refusals that are meaningful to
-the loop (for example an Eval refusal); infrastructure failures are evidence of failure
+silently dropped. Stages return `DomainError` only for refusals that are meaningful to
+the loop (for example an Eval refusal); infrastructure failures are receipt of failure
 and must also be consumed by `closeFailed` or a retry stage.
 
-A central `runResearchLoop` receives the wiring and an initial `ExperimentProposedEvidence`
+A central `runResearchFlow` receives the wiring and an initial `ExperimentProposedReceipt`
 and can only chain stages in the declared order. The compiler enforces the order:
 
 ```ts
-async function runResearchLoop(loop: ResearchLoop, start: ExperimentProposedEvidence) {
+async function runResearchFlow(loop: ResearchFlow, start: ExperimentProposedReceipt) {
   const accepted = await loop.deliverTrigger(start, ctx)
   if (!accepted.ok) return accepted
   const ticket = await loop.openTicket(accepted.value, ctx)
@@ -107,7 +107,7 @@ async function runResearchLoop(loop: ResearchLoop, start: ExperimentProposedEvid
 Passing `start` to `openTicket`, or calling `buildEnvironment` before `submitCommit`, is a
 compile error. There is no `any` or optional stage in the production interface.
 
-## Authorization is evidence too
+## Authorization is receipt too
 
 A command from a model is not executable until a Host gate has checked principal,
 capability and ownership. The gate returns a proof:
@@ -127,8 +127,8 @@ bag; the proof is minted only by the authorizer.
 
 ## Wiring and completion ledger
 
-`createResearchHost` takes a complete `ResearchLoop`; there is no default production
-wiring. Tests may use `createUnimplementedLoop()` whose stages throw
+`createResearchHost` takes a complete `ResearchFlow`; there is no default production
+wiring. Tests may use `createUnimplementedFlow()` whose stages throw
 `UnimplementedError(feature)`.
 
 The completion ledger (`research-core/src/completion.ts`) lists every stage that is not
@@ -141,17 +141,17 @@ ledger, and the release gate is the deployment gate.
 
 ## Storage and DSH seam
 
-Storage remains the durable source of truth for aggregate state. Evidence is ephemeral:
+Storage remains the durable source of truth for aggregate state. Receipt is ephemeral:
 it proves that a step happened, while the corresponding CIRecord, Ticket and state
-versions are persisted. Each evidence contains the ids and versions needed by the next
+versions are persisted. Each receipt contains the ids and versions needed by the next
 stage, so no stage needs to guess or re-read optional data.
 
 The DSH/prototype seam is represented by concrete stage interfaces, not optional ports:
 
 - `deliverTrigger` calls `ctx.orchestrator.context(aleph).receive` and returns
-  `TriggerAcceptedEvidence` only when the Source accepts;
-- `openTicket` returns `TicketOpenedEvidence` only with a real Ticket id;
-- `startWorker`, `buildEnvironment`, `runCI`, etc. likewise return evidence only after the
+  `TriggerAcceptedReceipt` only when the Source accepts;
+- `openTicket` returns `TicketOpenedReceipt` only with a real Ticket id;
+- `startWorker`, `buildEnvironment`, `runCI`, etc. likewise return receipt only after the
   corresponding action.
 
 A fake implementation for tests is allowed, but it must implement the same loop. A
@@ -163,14 +163,14 @@ expose `UnimplementedError`; it cannot silently skip.
 Guaranteed by the loop types:
 
 - a stage cannot be skipped or called out of order;
-- an earlier evidence cannot be passed to a later stage;
+- an earlier receipt cannot be passed to a later stage;
 - a CI failure cannot be ignored because the union must be consumed;
 - a raw command cannot reach the executor without an authorization proof;
 - a missing stage in the production wiring is a type error;
 - the release gate refuses to compile while the ledger has todos.
 
 Not guaranteed by types: the external side effect actually happened, the actor really is
-the Session, the Source really accepted the trigger, or the CI really ran. The evidence
+the Session, the Source really accepted the trigger, or the CI really ran. The receipt
 factory is the single trust boundary; integration tests must exercise it with the real
 DSH lab, and the ledger/release gate tracks what is still missing.
 
@@ -179,31 +179,31 @@ DSH lab, and the ledger/release gate tracks what is still missing.
 | Current | v4 |
 | --- | --- |
 | nominal state classes | stay; they are the durable aggregate shape |
-| command handlers returning state | return evidence after the durable write |
+| command handlers returning state | return receipt after the durable write |
 | `CommandContext` bag | `AuthorizedCommand` proof from the auth gate |
 | optional service ports | required loop stages; unimplemented loop for dev |
-| `TriggerFactory` mapping | `deliverTrigger` stage returns `TriggerAcceptedEvidence` |
+| `TriggerFactory` mapping | `deliverTrigger` stage returns `TriggerAcceptedReceipt` |
 | `triggerPort` / bridge | `openTicket` stage; no fire-and-forget bridge |
-| `createResearchHost` optional pipeline | `ResearchLoop` required; health reports ledger |
+| `createResearchHost` optional pipeline | `ResearchFlow` required; health reports ledger |
 | TODO comments | `TODO(@feature)` + completion checker + release gate |
 | type/mutation tests | plus loop-order and authorization negative tests |
 
 ## Migration plan (after approval)
 
-1. Define evidence classes and the `ResearchLoop` interface; update type tests.
-2. Change each handler to return its evidence after the durable write.
+1. Define receipt classes and the `ResearchFlow` interface; update type tests.
+2. Change each handler to return its receipt after the durable write.
 3. Implement the auth gate and `AuthorizedCommand`; executor accepts only it.
 4. Rewire `research-host` and the DSH adapter to call the loop; delete optional ports.
 5. Add loop-order negative tests and a lab integration test that drives
-   `ExperimentProposedEvidence` to `ResearchCompletedEvidence`.
+   `ExperimentProposedReceipt` to `ResearchCompletedReceipt`.
 6. Empty the completion ledger; only then restart a test DSH.
 
 ## Review questions
 
-1. **Evidence persistence.** Keep evidence ephemeral (proposed) or persist it for audit?
+1. **Receipt persistence.** Keep receipt ephemeral (proposed) or persist it for audit?
    Ephemeral keeps state and proof separate; audit already records the durable facts.
-2. **Failure branches.** Should the loop model explicit `CIFailedEvidence` (proposed),
-   retryable failure evidence, or both? A retry should be a loop edge, not a hidden retry
+2. **Failure branches.** Should the loop model explicit `CIFailedReceipt` (proposed),
+   retryable failure receipt, or both? A retry should be a loop edge, not a hidden retry
    inside `runCI`.
 3. **Stage granularity.** Is `submitCommit` separate from `startWorker`, or should the
-   Worker stage own prepare → commit and return `CommitSubmittedEvidence` directly?
+   Worker stage own prepare → commit and return `CommitSubmittedReceipt` directly?

@@ -342,10 +342,10 @@ export {
 // ---------------------------------------------------------------------------------------
 // Typed pipeline chain: a stage cannot accept the evidence of an earlier stage.
 // ---------------------------------------------------------------------------------------
-declare const researchPipeline: import('./pipeline.js').ResearchPipeline
-declare const proposedEvidence: import('./pipeline.js').ExperimentProposedEvidence
-// @ts-expect-error triggerToTicket requires TriggerAcceptedEvidence, not ExperimentProposedEvidence
-researchPipeline.triggerToTicket.run(proposedEvidence)
-declare const acceptedEvidence: import('./pipeline.js').TriggerAcceptedEvidence
-// @ts-expect-error ticketToWorker requires TicketCreatedEvidence
-researchPipeline.ticketToWorker.run(acceptedEvidence)
+declare const researchFlow: import('./flow.js').ResearchFlow
+declare const proposedReceipt: import('./flow.js').ExperimentProposedReceipt
+// @ts-expect-error openTicket requires TriggerAcceptedReceipt, not ExperimentProposedReceipt
+researchFlow.openTicket(proposedReceipt)
+declare const acceptedReceipt: import('./flow.js').TriggerAcceptedReceipt
+// @ts-expect-error startWorker requires TicketOpenedReceipt
+researchFlow.startWorker(acceptedReceipt)
