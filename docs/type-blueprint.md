@@ -69,7 +69,7 @@ state type has one successor operation; a wiring interface has one field per ste
 Cordis plugin (TypeScript)
   webServer routes, tools, session pool, panel, settings
   concept adapters implementing the effect-backed Rust traits
-  raw C ABI effect bridge
+  wasm-bindgen Core effect bridge
         |
         v
 Rust core (wasm32-unknown-unknown)
@@ -85,10 +85,11 @@ concept methods; the Rust core decides what may happen next.
 
 ## Effect bridge
 
-The wasm module has no JavaScript imports. Rust returns an effect frame
-`{name, sequence, payload}`; TypeScript performs the effect, then calls `aleph_resume`
-with the encoded result. Rust validates the pending effect kind and sequence, owns the
-stage order, and advances only on a matching result. TypeScript never selects a stage.
+The wasm-bindgen `Core` class receives and returns serde DTOs. Rust returns an effect
+frame `{effect, sequence, stage, payload}`; TypeScript performs the effect, then calls
+`resume` with the typed result. Rust validates the pending effect kind and decimal
+sequence, owns the stage order, and advances only on a matching result. TypeScript never
+selects a stage.
 
 The bridge exposes the six concepts the pipeline actually uses: storage, trigger,
 executor, sessions, benchmark and clock. Rust's ten-trait `Plugin` remains the internal

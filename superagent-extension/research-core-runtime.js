@@ -66,8 +66,8 @@ const utilityOf = (program) => (program?.utility?.metrics ?? []).map((metric) =>
 
 const usageOf = (program) => ({
   experiments: Number(program?.usage?.experiments ?? 0),
-  computeMinutes: Number(program?.usage?.computeMinutes ?? 0),
-  tokens: Number(program?.usage?.tokens ?? 0),
+  computeMinutes: String(Number(program?.usage?.computeMinutes ?? 0)),
+  tokens: String(Number(program?.usage?.tokens ?? 0)),
 })
 
 export function coreProgramOf(program) {
@@ -80,7 +80,7 @@ export function coreProgramOf(program) {
     benchmark: {
       id: benchmarkIdOf(program.id),
       entry: program.contract.ciEntry,
-      timeoutMs: Number(program.contract.timeoutMs),
+      timeoutMs: String(Number(program.contract.timeoutMs)),
       metrics: metricsOf(program),
       maxRetries: 0,
       baseline: {},
@@ -89,8 +89,8 @@ export function coreProgramOf(program) {
     exploration: program.exploration,
     policy: {
       maxExperiments: Number(program.budget.maxExperiments),
-      maxComputeMinutes: Number(program.budget.maxComputeMinutes),
-      maxTokens: Number(program.budget.maxTokens),
+      maxComputeMinutes: String(Number(program.budget.maxComputeMinutes)),
+      maxTokens: String(Number(program.budget.maxTokens)),
       maxAttemptsPerExperiment: 2,
     },
     usage: usageOf(program),

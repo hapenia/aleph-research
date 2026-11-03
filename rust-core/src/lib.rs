@@ -4,6 +4,7 @@
 pub mod bridge;
 pub mod command;
 pub mod domain;
+pub mod dto;
 pub mod error;
 pub mod id;
 pub mod memory;
@@ -11,13 +12,11 @@ pub mod pipeline;
 pub mod plugin;
 pub mod stage;
 pub mod time;
-pub mod wire;
 
 #[cfg(target_arch = "wasm32")]
-#[allow(unsafe_code)]
-mod wasm;
+pub mod wasm_bindgen;
 
-pub const CORE_ABI_VERSION: u32 = 1;
+pub const CORE_ABI_VERSION: u32 = 2;
 
 pub use command::*;
 pub use domain::{

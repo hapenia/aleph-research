@@ -39,11 +39,11 @@ class MemoryCommandStore implements CommandStore {
   private save<T extends { readonly id: string }>(
     rows: Map<string, CoreVersioned<T>>,
     value: T,
-    expected?: number,
-  ): Result<number, CoreCommandEffectFailure> {
-    const current = rows.get(value.id)?.version ?? 0
-    if ((expected ?? 0) !== current) return conflict()
-    const version = current + 1
+    expected?: string,
+  ): Result<string, CoreCommandEffectFailure> {
+    const current = Number(rows.get(value.id)?.version ?? '0')
+    if (Number(expected ?? '0') !== current) return conflict()
+    const version = String(current + 1)
     rows.set(value.id, { value, version })
     return ok(version)
   }
@@ -55,7 +55,7 @@ class MemoryCommandStore implements CommandStore {
   async saveProgram(
     program: CoreProgram,
     expected?: number,
-  ): Promise<Result<number, CoreCommandEffectFailure>> {
+  ): Promise<Result<string, CoreCommandEffectFailure>> {
     return this.save(this.programs, program, expected)
   }
 
@@ -66,7 +66,7 @@ class MemoryCommandStore implements CommandStore {
   async saveIssue(
     issue: CoreIssue,
     expected?: number,
-  ): Promise<Result<number, CoreCommandEffectFailure>> {
+  ): Promise<Result<string, CoreCommandEffectFailure>> {
     return this.save(this.issues, issue, expected)
   }
 
@@ -79,7 +79,7 @@ class MemoryCommandStore implements CommandStore {
   async saveExperiment(
     experiment: CoreExperiment,
     expected?: number,
-  ): Promise<Result<number, CoreCommandEffectFailure>> {
+  ): Promise<Result<string, CoreCommandEffectFailure>> {
     return this.save(this.experiments, experiment, expected)
   }
 
@@ -90,7 +90,7 @@ class MemoryCommandStore implements CommandStore {
   async saveTicket(
     ticket: CoreTicket,
     expected?: number,
-  ): Promise<Result<number, CoreCommandEffectFailure>> {
+  ): Promise<Result<string, CoreCommandEffectFailure>> {
     return this.save(this.tickets, ticket, expected)
   }
 
@@ -130,7 +130,7 @@ function createProgramDraft(): CoreCommandDraft {
     benchmark: {
       id: 'benchmark-1',
       entry: 'bench.py',
-      timeoutMs: 30_000,
+      timeoutMs: '30000',
       metrics: [
         { name: 'score', direction: 'maximize', required: true },
       ],
@@ -141,8 +141,8 @@ function createProgramDraft(): CoreCommandDraft {
     exploration: 'normal',
     policy: {
       maxExperiments: 4,
-      maxComputeMinutes: 60,
-      maxTokens: 10_000,
+      maxComputeMinutes: '60',
+      maxTokens: '10000',
       maxAttemptsPerExperiment: 2,
     },
   }
@@ -204,13 +204,13 @@ test('an authorized command mutates storage and writes an audit entry', async ()
   assert.deepEqual(created.value, {
     kind: 'program-created',
     program: 'program-1',
-    version: 1,
+    version: '1',
   })
   const stored = store.programs.get('program-1')
   assert.ok(stored)
   assert.equal(stored.value.owner, 'operator-1')
   assert.equal(stored.value.status, 'running')
-  assert.equal(stored.version, 1)
+  assert.equal(stored.version, '1')
   assert.equal(store.audits.length, 1)
   assert.equal(store.audits[0]?.entry.action, 'program.create')
   assert.equal(store.audits[0]?.entry.subject, 'program:program-1')
@@ -219,7 +219,7 @@ test('an authorized command mutates storage and writes an audit entry', async ()
   const paused = await bridge.execute(OPERATOR, pauseDraft())
   assert.equal(paused.ok, true)
   if (!paused.ok) return
-  assert.deepEqual(paused.value, { kind: 'program-updated', program: 'program-1', version: 2 })
+  assert.deepEqual(paused.value, { kind: 'program-updated', program: 'program-1', version: '2' })
   assert.equal(store.programs.get('program-1')?.value.status, 'paused')
   assert.equal(store.audits.length, 2)
   assert.equal(store.audits[1]?.entry.action, 'program.pause')
@@ -235,7 +235,7 @@ test('an unauthorized command is refused by the rust gate', async () => {
   if (refused.ok) return
   assert.equal(refused.error.kind, 'forbidden')
   assert.equal(store.programs.get('program-1')?.value.status, 'running')
-  assert.equal(store.programs.get('program-1')?.version, 1)
+  assert.equal(store.programs.get('program-1')?.version, '1')
   assert.equal(store.audits.length, 1)
 })
 
@@ -261,7 +261,7 @@ test('a duplicate create is refused without overwriting state', async () => {
   assert.equal(duplicate.ok, false)
   if (duplicate.ok) return
   assert.equal(duplicate.error.kind, 'state-conflict')
-  assert.equal(store.programs.get('program-1')?.version, 1)
+  assert.equal(store.programs.get('program-1')?.version, '1')
   assert.equal(store.audits.length, 1)
 })
 
@@ -280,7 +280,7 @@ test('issue and experiment commands cross the durable aggregate boundary', async
   const assigned = store.issues.get('issue-1')
   assert.equal(assigned?.value.status, 'assigned')
   assert.equal(assigned?.value.assignee, 'session-1')
-  assert.equal(assigned?.version, 2)
+  assert.equal(assigned?.version, '2')
 
   const proposed = await bridge.execute(RESEARCHER, proposeDraft())
   assert.equal(proposed.ok, true)
@@ -288,7 +288,7 @@ test('issue and experiment commands cross the durable aggregate boundary', async
   assert.deepEqual(proposed.value, {
     kind: 'experiment-created',
     experiment: 'experiment-1',
-    version: 1,
+    version: '1',
   })
   const experiment = store.experiments.get('experiment-1')
   assert.ok(experiment)
@@ -296,7 +296,7 @@ test('issue and experiment commands cross the durable aggregate boundary', async
   assert.equal(experiment.value.createdBy, 'researcher-1')
   const updatedIssue = store.issues.get('issue-1')
   assert.deepEqual(updatedIssue?.value.experiments, ['experiment-1'])
-  assert.equal(updatedIssue?.version, 3)
+  assert.equal(updatedIssue?.version, '3')
   assert.equal(store.audits.length, 4)
 })
 

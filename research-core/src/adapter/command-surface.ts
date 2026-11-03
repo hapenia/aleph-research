@@ -162,7 +162,7 @@ function benchmarkOf(input: UnknownRecord): CoreBenchmarkSpec {
   return {
     id: `benchmark-${textOf(input['programId']) || 'program'}`,
     entry: textOf(contract['ciEntry']),
-    timeoutMs: numberOf(contract['timeoutMs']),
+    timeoutMs: String(numberOf(contract['timeoutMs'])),
     metrics: benchmarkMetrics,
     maxRetries: 0,
     baseline: {},
@@ -186,8 +186,8 @@ function policyOf(input: UnknownRecord): CoreResearchPolicy {
   const budget = recordOf(input['budget'])
   return {
     maxExperiments: numberOf(budget['maxExperiments']),
-    maxComputeMinutes: numberOf(budget['maxComputeMinutes']),
-    maxTokens: numberOf(budget['maxTokens']),
+    maxComputeMinutes: String(numberOf(budget['maxComputeMinutes'])),
+    maxTokens: String(numberOf(budget['maxTokens'])),
     maxAttemptsPerExperiment: 2,
   }
 }
@@ -252,7 +252,7 @@ function draftOf(
         goal: textOf(input['goal']),
         methodology: textOf(input['methodology']),
         benchmark: benchmarkOf(input),
-        utility: utilityOf(input),
+        utility: [...utilityOf(input)],
         exploration: explorationOf(input['exploration']),
         policy: policyOf(input),
       }
@@ -277,7 +277,7 @@ function draftOf(
         programId,
         title: textOf(input['title']),
         body: textOf(input['body']),
-        labels: stringsOf(input['labels']),
+        labels: [...stringsOf(input['labels'])],
       }
     case 'issue.claim':
     case 'issue.close':

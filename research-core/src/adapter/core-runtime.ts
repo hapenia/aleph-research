@@ -1,5 +1,5 @@
 import type { Result } from '../types/errors.js'
-import type { CommitSha, TicketId } from '../types/ids.js'
+import type { CommitSha } from '../types/ids.js'
 import type {
   CoreBridgeError,
   CoreConcepts,
@@ -13,16 +13,15 @@ import type {
   CoreStartInput,
   ResearchCore,
 } from './boundary.js'
-import { decodeEffect } from './wasm-codec.js'
-import { loadBundledResearchCore, performEffect } from './wasm.js'
+import { effectOf, loadBundledResearchCore, performEffect } from './wasm.js'
 
 export interface CoreRuntimeHooks {
-  canSubmitCommit(ticketId: TicketId): Promise<boolean>
+  canSubmitCommit(ticketId: string): Promise<boolean>
 }
 
 export interface CorePending {
   readonly effect: 'sessions.review' | 'sessions.submitCommit'
-  readonly sequence: number
+  readonly sequence: string
   readonly stage: CoreStageName
 }
 
@@ -149,15 +148,10 @@ class Runtime implements CoreRuntime {
         }
         return { status: 'paused', pending: this.current }
       }
-      const decoded = decodeEffect(current.effect, current.payload)
-      if (!decoded.ok) {
-        return failed({ ...decoded.error, effect: current.effect })
-      }
       if (
         current.effect === 'sessions.submitCommit'
         && this.hooks !== undefined
-        && decoded.value.name === 'sessions.submitCommit'
-        && !(await this.hooks.canSubmitCommit(decoded.value.ticketId))
+        && !(await this.hooks.canSubmitCommit(current.payload.ticketId))
       ) {
         this.current = {
           effect: 'sessions.submitCommit',
@@ -168,7 +162,7 @@ class Runtime implements CoreRuntime {
       }
       let resume: CoreEffectResume
       try {
-        resume = await performEffect(this.concepts, current.sequence, decoded.value)
+        resume = await performEffect(this.concepts, current.sequence, effectOf(current))
       } catch (error) {
         return failed({
           kind: 'concept',

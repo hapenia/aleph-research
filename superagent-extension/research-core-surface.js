@@ -267,6 +267,12 @@ export function createSurfaceHandlers(options) {
           if (!resumed.ok) return resumed
           return ok({ ...value, progress: resumed.value })
         }
+        if (name === 'ticket.submit' || name === 'aleph_research_submit_ticket') {
+          const resumed = await resumeCommit(input)
+          if (resumed === undefined) return ok(value)
+          if (!resumed.ok) return resumed
+          return ok({ ...value, progress: resumed.value })
+        }
         return ok(value)
       }
     }

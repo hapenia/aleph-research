@@ -6,6 +6,7 @@ files:
   - 'src/**/*.ts'
 ignores:
   - 'src/type-tests.ts'
+  - 'src/adapter/wasm-bindgen/**'
   - 'src/factories.ts'
   - 'src/hydration.ts'
 rule:

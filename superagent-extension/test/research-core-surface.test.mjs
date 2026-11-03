@@ -224,6 +224,43 @@ test('ticket.submit resumes a pending commit with the submitted head', async () 
   assert.equal(fixture.calls[0].context.actorKind, 'implementer')
 })
 
+test('ticket.submit resumes the core when the command bridge handles it', async () => {
+  const calls = []
+  const commits = []
+  const runtime = {
+    async start() {
+      return completed
+    },
+    pending() {
+      return { effect: 'sessions.submitCommit', sequence: '7', stage: 'WorkerStarted' }
+    },
+    async resumeCommit(commit) {
+      commits.push(commit)
+      return completed
+    },
+  }
+  const handlers = createSurfaceHandlers({
+    executeTool: async (tool, input, context) => {
+      calls.push({ tool, input, context })
+      return { ok: true, value: { legacy: true } }
+    },
+    executeCommand: async () => ({
+      ok: true,
+      value: { command: { kind: 'experiment-updated', experiment: 'experiment-1', version: '2' }, id: 'experiment-1' },
+    }),
+    runtime,
+    store: { experiments: { get: async () => undefined } },
+    actorSession: 'aleph-implementer-1',
+  })
+
+  const response = await handlers['ticket.submit'].handle(
+    routeRequest('ticket.submit', {}, { head: HEAD }),
+  )
+  assert.equal(response.status, 200)
+  assert.deepEqual(commits, [HEAD])
+  assert.equal(calls.length, 0)
+})
+
 test('a legacy refusal is returned as a typed error response', async () => {
   const store = { experiments: { get: async () => undefined } }
   const runtime = {

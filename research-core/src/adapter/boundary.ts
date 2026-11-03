@@ -1,132 +1,97 @@
 import type { Result } from '../types/errors.js'
 import type {
-  BranchName,
-  CommitSha,
-  ExperimentId,
-  ImplementerSessionId,
-  IsoTimestamp,
-  IssueId,
-  ProgramId,
-  TicketId,
-} from '../types/ids.js'
+  CoreBenchmarkRecord,
+  CoreBenchmarkSpec,
+  CoreCompletedFrame,
+  CoreFrame as CoreWireFrame,
+  CoreEffectFailure,
+  CoreEffectFrame,
+  CoreEffectResume,
+  CoreEnvironmentDeclaration,
+  CoreProgram,
+  CoreResearcherDecision,
+  CoreStageName,
+  CoreStartRequest,
+} from './bindings.js'
 
-export const CORE_BOUNDARY_VERSION = 1
+export type {
+  CoreActor,
+  CoreActorRole,
+  CoreAck,
+  CoreAuditEntry,
+  CoreBenchmarkMetric,
+  CoreBenchmarkRecord,
+  CoreBenchmarkSpec,
+  CoreBenchmarkStatus,
+  CoreCommandCompletedFrame,
+  CoreCommandDraft,
+  CoreCommandEffectFrame,
+  CoreCommandEffectResume,
+  CoreCommandErrorFrame,
+  CoreCommandErrorFrameKind,
+  CoreCommandName,
+  CoreCommandOutcome,
+  CoreCommandRequest,
+  CoreCompletedFrame,
+  CoreDomainFrame,
+  CoreEffectFailure,
+  CoreEffectFailureKind,
+  CoreEffectFrame,
+  CoreEffectResult,
+  CoreEffectResume,
+  CoreEnvironmentDeclaration,
+  CoreEnvironmentKind,
+  CoreExecutorOpen,
+  CoreExperiment,
+  CoreExperimentStatus,
+  CoreExploration,
+  CoreIssue,
+  CoreIssueStatus,
+  CoreLineage,
+  CoreLineageStrategy,
+  CoreMetric,
+  CoreMetricDirection,
+  CoreMetricWeight,
+  CoreProgram,
+  CoreProgramStatus,
+  CoreProtocolFrame,
+  CoreResearchPolicy,
+  CoreResearcherDecision,
+  CoreResearchOutcome,
+  CoreSessionsReview,
+  CoreSessionsStartWorker,
+  CoreSessionsSubmitCommit,
+  CoreStageName,
+  CoreStartRequest,
+  CoreStopReason,
+  CoreStorageAppendAudit,
+  CoreStorageAppendBenchmarkRecord,
+  CoreStorageLoadExperiment,
+  CoreStorageLoadIssue,
+  CoreStorageLoadProgram,
+  CoreStorageLoadTicket,
+  CoreStorageSaveExperiment,
+  CoreStorageSaveIssue,
+  CoreStorageSaveProgram,
+  CoreStorageSaveTicket,
+  CoreTicket,
+  CoreTicketStatus,
+  CoreTriggerDeliver,
+  CoreUsage,
+  CoreVersioned,
+} from './bindings.js'
 
-export type CoreStageName =
-  | 'IssueAssigned'
-  | 'ExperimentProposed'
-  | 'TriggerAccepted'
-  | 'TicketOpened'
-  | 'WorkerStarted'
-  | 'CommitSubmitted'
-  | 'EnvironmentBuilt'
-  | 'BenchmarkPassed'
-  | 'BenchmarkFailed'
-  | 'BenchmarkRetryable'
-  | 'ResultRecorded'
-  | 'ReviewRecorded'
-  | 'ResearchCompleted'
+export type { CoreFrame as CoreWireFrame } from './bindings.js'
 
+export const CORE_BOUNDARY_VERSION = 2
+
+export type CoreStartInput = CoreStartRequest
 export type CoreOutcome = 'concluded' | 'failed' | 'cancelled'
-
-export type CoreProgramStatus = 'running' | 'paused' | 'stopped'
-
-export type CoreMetricDirection = 'maximize' | 'minimize'
-
-export type CoreBenchmarkStatus = 'passed' | 'failed' | 'retryable'
-
-export type CoreExploration = 'low' | 'normal' | 'high'
-
-export type CoreStopReason =
-  | 'goal-met'
-  | 'policy-exhausted'
-  | 'no-hypothesis'
-  | 'cancelled'
-
-export interface CoreBenchmarkMetric {
-  readonly name: string
-  readonly direction: CoreMetricDirection
-  readonly required: boolean
-  readonly tolerance?: number
+export type CoreFrame = CoreEffectFrame | CoreCompletedFrame
+export type CoreCompletion = {
+  readonly outcome: CoreOutcome
+  readonly stages: readonly CoreStageName[]
 }
-
-export interface CoreBenchmarkSpec {
-  readonly id: string
-  readonly entry: string
-  readonly timeoutMs: number
-  readonly metrics: readonly CoreBenchmarkMetric[]
-  readonly maxRetries: number
-  readonly baseline: Readonly<Record<string, number>>
-  readonly dataset?: string
-}
-
-export interface CoreMetric {
-  readonly name: string
-  readonly value: number
-}
-
-export interface CoreMetricWeight {
-  readonly name: string
-  readonly direction: CoreMetricDirection
-  readonly weight: number
-}
-
-export interface CoreUsage {
-  readonly experiments: number
-  readonly computeMinutes: number
-  readonly tokens: number
-}
-
-export interface CoreResearchPolicy {
-  readonly maxExperiments: number
-  readonly maxComputeMinutes: number
-  readonly maxTokens: number
-  readonly maxAttemptsPerExperiment: number
-}
-
-export interface CoreProgram {
-  readonly id: ProgramId
-  readonly owner: string
-  readonly name: string
-  readonly goal: string
-  readonly methodology: string
-  readonly benchmark: CoreBenchmarkSpec
-  readonly utility: readonly CoreMetricWeight[]
-  readonly exploration: CoreExploration
-  readonly policy: CoreResearchPolicy
-  readonly usage: CoreUsage
-  readonly status: CoreProgramStatus
-  readonly createdAt: IsoTimestamp
-}
-
-export type CoreEnvironmentKind = 'requirements' | 'uv-lock'
-
-export interface CoreEnvironmentDeclaration {
-  readonly kind: CoreEnvironmentKind
-  readonly file: string
-}
-
-export interface CoreBenchmarkRecord {
-  readonly id: string
-  readonly experimentId: ExperimentId
-  readonly ticketId: TicketId
-  readonly commit: CommitSha
-  readonly specHash: string
-  readonly environmentDigest: string
-  readonly metrics: readonly CoreMetric[]
-  readonly status: CoreBenchmarkStatus
-  readonly attempt: number
-  readonly maxAttempts: number
-  readonly stdout: string
-  readonly stderr: string
-  readonly artifacts: readonly string[]
-  readonly createdAt: IsoTimestamp
-}
-
-export type CoreResearcherDecision =
-  | { readonly kind: 'propose' }
-  | { readonly kind: 'revise' }
-  | { readonly kind: 'stop'; readonly reason: CoreStopReason }
 
 export type CoreEffectName =
   | 'storage.loadProgram'
@@ -142,41 +107,41 @@ export type CoreEffectName =
   | 'clock.now'
 
 export type CoreEffect =
-  | { readonly name: 'storage.loadProgram'; readonly programId: ProgramId }
+  | { readonly name: 'storage.loadProgram'; readonly programId: string }
   | {
       readonly name: 'trigger.deliver'
-      readonly experimentId: ExperimentId
-      readonly branch: BranchName
-      readonly baseCommit: CommitSha
+      readonly experimentId: string
+      readonly branch: string
+      readonly baseCommit: string
     }
   | {
       readonly name: 'executor.open'
-      readonly programId: ProgramId
-      readonly issueId: IssueId
-      readonly experimentId: ExperimentId
+      readonly programId: string
+      readonly issueId: string
+      readonly experimentId: string
     }
   | {
       readonly name: 'sessions.startWorker'
-      readonly ticketId: TicketId
-      readonly experimentId: ExperimentId
+      readonly ticketId: string
+      readonly experimentId: string
     }
   | {
       readonly name: 'sessions.submitCommit'
-      readonly ticketId: TicketId
-      readonly workerSessionId: ImplementerSessionId
+      readonly ticketId: string
+      readonly workerSessionId: string
     }
   | {
       readonly name: 'benchmark.buildEnvironment'
-      readonly commit: CommitSha
+      readonly commit: string
       readonly environment: CoreEnvironmentDeclaration
     }
   | { readonly name: 'benchmark.specHash'; readonly spec: CoreBenchmarkSpec }
   | {
       readonly name: 'benchmark.run'
-      readonly experimentId: ExperimentId
-      readonly ticketId: TicketId
+      readonly experimentId: string
+      readonly ticketId: string
       readonly spec: CoreBenchmarkSpec
-      readonly commit: CommitSha
+      readonly commit: string
       readonly environmentDigest: string
       readonly attempt: number
       readonly maxAttempts: number
@@ -184,86 +149,75 @@ export type CoreEffect =
   | { readonly name: 'storage.appendBenchmarkRecord'; readonly record: CoreBenchmarkRecord }
   | {
       readonly name: 'sessions.review'
-      readonly experimentId: ExperimentId
+      readonly experimentId: string
       readonly benchmark: CoreBenchmarkRecord
     }
   | { readonly name: 'clock.now' }
 
-export interface CoreTriggerRequest {
-  readonly experimentId: ExperimentId
-  readonly branch: BranchName
-  readonly baseCommit: CommitSha
-}
-
-export interface CoreTicketRequest {
-  readonly programId: ProgramId
-  readonly issueId: IssueId
-  readonly experimentId: ExperimentId
-}
-
-export interface CoreWorkerRequest {
-  readonly ticketId: TicketId
-  readonly experimentId: ExperimentId
-}
-
-export interface CoreCommitRequest {
-  readonly ticketId: TicketId
-  readonly workerSessionId: ImplementerSessionId
-}
-
-export interface CoreEnvironmentRequest {
-  readonly commit: CommitSha
-  readonly environment: CoreEnvironmentDeclaration
-}
-
-export interface CoreBenchmarkRequest {
-  readonly experimentId: ExperimentId
-  readonly ticketId: TicketId
-  readonly spec: CoreBenchmarkSpec
-  readonly commit: CommitSha
-  readonly environmentDigest: string
-  readonly attempt: number
-  readonly maxAttempts: number
-}
-
-export interface CoreReviewRequest {
-  readonly experimentId: ExperimentId
-  readonly benchmark: CoreBenchmarkRecord
-}
-
-export interface CoreEffectFailure {
-  readonly kind: 'rejected' | 'unavailable'
-  readonly message: string
-}
-
 export type CoreEffectValue = {
   readonly 'storage.loadProgram': CoreProgram
   readonly 'trigger.deliver': string
-  readonly 'executor.open': TicketId
-  readonly 'sessions.startWorker': ImplementerSessionId
-  readonly 'sessions.submitCommit': CommitSha
+  readonly 'executor.open': string
+  readonly 'sessions.startWorker': string
+  readonly 'sessions.submitCommit': string
   readonly 'benchmark.buildEnvironment': string
   readonly 'benchmark.specHash': string
   readonly 'benchmark.run': CoreBenchmarkRecord
-  readonly 'storage.appendBenchmarkRecord': void
+  readonly 'storage.appendBenchmarkRecord': null
   readonly 'sessions.review': CoreResearcherDecision
-  readonly 'clock.now': IsoTimestamp
+  readonly 'clock.now': string
 }
 
 export type CoreEffectResultFor<E extends CoreEffectName> =
   | { readonly ok: true; readonly value: CoreEffectValue[E] }
   | { readonly ok: false; readonly failure: CoreEffectFailure }
 
-export type CoreEffectResume = {
-  readonly [E in CoreEffectName]: {
-    readonly effect: E
-    readonly sequence: number
-    readonly result: CoreEffectResultFor<E>
-  }
-}[CoreEffectName]
+export type CoreResume = CoreEffectResume
+
+export interface CoreTriggerRequest {
+  readonly experimentId: string
+  readonly branch: string
+  readonly baseCommit: string
+}
+
+export interface CoreTicketRequest {
+  readonly programId: string
+  readonly issueId: string
+  readonly experimentId: string
+}
+
+export interface CoreWorkerRequest {
+  readonly ticketId: string
+  readonly experimentId: string
+}
+
+export interface CoreCommitRequest {
+  readonly ticketId: string
+  readonly workerSessionId: string
+}
+
+export interface CoreEnvironmentRequest {
+  readonly commit: string
+  readonly environment: CoreEnvironmentDeclaration
+}
+
+export interface CoreBenchmarkRequest {
+  readonly experimentId: string
+  readonly ticketId: string
+  readonly spec: CoreBenchmarkSpec
+  readonly commit: string
+  readonly environmentDigest: string
+  readonly attempt: number
+  readonly maxAttempts: number
+}
+
+export interface CoreReviewRequest {
+  readonly experimentId: string
+  readonly benchmark: CoreBenchmarkRecord
+}
 
 export interface CoreStorageConcepts {
-  loadProgram(programId: ProgramId): Promise<Result<CoreProgram, CoreEffectFailure>>
+  loadProgram(programId: string): Promise<Result<CoreProgram, CoreEffectFailure>>
   appendBenchmarkRecord(
     record: CoreBenchmarkRecord,
   ): Promise<Result<void, CoreEffectFailure>>
@@ -274,17 +228,13 @@ export interface CoreTriggerConcepts {
 }
 
 export interface CoreExecutorConcepts {
-  open(request: CoreTicketRequest): Promise<Result<TicketId, CoreEffectFailure>>
+  open(request: CoreTicketRequest): Promise<Result<string, CoreEffectFailure>>
 }
 
 export interface CoreSessionsConcepts {
-  startWorker(
-    request: CoreWorkerRequest,
-  ): Promise<Result<ImplementerSessionId, CoreEffectFailure>>
-  submitCommit(request: CoreCommitRequest): Promise<Result<CommitSha, CoreEffectFailure>>
-  review(
-    request: CoreReviewRequest,
-  ): Promise<Result<CoreResearcherDecision, CoreEffectFailure>>
+  startWorker(request: CoreWorkerRequest): Promise<Result<string, CoreEffectFailure>>
+  submitCommit(request: CoreCommitRequest): Promise<Result<string, CoreEffectFailure>>
+  review(request: CoreReviewRequest): Promise<Result<CoreResearcherDecision, CoreEffectFailure>>
 }
 
 export interface CoreBenchmarkConcepts {
@@ -296,7 +246,7 @@ export interface CoreBenchmarkConcepts {
 }
 
 export interface CoreClockConcepts {
-  now(): IsoTimestamp
+  now(): string
 }
 
 export interface CoreConcepts {
@@ -308,36 +258,6 @@ export interface CoreConcepts {
   readonly clock: CoreClockConcepts
 }
 
-export interface CoreStartInput {
-  readonly programId: ProgramId
-  readonly issueId: IssueId
-  readonly experimentId: ExperimentId
-  readonly branch: BranchName
-  readonly baseCommit: CommitSha
-  readonly environment: CoreEnvironmentDeclaration
-}
-
-export interface CoreEffectFrame {
-  readonly kind: 'effect'
-  readonly effect: CoreEffectName
-  readonly sequence: number
-  readonly stage: CoreStageName
-  readonly payload: Uint8Array
-}
-
-export interface CoreCompletedFrame {
-  readonly kind: 'completed'
-  readonly outcome: CoreOutcome
-  readonly stages: readonly CoreStageName[]
-}
-
-export type CoreFrame = CoreEffectFrame | CoreCompletedFrame
-
-export interface CoreCompletion {
-  readonly outcome: CoreOutcome
-  readonly stages: readonly CoreStageName[]
-}
-
 export type CoreBridgeErrorKind = 'protocol' | 'domain' | 'concept' | 'transport'
 
 export interface CoreBridgeError {
@@ -346,31 +266,14 @@ export interface CoreBridgeError {
   readonly effect?: CoreEffectName
 }
 
-export interface CoreWasmMemory {
-  readonly buffer: ArrayBuffer
+export interface CoreHandle {
+  boundary_version(): number
+  start(input: CoreStartRequest): CoreWireFrame
+  resume(input: CoreEffectResume): CoreWireFrame
 }
 
-export interface CoreWasmExports {
-  readonly memory: CoreWasmMemory
-  readonly aleph_bridge_version: () => number
-  readonly aleph_alloc: (length: number) => number
-  readonly aleph_free: (pointer: number, length: number) => void
-  readonly aleph_start: (pointer: number, length: number) => number
-  readonly aleph_resume: (pointer: number, length: number) => number
-  readonly aleph_response_len: () => number
-  readonly aleph_response_write: (pointer: number, capacity: number) => number
-}
-
-export interface WasmInstance {
-  readonly exports: CoreWasmExports
-}
-
-export interface WasmRuntime {
-  instantiate(module: Uint8Array): Promise<WasmInstance>
-}
-
-export interface CoreSource {
-  readonly module: Uint8Array
+export interface CoreFactory {
+  create(): CoreHandle
 }
 
 export type CoreLoadError =
@@ -380,11 +283,10 @@ export type CoreLoadError =
       readonly actual: number
     }
   | { readonly kind: 'instantiate'; readonly message: string }
-  | { readonly kind: 'missing-export'; readonly name: string }
 
 export interface ResearchCore {
   readonly boundaryVersion: number
   start(input: CoreStartInput): Result<CoreFrame, CoreBridgeError>
-  resume(input: CoreEffectResume): Result<CoreFrame, CoreBridgeError>
+  resume(input: CoreResume): Result<CoreFrame, CoreBridgeError>
   run(input: CoreStartInput): Promise<Result<CoreCompletion, CoreBridgeError>>
 }
