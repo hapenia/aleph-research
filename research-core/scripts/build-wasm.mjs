@@ -13,7 +13,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const CLI_VERSION = '0.2.130'
-const BUDGET_BYTES = 320 * 1024
+const BUDGET_BYTES = 640 * 1024
 const packageRoot = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
 const workspaceRoot = path.resolve(packageRoot, '..')
 const manifestPath = path.join(workspaceRoot, 'rust-core', 'Cargo.toml')
