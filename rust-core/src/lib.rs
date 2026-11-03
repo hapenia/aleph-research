@@ -14,6 +14,9 @@ pub mod time;
 pub mod wire;
 
 #[cfg(target_arch = "wasm32")]
+pub mod wasm_bindgen;
+
+#[cfg(target_arch = "wasm32")]
 #[allow(unsafe_code)]
 mod wasm;
 
