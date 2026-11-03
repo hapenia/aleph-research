@@ -101,7 +101,11 @@ if [ -d "$research_core" ]; then
   if [ ! -d "$research_core/node_modules" ]; then
     (cd "$research_core" && npm install --no-audit --no-fund --silent)
   fi
-  (cd "$research_core" && npm run -s build)
+  if ! command -v wasm-bindgen >/dev/null 2>&1; then
+    echo "wasm-bindgen CLI ${ALEPH_WASM_BINDGEN_VERSION:-0.2.130} is required to build research-core" >&2
+    exit 1
+  fi
+  (cd "$research_core" && npm run -s generate && npm run -s build)
 fi
 phase "research-core build"
 

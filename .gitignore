@@ -15,3 +15,7 @@ vendor/dsh-superagent/.artifacts/
 superagent-extension/node_modules/
 research-core/node_modules/
 research-core/dist/
+rust-core/target/
+research-core/src/adapter/wasm-bindgen/
+research-core/src/adapter/bindings/
+research-core/src/adapter/wasm-core.ts
