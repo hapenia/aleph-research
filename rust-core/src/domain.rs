@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 
+use getset::{CopyGetters, Getters};
+
 use crate::error::{
     ArtifactError, AuditError, BenchmarkRecordError, BenchmarkSpecError, DomainError, IssueError,
     LineageError, ProgramError, ResearchPolicyError,
@@ -162,9 +164,10 @@ impl Environment {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, CopyGetters)]
 pub struct Metric {
     name: String,
+    #[getset(get_copy = "pub")]
     value: f64,
 }
 
@@ -182,10 +185,6 @@ impl Metric {
 
     pub fn name(&self) -> &str {
         &self.name
-    }
-
-    pub fn value(&self) -> f64 {
-        self.value
     }
 }
 
@@ -238,13 +237,15 @@ impl BenchmarkMetric {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct BenchmarkSpec {
+    #[getset(get = "pub")]
     id: BenchmarkSpecId,
     entry: String,
     timeout_ms: u64,
     metrics: Vec<BenchmarkMetric>,
     max_retries: u32,
+    #[getset(get = "pub")]
     baseline: BTreeMap<String, f64>,
     dataset: Option<String>,
 }
@@ -306,10 +307,6 @@ impl BenchmarkSpec {
         })
     }
 
-    pub fn id(&self) -> &BenchmarkSpecId {
-        &self.id
-    }
-
     pub fn entry(&self) -> &str {
         &self.entry
     }
@@ -326,10 +323,6 @@ impl BenchmarkSpec {
         self.max_retries
     }
 
-    pub fn baseline(&self) -> &BTreeMap<String, f64> {
-        &self.baseline
-    }
-
     pub fn dataset(&self) -> Option<&str> {
         self.dataset.as_deref()
     }
@@ -339,13 +332,19 @@ impl BenchmarkSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct BenchmarkRecord {
+    #[getset(get = "pub")]
     id: BenchmarkRunId,
+    #[getset(get = "pub")]
     experiment_id: ExperimentId,
+    #[getset(get = "pub")]
     ticket_id: TicketId,
+    #[getset(get = "pub")]
     commit: CommitSha,
+    #[getset(get = "pub")]
     spec_hash: SpecHash,
+    #[getset(get = "pub")]
     environment_digest: EnvironmentDigest,
     metrics: Vec<Metric>,
     status: BenchmarkStatus,
@@ -409,30 +408,6 @@ impl BenchmarkRecord {
             artifacts: input.artifacts,
             created_at: input.created_at,
         })
-    }
-
-    pub fn id(&self) -> &BenchmarkRunId {
-        &self.id
-    }
-
-    pub fn experiment_id(&self) -> &ExperimentId {
-        &self.experiment_id
-    }
-
-    pub fn ticket_id(&self) -> &TicketId {
-        &self.ticket_id
-    }
-
-    pub fn commit(&self) -> &CommitSha {
-        &self.commit
-    }
-
-    pub fn spec_hash(&self) -> &SpecHash {
-        &self.spec_hash
-    }
-
-    pub fn environment_digest(&self) -> &EnvironmentDigest {
-        &self.environment_digest
     }
 
     pub fn metrics(&self) -> &[Metric] {
@@ -717,13 +692,16 @@ impl MetricWeight {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct Program {
+    #[getset(get = "pub")]
     id: ProgramId,
+    #[getset(get = "pub")]
     owner: ActorId,
     name: String,
     goal: String,
     methodology: String,
+    #[getset(get = "pub")]
     benchmark: BenchmarkSpec,
     utility: Vec<MetricWeight>,
     exploration: Exploration,
@@ -783,14 +761,6 @@ impl Program {
         })
     }
 
-    pub fn id(&self) -> &ProgramId {
-        &self.id
-    }
-
-    pub fn owner(&self) -> &ActorId {
-        &self.owner
-    }
-
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -801,10 +771,6 @@ impl Program {
 
     pub fn methodology(&self) -> &str {
         &self.methodology
-    }
-
-    pub fn benchmark(&self) -> &BenchmarkSpec {
-        &self.benchmark
     }
 
     pub fn utility(&self) -> &[MetricWeight] {
@@ -848,13 +814,16 @@ impl Program {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct Issue {
+    #[getset(get = "pub")]
     id: IssueId,
+    #[getset(get = "pub")]
     program_id: ProgramId,
     title: String,
     body: String,
     labels: Vec<String>,
+    #[getset(get = "pub")]
     author: ActorId,
     created_at: Timestamp,
     status: IssueStatus,
@@ -892,14 +861,6 @@ impl Issue {
         })
     }
 
-    pub fn id(&self) -> &IssueId {
-        &self.id
-    }
-
-    pub fn program_id(&self) -> &ProgramId {
-        &self.program_id
-    }
-
     pub fn title(&self) -> &str {
         &self.title
     }
@@ -910,10 +871,6 @@ impl Issue {
 
     pub fn labels(&self) -> &[String] {
         &self.labels
-    }
-
-    pub fn author(&self) -> &ActorId {
-        &self.author
     }
 
     pub const fn created_at(&self) -> Timestamp {
@@ -963,9 +920,10 @@ impl Issue {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct Lineage {
     strategy: LineageStrategy,
+    #[getset(get = "pub")]
     base_commit: CommitSha,
     fresh_start_probability: f64,
 }
@@ -993,25 +951,29 @@ impl Lineage {
         self.strategy
     }
 
-    pub fn base_commit(&self) -> &CommitSha {
-        &self.base_commit
-    }
-
     pub const fn fresh_start_probability(&self) -> f64 {
         self.fresh_start_probability
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct Experiment {
+    #[getset(get = "pub")]
     id: ExperimentId,
+    #[getset(get = "pub")]
     program_id: ProgramId,
+    #[getset(get = "pub")]
     issue_id: IssueId,
+    #[getset(get = "pub")]
     branch: BranchName,
+    #[getset(get = "pub")]
     head: CommitSha,
+    #[getset(get = "pub")]
     environment: Environment,
+    #[getset(get = "pub")]
     lineage: Lineage,
     plan_comment_id: Option<CommentId>,
+    #[getset(get = "pub")]
     created_by: ActorId,
     created_at: Timestamp,
     status: ExperimentStatus,
@@ -1049,40 +1011,8 @@ impl Experiment {
         }
     }
 
-    pub fn id(&self) -> &ExperimentId {
-        &self.id
-    }
-
-    pub fn program_id(&self) -> &ProgramId {
-        &self.program_id
-    }
-
-    pub fn issue_id(&self) -> &IssueId {
-        &self.issue_id
-    }
-
-    pub fn branch(&self) -> &BranchName {
-        &self.branch
-    }
-
-    pub fn head(&self) -> &CommitSha {
-        &self.head
-    }
-
-    pub fn environment(&self) -> &Environment {
-        &self.environment
-    }
-
-    pub fn lineage(&self) -> &Lineage {
-        &self.lineage
-    }
-
     pub fn plan_comment_id(&self) -> Option<&CommentId> {
         self.plan_comment_id.as_ref()
-    }
-
-    pub fn created_by(&self) -> &ActorId {
-        &self.created_by
     }
 
     pub const fn created_at(&self) -> Timestamp {
@@ -1098,9 +1028,11 @@ impl Experiment {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct TicketAssignment {
+    #[getset(get = "pub")]
     branch: BranchName,
+    #[getset(get = "pub")]
     base_commit: CommitSha,
 }
 
@@ -1111,20 +1043,15 @@ impl TicketAssignment {
             base_commit,
         }
     }
-
-    pub fn branch(&self) -> &BranchName {
-        &self.branch
-    }
-
-    pub fn base_commit(&self) -> &CommitSha {
-        &self.base_commit
-    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct Ticket {
+    #[getset(get = "pub")]
     id: TicketId,
+    #[getset(get = "pub")]
     experiment_id: ExperimentId,
+    #[getset(get = "pub")]
     assignment: TicketAssignment,
     status: TicketStatus,
     commit: Option<CommitSha>,
@@ -1161,18 +1088,6 @@ impl Ticket {
         }
     }
 
-    pub fn id(&self) -> &TicketId {
-        &self.id
-    }
-
-    pub fn experiment_id(&self) -> &ExperimentId {
-        &self.experiment_id
-    }
-
-    pub fn assignment(&self) -> &TicketAssignment {
-        &self.assignment
-    }
-
     pub const fn status(&self) -> TicketStatus {
         self.status
     }
@@ -1192,13 +1107,16 @@ impl Ticket {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct AuditEntry {
+    #[getset(get = "pub")]
     id: AuditId,
+    #[getset(get = "pub")]
     actor: ActorId,
     action: String,
     subject: String,
     detail: String,
+    #[getset(get = "pub")]
     request_id: RequestId,
     created_at: Timestamp,
 }
@@ -1232,14 +1150,6 @@ impl AuditEntry {
         })
     }
 
-    pub fn id(&self) -> &AuditId {
-        &self.id
-    }
-
-    pub fn actor(&self) -> &ActorId {
-        &self.actor
-    }
-
     pub fn action(&self) -> &str {
         &self.action
     }
@@ -1252,17 +1162,14 @@ impl AuditEntry {
         &self.detail
     }
 
-    pub fn request_id(&self) -> &RequestId {
-        &self.request_id
-    }
-
     pub const fn created_at(&self) -> Timestamp {
         self.created_at
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct Artifact {
+    #[getset(get = "pub")]
     experiment_id: ExperimentId,
     name: String,
     media_type: String,
@@ -1290,10 +1197,6 @@ impl Artifact {
             media_type,
             bytes,
         })
-    }
-
-    pub fn experiment_id(&self) -> &ExperimentId {
-        &self.experiment_id
     }
 
     pub fn name(&self) -> &str {

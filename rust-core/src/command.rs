@@ -2,6 +2,8 @@ use std::collections::HashSet;
 use std::fmt;
 use std::marker::PhantomData;
 
+use getset::Getters;
+
 use crate::domain::{
     AuditEntry, BenchmarkSpec, Environment, Experiment, ExperimentInput, ExperimentStatus,
     Exploration, Issue, IssueInput, IssueStatus, Lineage, MetricWeight, Program, ProgramInput,
@@ -177,8 +179,9 @@ impl fmt::Display for ActorRole {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct Actor {
+    #[getset(get = "pub")]
     id: ActorId,
     role: ActorRole,
     session: Option<SessionId>,
@@ -211,10 +214,6 @@ impl Actor {
             role: ActorRole::Implementer,
             session: Some(session),
         }
-    }
-
-    pub fn id(&self) -> &ActorId {
-        &self.id
     }
 
     pub const fn role(&self) -> ActorRole {
