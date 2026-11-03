@@ -22,7 +22,13 @@
     "test:dist": "node --test test/dist.test.mjs",
     "lint:fixtures": "bash scripts/lint-fixtures.sh",
     "check:completion": "node scripts/check-completion.mjs",
-    "check:release": "tsc -p tsconfig.release.json"
+    "check:release": "tsc -p tsconfig.release.json",
+    "generate": "npm run build:bindings && npm run build:wasm",
+    "ensure:generated": "node scripts/ensure-generated.mjs",
+    "prebuild": "npm run -s ensure:generated",
+    "pretypecheck": "npm run -s ensure:generated",
+    "pretest": "npm run -s ensure:generated",
+    "pretest:lab": "npm run -s ensure:generated"
   },
   "exports": {
     ".": {

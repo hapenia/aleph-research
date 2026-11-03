@@ -40,7 +40,8 @@ DTO path removes the hand-written codecs and keeps generated types, so the revis
 
 ## Build
 
-`npm run build:wasm` runs:
+`npm run generate` writes the ignored wasm-bindgen JS/wasm and ts-rs DTO files; it must
+run before typecheck or build on a fresh checkout. `npm run build:wasm` runs:
 
 1. `cargo build --locked --release --target wasm32-unknown-unknown`
 2. `wasm-bindgen 0.2.130 --target web --remove-name-section`

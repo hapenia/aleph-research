@@ -16,13 +16,20 @@ jobs:
   extension:
     name: extension syntax and tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: '26'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.130 --locked
 
       - name: Install dependencies
         working-directory: superagent-extension
@@ -42,6 +49,7 @@ jobs:
         working-directory: research-core
         run: |
           npm install --no-audit --no-fund
+          npm run generate
           npm run typecheck
           npm run lint
           npm run check:completion
