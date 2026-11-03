@@ -5,24 +5,17 @@ import {
   loadBundledResearchCore,
   loadResearchCore,
 } from '../src/adapter/wasm.js'
-import type { CoreConcepts, CoreWasmExports, WasmRuntime } from '../src/adapter/wasm.js'
+import type { CoreConcepts, CoreFactory, CoreHandle } from '../src/adapter/wasm.js'
 
-function exportsFor(version: number): CoreWasmExports {
+function fakeCore(version: number): CoreHandle {
   return {
-    memory: { buffer: new ArrayBuffer(0) },
-    aleph_bridge_version: () => version,
-    aleph_alloc: () => 0,
-    aleph_free: () => {},
-    aleph_start: () => 0,
-    aleph_resume: () => 0,
-    aleph_response_len: () => 0,
-    aleph_response_write: () => 0,
-  }
-}
-
-function runtimeFor(exports: CoreWasmExports): WasmRuntime {
-  return {
-    instantiate: async () => ({ exports }),
+    boundary_version: () => version,
+    start: () => {
+      throw new Error('unused')
+    },
+    resume: () => {
+      throw new Error('unused')
+    },
   }
 }
 
@@ -41,11 +34,14 @@ function unusedConcepts(): CoreConcepts {
   }
 }
 
+function factoryFor(version: number): CoreFactory {
+  return { create: () => fakeCore(version) }
+}
+
 test('the loader refuses a module with a different boundary version', async () => {
   const loaded = await loadResearchCore({
-    source: { module: new Uint8Array([0, 97, 115, 109]) },
     concepts: unusedConcepts(),
-    runtime: runtimeFor(exportsFor(CORE_BOUNDARY_VERSION + 1)),
+    factory: factoryFor(CORE_BOUNDARY_VERSION - 1),
   })
 
   assert.deepEqual(loaded, {
@@ -53,26 +49,24 @@ test('the loader refuses a module with a different boundary version', async () =
     error: {
       kind: 'boundary-version',
       expected: CORE_BOUNDARY_VERSION,
-      actual: CORE_BOUNDARY_VERSION + 1,
+      actual: CORE_BOUNDARY_VERSION - 1,
     },
   })
 })
 
-test('the loader refuses a module without the bridge exports', async () => {
-  const exports = exportsFor(CORE_BOUNDARY_VERSION)
-  const missing = {
-    ...exports,
-    aleph_start: undefined,
-  } as unknown as CoreWasmExports
+test('the loader refuses a factory that cannot instantiate the core', async () => {
   const loaded = await loadResearchCore({
-    source: { module: new Uint8Array() },
     concepts: unusedConcepts(),
-    runtime: runtimeFor(missing),
+    factory: {
+      create: () => {
+        throw new Error('instantiation failed')
+      },
+    },
   })
 
   assert.deepEqual(loaded, {
     ok: false,
-    error: { kind: 'missing-export', name: 'aleph_start' },
+    error: { kind: 'instantiate', message: 'instantiation failed' },
   })
 })
 

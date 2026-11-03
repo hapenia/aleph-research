@@ -10,7 +10,7 @@ import tseslint from 'typescript-eslint'
  * factory/hydration modules and in the type tests that deliberately exercise them.
  */
 export default tseslint.config(
-  { ignores: ['node_modules/**', 'dist/**', 'eslint.config.js', 'src/release-gate.ts'] },
+  { ignores: ['node_modules/**', 'dist/**', 'eslint.config.js', 'src/release-gate.ts', 'src/adapter/wasm-bindgen/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {

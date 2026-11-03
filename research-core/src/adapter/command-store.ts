@@ -99,12 +99,13 @@ function messageOf(error: unknown): string {
 
 async function saveVersioned<T>(
   repository: { save(expected: Version, next: T): Promise<Result<Version, StoreError>> },
-  expected: number | undefined,
+  expected: string | undefined,
   next: T,
-): Promise<Result<number, CoreCommandEffectFailure>> {
-  const saved = await repository.save(require(parseVersion(expected ?? 0)), next)
+): Promise<Result<string, CoreCommandEffectFailure>> {
+  const parsed = expected === undefined ? 0 : Number(expected)
+  const saved = await repository.save(require(parseVersion(parsed)), next)
   return saved.ok
-    ? { ok: true, value: saved.value }
+    ? { ok: true, value: String(saved.value) }
     : { ok: false, error: failureOf(saved.error) }
 }
 
@@ -140,7 +141,7 @@ function coreProgramOf(program: Program): CoreProgram {
     benchmark: {
       id: `benchmark-${program.id}`,
       entry: program.contract.ciEntry,
-      timeoutMs: program.contract.timeoutMs,
+      timeoutMs: String(program.contract.timeoutMs),
       metrics,
       maxRetries: 0,
       baseline: {},
@@ -149,14 +150,14 @@ function coreProgramOf(program: Program): CoreProgram {
     exploration: program.exploration,
     policy: {
       maxExperiments: program.budget.maxExperiments,
-      maxComputeMinutes: program.budget.maxComputeMinutes,
-      maxTokens: program.budget.maxTokens,
+      maxComputeMinutes: String(program.budget.maxComputeMinutes),
+      maxTokens: String(program.budget.maxTokens),
       maxAttemptsPerExperiment: 2,
     },
     usage: {
       experiments: program.usage.experiments,
-      computeMinutes: program.usage.computeMinutes,
-      tokens: program.usage.tokens,
+      computeMinutes: String(program.usage.computeMinutes),
+      tokens: String(program.usage.tokens),
     },
     status: programStatusOf(program),
     createdAt: program.createdAt,
@@ -216,7 +217,7 @@ function programRow(program: CoreProgram, clock: CommandClock, existing: Program
     methodology: program.methodology,
     contract: {
       ciEntry: program.benchmark.entry,
-      timeoutMs: program.benchmark.timeoutMs,
+      timeoutMs: Number(program.benchmark.timeoutMs),
       requiredMetrics: program.benchmark.metrics.map((metric) => metric.name),
     },
     utility: {
@@ -229,10 +230,14 @@ function programRow(program: CoreProgram, clock: CommandClock, existing: Program
     exploration: program.exploration,
     budget: {
       maxExperiments: program.policy.maxExperiments,
-      maxComputeMinutes: program.policy.maxComputeMinutes,
-      maxTokens: program.policy.maxTokens,
+      maxComputeMinutes: Number(program.policy.maxComputeMinutes),
+      maxTokens: Number(program.policy.maxTokens),
     },
-    usage: program.usage,
+    usage: {
+      experiments: program.usage.experiments,
+      computeMinutes: Number(program.usage.computeMinutes),
+      tokens: Number(program.usage.tokens),
+    },
     createdAt: program.createdAt,
   }
   if (program.status === 'paused') {
@@ -429,7 +434,7 @@ export function createDshCommandStore(options: {
     async loadProgram(programId) {
       const stored = await store.programs.get(require(parseProgramId(programId)))
       if (stored === undefined) return undefined
-      return { value: coreProgramOf(stored.value), version: stored.version }
+      return { value: coreProgramOf(stored.value), version: String(stored.version) }
     },
     async saveProgram(program, expected) {
       try {
@@ -458,14 +463,14 @@ export function createDshCommandStore(options: {
         programId: issue.programId,
         title: issue.title,
         body: issue.body,
-        labels: issue.labels,
+        labels: [...issue.labels],
         author: issue.author.sessionId,
         createdAt: issue.createdAt,
         status: issue.status,
-        experiments,
+        experiments: [...experiments],
       }
       const value: CoreIssue = assignee === undefined ? base : { ...base, assignee }
-      return { value, version: stored.version }
+      return { value, version: String(stored.version) }
     },
     async saveIssue(issue, expected) {
       try {
@@ -508,7 +513,7 @@ export function createDshCommandStore(options: {
         createdAt: experiment.createdAt,
         status,
       }
-      return { value, version: stored.version }
+      return { value, version: String(stored.version) }
     },
     async saveExperiment(experiment, expected) {
       try {
@@ -550,7 +555,7 @@ export function createDshCommandStore(options: {
       const value: CoreTicket = ticket.status === 'submitted'
         ? { ...withSession, commit: ticket.head }
         : withSession
-      return { value, version: stored.version }
+      return { value, version: String(stored.version) }
     },
     async saveTicket(ticket, expected) {
       try {

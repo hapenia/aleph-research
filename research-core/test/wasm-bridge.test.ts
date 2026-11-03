@@ -43,7 +43,7 @@ const PROGRAM: CoreProgram = {
   benchmark: {
     id: 'benchmark-1',
     entry: 'bench.py',
-    timeoutMs: 30_000,
+    timeoutMs: '30000',
     metrics: [{ name: 'score', direction: 'maximize', required: true }],
     maxRetries: 1,
     baseline: {},
@@ -52,11 +52,11 @@ const PROGRAM: CoreProgram = {
   exploration: 'normal',
   policy: {
     maxExperiments: 4,
-    maxComputeMinutes: 60,
-    maxTokens: 10_000,
+    maxComputeMinutes: '60',
+    maxTokens: '10000',
     maxAttemptsPerExperiment: 2,
   },
-  usage: { experiments: 0, computeMinutes: 0, tokens: 0 },
+  usage: { experiments: 0, computeMinutes: '0', tokens: '0' },
   status: 'running',
   createdAt: NOW,
 }
@@ -193,23 +193,22 @@ const EXPECTED_STAGES = [
   'ResearchCompleted',
 ]
 
-test('the bundled artifact is a real import-free wasm module', () => {
+test('the bundled artifact is a real wasm module with the Core exports', () => {
   const module = bundledResearchCoreModule()
   assert.deepEqual([...module.subarray(0, 4)], [0x00, 0x61, 0x73, 0x6d])
   const compiled = new WebAssembly.Module(module)
-  assert.deepEqual(WebAssembly.Module.imports(compiled), [])
   const names = WebAssembly.Module.exports(compiled).map((entry) => entry.name)
   for (const name of [
-    'aleph_bridge_version',
-    'aleph_alloc',
-    'aleph_free',
-    'aleph_start',
-    'aleph_resume',
-    'aleph_response_len',
-    'aleph_response_write',
+    'core_new',
+    'core_boundary_version',
+    'core_start',
+    'core_resume',
+    'core_command_start',
+    'core_command_resume',
   ]) {
     assert.ok(names.includes(name), `the wasm module must export ${name}`)
   }
+  assert.ok(WebAssembly.Module.imports(compiled).length > 0)
 })
 
 test('the real wasm core drives a passing experiment through every stage', async () => {
@@ -251,8 +250,8 @@ test('the core refuses a resume for any effect but the pending one', async () =>
   const sequence = started.value.sequence
 
   const laterEffect = core.resume({
-    sequence,
     effect: 'benchmark.run',
+    sequence,
     result: {
       ok: true,
       value: {
@@ -279,15 +278,15 @@ test('the core refuses a resume for any effect but the pending one', async () =>
   assert.match(laterEffect.error.message, /benchmark\.run/)
 
   const laterSequence = core.resume({
-    sequence: sequence + 1,
     effect: 'storage.loadProgram',
+    sequence: String(Number(sequence) + 1),
     result: { ok: true, value: PROGRAM },
   })
   assert.equal(laterSequence.ok, false)
 
   const accepted = core.resume({
-    sequence,
     effect: 'storage.loadProgram',
+    sequence,
     result: { ok: true, value: PROGRAM },
   })
   assert.equal(accepted.ok, true)
@@ -382,6 +381,38 @@ test('a retryable benchmark returns to EnvironmentBuilt before passing', async (
       ['passed', 2],
     ],
   )
+})
+
+test('isolated Core instances keep independent effect state', async () => {
+  const first = createConcepts()
+  const second = createConcepts(['failed'])
+  const firstCore = await loadBundledResearchCore(first.concepts)
+  const secondCore = await loadBundledResearchCore(second.concepts)
+  assert.equal(firstCore.ok, true)
+  assert.equal(secondCore.ok, true)
+  if (!firstCore.ok || !secondCore.ok) return
+
+  const firstStart = firstCore.value.start(START)
+  const secondStart = secondCore.value.start(START)
+  assert.equal(firstStart.ok, true)
+  assert.equal(secondStart.ok, true)
+  if (!firstStart.ok || !secondStart.ok) return
+  assert.equal(firstStart.value.kind, 'effect')
+  assert.equal(secondStart.value.kind, 'effect')
+  if (firstStart.value.kind !== 'effect' || secondStart.value.kind !== 'effect') return
+  assert.equal(firstStart.value.sequence, secondStart.value.sequence)
+  assert.equal(firstStart.value.effect, 'storage.loadProgram')
+
+  const firstRun = firstCore.value.run(START)
+  const secondRun = secondCore.value.run(START)
+  const [firstResult, secondResult] = await Promise.all([firstRun, secondRun])
+  assert.equal(firstResult.ok, true)
+  assert.equal(secondResult.ok, true)
+  if (!firstResult.ok || !secondResult.ok) return
+  assert.equal(firstResult.value.outcome, 'concluded')
+  assert.equal(secondResult.value.outcome, 'failed')
+  assert.deepEqual(first.calls, EXPECTED_CALLS)
+  assert.ok(second.calls.includes('benchmark.run:1'))
 })
 
 test('the core exposes no stage mutation entry point', async () => {

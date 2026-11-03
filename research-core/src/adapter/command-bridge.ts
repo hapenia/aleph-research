@@ -3,43 +3,25 @@ import type {
   CommandBridge,
   CommandConcepts,
   CommandEffect,
-  CommandEffectResult,
-  CommandFrame,
+  CommandFactory,
+  CoreCommandEffectFrame,
+  CommandHandle,
   CommandLoadError,
-  CommandWasmExports,
-  CommandWasmInstance,
-  CommandWasmRuntime,
   CoreCommandActor,
   CoreCommandDraft,
   CoreCommandEffectFailure,
+  CoreCommandEffectResume,
   CoreCommandError,
   CoreCommandOutcome,
 } from './command-boundary.js'
 import { COMMAND_BOUNDARY_VERSION } from './command-boundary.js'
-import {
-  decodeCommandEffect,
-  decodeCommandFrame,
-  encodeClockValue,
-  encodeCommandRequest,
-  encodeCommandResume,
-  encodeEmptyValue,
-  encodeLoadExperimentValue,
-  encodeLoadIssueValue,
-  encodeLoadProgramValue,
-  encodeLoadTicketValue,
-  encodeVersionValue,
-} from './command-codec.js'
-import { decodeBase64 } from './wasm-codec.js'
-import { WASM_CORE_BASE64 } from './wasm-core.js'
+import { Core } from './wasm-bindgen/core.js'
+import { initCore } from './wasm-core.js'
 
-declare const WebAssembly: {
-  instantiate(module: Uint8Array): Promise<{ readonly instance: CommandWasmInstance }>
-}
-
-const DEFAULT_RUNTIME: CommandWasmRuntime = {
-  instantiate: async (module) => {
-    const instantiated = await WebAssembly.instantiate(module)
-    return { exports: instantiated.instance.exports }
+const DEFAULT_FACTORY: CommandFactory = {
+  create: () => {
+    initCore()
+    return new Core()
   },
 }
 
@@ -53,16 +35,12 @@ function transport(message: string): CoreCommandError {
   return { kind: 'transport', message }
 }
 
-function missingExport(exports: CommandWasmExports): string | undefined {
-  if (exports.memory === undefined || exports.memory.buffer === undefined) return 'memory'
-  if (typeof exports.aleph_bridge_version !== 'function') return 'aleph_bridge_version'
-  if (typeof exports.aleph_alloc !== 'function') return 'aleph_alloc'
-  if (typeof exports.aleph_free !== 'function') return 'aleph_free'
-  if (typeof exports.aleph_command_start !== 'function') return 'aleph_command_start'
-  if (typeof exports.aleph_command_resume !== 'function') return 'aleph_command_resume'
-  if (typeof exports.aleph_response_len !== 'function') return 'aleph_response_len'
-  if (typeof exports.aleph_response_write !== 'function') return 'aleph_response_write'
-  return undefined
+function failure(message: string): CoreCommandEffectFailure {
+  return { kind: 'unavailable', message }
+}
+
+function notFound(message: string): CoreCommandEffectFailure {
+  return { kind: 'not-found', message }
 }
 
 type EffectOutcome<T> =
@@ -73,101 +51,202 @@ async function attempt<T>(work: () => Promise<T>): Promise<EffectOutcome<T>> {
   try {
     return { ok: true, value: await work() }
   } catch (error) {
-    return { ok: false, failure: { kind: 'unavailable', message: errorMessage(error) } }
+    return { ok: false, failure: failure(errorMessage(error)) }
   }
 }
 
-function notFound(message: string): EffectOutcome<never> {
-  return { ok: false, failure: { kind: 'not-found', message } }
+function effectOf(frame: CoreCommandEffectFrame): CommandEffect {
+  switch (frame.effect) {
+    case 'storage.loadProgram':
+      return { name: frame.effect, programId: frame.payload.programId }
+    case 'storage.saveProgram':
+      return {
+        name: frame.effect,
+        expected: frame.payload.expected,
+        program: frame.payload.program,
+      }
+    case 'storage.loadIssue':
+      return { name: frame.effect, issueId: frame.payload.issueId }
+    case 'storage.saveIssue':
+      return {
+        name: frame.effect,
+        expected: frame.payload.expected,
+        issue: frame.payload.issue,
+      }
+    case 'storage.loadExperiment':
+      return { name: frame.effect, experimentId: frame.payload.experimentId }
+    case 'storage.saveExperiment':
+      return {
+        name: frame.effect,
+        expected: frame.payload.expected,
+        experiment: frame.payload.experiment,
+      }
+    case 'storage.loadTicket':
+      return { name: frame.effect, ticketId: frame.payload.ticketId }
+    case 'storage.saveTicket':
+      return {
+        name: frame.effect,
+        expected: frame.payload.expected,
+        ticket: frame.payload.ticket,
+      }
+    case 'storage.appendAudit':
+      return {
+        name: frame.effect,
+        role: frame.payload.role,
+        entry: frame.payload.entry,
+      }
+    case 'clock.now':
+      return { name: frame.effect }
+  }
 }
 
 async function performEffect(
   concepts: CommandConcepts,
   effect: CommandEffect,
-): Promise<CommandEffectResult['result']> {
+  sequence: string,
+): Promise<CoreCommandEffectResume> {
   const store = concepts.store
   switch (effect.name) {
     case 'storage.loadProgram': {
       const loaded = await attempt(() => store.loadProgram(effect.programId))
-      if (!loaded.ok) return { ok: false, failure: loaded.failure }
-      if (loaded.value === undefined) {
-        return notFound(`program ${effect.programId} does not exist`)
+      if (!loaded.ok) {
+        return { effect: effect.name, sequence, result: { ok: false, failure: loaded.failure } }
       }
-      return { ok: true, value: encodeLoadProgramValue(loaded.value) }
+      if (loaded.value === undefined) {
+        return {
+          effect: effect.name,
+          sequence,
+          result: {
+            ok: false,
+            failure: notFound(`program ${effect.programId} does not exist`),
+          },
+        }
+      }
+      return {
+        effect: effect.name,
+        sequence,
+        result: { ok: true, value: loaded.value },
+      }
     }
     case 'storage.saveProgram': {
       const saved = await attempt(() => store.saveProgram(effect.program, effect.expected))
-      if (!saved.ok) return { ok: false, failure: saved.failure }
-      if (!saved.value.ok) return { ok: false, failure: saved.value.error }
-      return { ok: true, value: encodeVersionValue(saved.value.value) }
+      if (!saved.ok) {
+        return { effect: effect.name, sequence, result: { ok: false, failure: saved.failure } }
+      }
+      return saved.value.ok
+        ? { effect: effect.name, sequence, result: { ok: true, value: saved.value.value } }
+        : { effect: effect.name, sequence, result: { ok: false, failure: saved.value.error } }
     }
     case 'storage.loadIssue': {
       const loaded = await attempt(() => store.loadIssue(effect.issueId))
-      if (!loaded.ok) return { ok: false, failure: loaded.failure }
-      if (loaded.value === undefined) return notFound(`issue ${effect.issueId} does not exist`)
-      return { ok: true, value: encodeLoadIssueValue(loaded.value) }
+      if (!loaded.ok) {
+        return { effect: effect.name, sequence, result: { ok: false, failure: loaded.failure } }
+      }
+      if (loaded.value === undefined) {
+        return {
+          effect: effect.name,
+          sequence,
+          result: {
+            ok: false,
+            failure: notFound(`issue ${effect.issueId} does not exist`),
+          },
+        }
+      }
+      return { effect: effect.name, sequence, result: { ok: true, value: loaded.value } }
     }
     case 'storage.saveIssue': {
       const saved = await attempt(() => store.saveIssue(effect.issue, effect.expected))
-      if (!saved.ok) return { ok: false, failure: saved.failure }
-      if (!saved.value.ok) return { ok: false, failure: saved.value.error }
-      return { ok: true, value: encodeVersionValue(saved.value.value) }
+      if (!saved.ok) {
+        return { effect: effect.name, sequence, result: { ok: false, failure: saved.failure } }
+      }
+      return saved.value.ok
+        ? { effect: effect.name, sequence, result: { ok: true, value: saved.value.value } }
+        : { effect: effect.name, sequence, result: { ok: false, failure: saved.value.error } }
     }
     case 'storage.loadExperiment': {
       const loaded = await attempt(() => store.loadExperiment(effect.experimentId))
-      if (!loaded.ok) return { ok: false, failure: loaded.failure }
-      if (loaded.value === undefined) {
-        return notFound(`experiment ${effect.experimentId} does not exist`)
+      if (!loaded.ok) {
+        return { effect: effect.name, sequence, result: { ok: false, failure: loaded.failure } }
       }
-      return { ok: true, value: encodeLoadExperimentValue(loaded.value) }
+      if (loaded.value === undefined) {
+        return {
+          effect: effect.name,
+          sequence,
+          result: {
+            ok: false,
+            failure: notFound(`experiment ${effect.experimentId} does not exist`),
+          },
+        }
+      }
+      return { effect: effect.name, sequence, result: { ok: true, value: loaded.value } }
     }
     case 'storage.saveExperiment': {
       const saved = await attempt(() =>
         store.saveExperiment(effect.experiment, effect.expected),
       )
-      if (!saved.ok) return { ok: false, failure: saved.failure }
-      if (!saved.value.ok) return { ok: false, failure: saved.value.error }
-      return { ok: true, value: encodeVersionValue(saved.value.value) }
+      if (!saved.ok) {
+        return { effect: effect.name, sequence, result: { ok: false, failure: saved.failure } }
+      }
+      return saved.value.ok
+        ? { effect: effect.name, sequence, result: { ok: true, value: saved.value.value } }
+        : { effect: effect.name, sequence, result: { ok: false, failure: saved.value.error } }
     }
     case 'storage.loadTicket': {
       const loaded = await attempt(() => store.loadTicket(effect.ticketId))
-      if (!loaded.ok) return { ok: false, failure: loaded.failure }
-      if (loaded.value === undefined) return notFound(`ticket ${effect.ticketId} does not exist`)
-      return { ok: true, value: encodeLoadTicketValue(loaded.value) }
+      if (!loaded.ok) {
+        return { effect: effect.name, sequence, result: { ok: false, failure: loaded.failure } }
+      }
+      if (loaded.value === undefined) {
+        return {
+          effect: effect.name,
+          sequence,
+          result: {
+            ok: false,
+            failure: notFound(`ticket ${effect.ticketId} does not exist`),
+          },
+        }
+      }
+      return { effect: effect.name, sequence, result: { ok: true, value: loaded.value } }
     }
     case 'storage.saveTicket': {
       const saved = await attempt(() => store.saveTicket(effect.ticket, effect.expected))
-      if (!saved.ok) return { ok: false, failure: saved.failure }
-      if (!saved.value.ok) return { ok: false, failure: saved.value.error }
-      return { ok: true, value: encodeVersionValue(saved.value.value) }
+      if (!saved.ok) {
+        return { effect: effect.name, sequence, result: { ok: false, failure: saved.failure } }
+      }
+      return saved.value.ok
+        ? { effect: effect.name, sequence, result: { ok: true, value: saved.value.value } }
+        : { effect: effect.name, sequence, result: { ok: false, failure: saved.value.error } }
     }
     case 'storage.appendAudit': {
       const appended = await attempt(() => store.appendAudit(effect.entry, effect.role))
-      if (!appended.ok) return { ok: false, failure: appended.failure }
-      if (!appended.value.ok) return { ok: false, failure: appended.value.error }
-      return { ok: true, value: encodeEmptyValue() }
+      if (!appended.ok) {
+        return {
+          effect: effect.name,
+          sequence,
+          result: { ok: false, failure: appended.failure },
+        }
+      }
+      return appended.value.ok
+        ? { effect: effect.name, sequence, result: { ok: true, value: { acknowledged: true } } }
+        : { effect: effect.name, sequence, result: { ok: false, failure: appended.value.error } }
     }
     case 'clock.now':
-      try {
-        return { ok: true, value: encodeClockValue(concepts.clock.now()) }
-      } catch (error) {
-        return { ok: false, failure: { kind: 'unavailable', message: errorMessage(error) } }
+      return {
+        effect: effect.name,
+        sequence,
+        result: { ok: true, value: concepts.clock.now() },
       }
   }
 }
 
 class WasmCommandBridge implements CommandBridge {
   readonly boundaryVersion: number
-  private readonly exports: CommandWasmExports
+  private readonly core: CommandHandle
   private readonly concepts: CommandConcepts
   private requestSequence = 0
 
-  constructor(
-    exports: CommandWasmExports,
-    concepts: CommandConcepts,
-    boundaryVersion: number,
-  ) {
-    this.exports = exports
+  constructor(core: CommandHandle, concepts: CommandConcepts, boundaryVersion: number) {
+    this.core = core
     this.concepts = concepts
     this.boundaryVersion = boundaryVersion
   }
@@ -178,98 +257,75 @@ class WasmCommandBridge implements CommandBridge {
   ): Promise<Result<CoreCommandOutcome, CoreCommandError>> {
     this.requestSequence += 1
     const requestId = `command-${this.requestSequence}`
-    let frame = this.invoke(
-      this.exports.aleph_command_start,
-      encodeCommandRequest(actor, requestId, draft),
-    )
-    if (!frame.ok) return frame
-    while (frame.value.kind === 'effect') {
-      const effect = decodeCommandEffect(frame.value.effect, frame.value.payload)
-      if (!effect.ok) return effect
-      const result = await performEffect(this.concepts, effect.value)
-      const resume: CommandEffectResult = {
-        effect: effect.value.name,
-        sequence: frame.value.sequence,
-        result,
+    let frame
+    try {
+      frame = this.core.command_start({ actor, requestId, draft })
+    } catch (error) {
+      return { ok: false, error: transport(errorMessage(error)) }
+    }
+    while (frame.kind === 'effect') {
+      const effect = effectOf(frame)
+      const resume = await performEffect(this.concepts, effect, frame.sequence)
+      let resumed
+      try {
+        resumed = this.core.command_resume(resume)
+      } catch (error) {
+        return { ok: false, error: transport(errorMessage(error)) }
       }
-      const resumed = this.invoke(
-        this.exports.aleph_command_resume,
-        encodeCommandResume(resume),
-      )
-      if (!resumed.ok) return resumed
       frame = resumed
     }
-    return { ok: true, value: frame.value.outcome }
-  }
-
-  private invoke(
-    call: (pointer: number, length: number) => number,
-    request: Uint8Array,
-  ): Result<CommandFrame, CoreCommandError> {
-    const requestPointer = this.exports.aleph_alloc(request.length)
-    if (requestPointer === 0) return { ok: false, error: transport('the core could not allocate a request buffer') }
-    new Uint8Array(this.exports.memory.buffer, requestPointer, request.length).set(request)
-    const accepted = call(requestPointer, request.length)
-    this.exports.aleph_free(requestPointer, request.length)
-    if (accepted === 0) return { ok: false, error: transport('the core refused the request buffer') }
-    const length = this.exports.aleph_response_len()
-    if (length === 0) return { ok: false, error: transport('the core produced an empty response') }
-    const responsePointer = this.exports.aleph_alloc(length)
-    if (responsePointer === 0) {
-      return { ok: false, error: transport('the core could not allocate a response buffer') }
+    if (frame.kind === 'protocol') {
+      return { ok: false, error: { kind: 'protocol', message: frame.message } }
     }
-    const written = this.exports.aleph_response_write(responsePointer, length)
-    const response = new Uint8Array(
-      this.exports.memory.buffer,
-      responsePointer,
-      written,
-    ).slice()
-    this.exports.aleph_free(responsePointer, length)
-    if (written !== length) {
-      return { ok: false, error: transport('the core produced an incomplete response') }
+    if (frame.kind === 'command-error') {
+      return {
+        ok: false,
+        error: {
+          kind: frame.errorKind,
+          command: frame.command,
+          message: frame.message,
+        },
+      }
     }
-    return decodeCommandFrame(response)
+    return { ok: true, value: frame.outcome }
   }
 }
 
 export interface LoadCommandBridgeInput {
   readonly concepts: CommandConcepts
-  readonly runtime?: CommandWasmRuntime
-  readonly source?: Uint8Array
+  readonly factory?: CommandFactory
 }
 
-export async function loadCommandBridge(
+export function loadCommandBridge(
   input: LoadCommandBridgeInput,
 ): Promise<Result<CommandBridge, CommandLoadError>> {
-  let instance: CommandWasmInstance
+  let core: CommandHandle
   try {
-    const module = input.source ?? decodeBase64(WASM_CORE_BASE64)
-    instance = await (input.runtime ?? DEFAULT_RUNTIME).instantiate(module)
+    core = (input.factory ?? DEFAULT_FACTORY).create()
   } catch (error) {
-    return { ok: false, error: { kind: 'instantiate', message: errorMessage(error) } }
+    return Promise.resolve({
+      ok: false,
+      error: { kind: 'instantiate', message: errorMessage(error) },
+    })
   }
-  const missing = missingExport(instance.exports)
-  if (missing !== undefined) {
-    return { ok: false, error: { kind: 'missing-export', name: missing } }
-  }
-  const actual = instance.exports.aleph_bridge_version()
+  const actual = core.boundary_version()
   if (actual !== COMMAND_BOUNDARY_VERSION) {
-    return {
+    return Promise.resolve({
       ok: false,
       error: {
         kind: 'boundary-version',
         expected: COMMAND_BOUNDARY_VERSION,
         actual,
       },
-    }
+    })
   }
-  return {
+  return Promise.resolve({
     ok: true,
-    value: new WasmCommandBridge(instance.exports, input.concepts, actual),
-  }
+    value: new WasmCommandBridge(core, input.concepts, actual),
+  })
 }
 
-export async function loadBundledCommandBridge(
+export function loadBundledCommandBridge(
   concepts: CommandConcepts,
 ): Promise<Result<CommandBridge, CommandLoadError>> {
   return loadCommandBridge({ concepts })

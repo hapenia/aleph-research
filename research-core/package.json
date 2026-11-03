@@ -7,6 +7,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "build:wasm": "node scripts/build-wasm.mjs",
+    "build:bindings": "node scripts/build-bindings.mjs",
+    "check:bindings": "node scripts/build-bindings.mjs --check",
     "check:wasm": "node scripts/build-wasm.mjs --check",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.lab.json",
     "typecheck:lab": "tsc -p tsconfig.lab.json",

@@ -39,7 +39,7 @@ const PROGRAM: CoreProgram = {
   benchmark: {
     id: 'benchmark-1',
     entry: 'bench.py',
-    timeoutMs: 30_000,
+    timeoutMs: '30000',
     metrics: [{ name: 'score', direction: 'maximize', required: true }],
     maxRetries: 1,
     baseline: {},
@@ -48,11 +48,11 @@ const PROGRAM: CoreProgram = {
   exploration: 'normal',
   policy: {
     maxExperiments: 4,
-    maxComputeMinutes: 60,
-    maxTokens: 10_000,
+    maxComputeMinutes: '60',
+    maxTokens: '10000',
     maxAttemptsPerExperiment: 2,
   },
-  usage: { experiments: 0, computeMinutes: 0, tokens: 0 },
+  usage: { experiments: 0, computeMinutes: '0', tokens: '0' },
   status: 'running',
   createdAt: NOW,
 }

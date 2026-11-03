@@ -16,7 +16,8 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": []
+    "types": [],
+    "allowJs": true
   },
   "include": [
     "src"

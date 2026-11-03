@@ -1,25 +1,26 @@
 use std::cell::RefCell;
+use std::rc::Rc;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use wasm_bindgen::prelude::*;
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ProbeRequest {
-    value: String,
+use crate::bridge::{self, CoreState};
+use crate::dto::{CoreCommandEffectResume, CoreCommandRequest, CoreEffectResume, CoreStartRequest};
+
+fn decode<T: DeserializeOwned>(input: JsValue) -> Option<T> {
+    serde_wasm_bindgen::from_value(input).ok()
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ProbeResponse {
-    value: String,
-    version: u32,
+fn encode<T: Serialize>(frame: &T) -> Result<JsValue, JsError> {
+    frame
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|error| JsError::new(&error.to_string()))
 }
 
 #[wasm_bindgen]
 pub struct Core {
-    version: u32,
-    state: RefCell<u32>,
+    state: Rc<RefCell<CoreState>>,
 }
 
 #[wasm_bindgen]
@@ -27,24 +28,49 @@ impl Core {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Core {
         Core {
-            version: crate::CORE_ABI_VERSION,
-            state: RefCell::new(0),
+            state: Rc::new(RefCell::new(CoreState::new())),
         }
     }
 
     pub fn boundary_version(&self) -> u32 {
-        self.version
+        crate::CORE_ABI_VERSION
     }
 
-    pub fn probe(&self, input: JsValue) -> Result<JsValue, JsError> {
-        let request: ProbeRequest =
-            serde_wasm_bindgen::from_value(input).map_err(|error| JsError::new(&error.to_string()))?;
-        let mut state = self.state.borrow_mut();
-        *state = state.saturating_add(1);
-        serde_wasm_bindgen::to_value(&ProbeResponse {
-            value: request.value,
-            version: self.version,
-        })
-        .map_err(|error| JsError::new(&error.to_string()))
+    pub fn start(&self, input: JsValue) -> Result<JsValue, JsError> {
+        let frame = match decode::<CoreStartRequest>(input) {
+            Some(request) => bridge::start(&self.state, request),
+            None => bridge::protocol_frame("the start request is malformed"),
+        };
+        encode(&frame)
+    }
+
+    pub fn resume(&self, input: JsValue) -> Result<JsValue, JsError> {
+        let frame = match decode::<CoreEffectResume>(input) {
+            Some(request) => bridge::resume(&self.state, request),
+            None => bridge::protocol_frame("the resume request is malformed"),
+        };
+        encode(&frame)
+    }
+
+    pub fn command_start(&self, input: JsValue) -> Result<JsValue, JsError> {
+        let frame = match decode::<CoreCommandRequest>(input) {
+            Some(request) => bridge::start_command(&self.state, request),
+            None => bridge::command_protocol_frame("the command request is malformed"),
+        };
+        encode(&frame)
+    }
+
+    pub fn command_resume(&self, input: JsValue) -> Result<JsValue, JsError> {
+        let frame = match decode::<CoreCommandEffectResume>(input) {
+            Some(request) => bridge::resume_command(&self.state, request),
+            None => bridge::command_protocol_frame("the resume request is malformed"),
+        };
+        encode(&frame)
+    }
+}
+
+impl Default for Core {
+    fn default() -> Self {
+        Self::new()
     }
 }

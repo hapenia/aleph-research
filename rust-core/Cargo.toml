@@ -9,18 +9,20 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 getset = "0.1.7"
-serde = "1.0.229"
+serde = { version = "1.0.229", features = ["derive"] }
 serde-wasm-bindgen = "0.6.5"
 thiserror = "2"
 wasm-bindgen = "0.2.130"
 
 [dev-dependencies]
 trybuild = "1"
-ts-rs = "12.0.1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ts-rs = { version = "12.0.1", features = ["no-serde-warnings"] }
 
 [profile.release]
 opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"
-strip = true
+strip = "debuginfo"

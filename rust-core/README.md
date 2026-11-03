@@ -23,7 +23,7 @@ accepts only a complete `Plugin`.
 - `plugin`: the ten host traits and `Plugin`.
 - `pipeline`: `PipelineContext` and `run_pipeline`.
 - `memory`: in-memory host implementations and `InMemoryPlugin`.
-- `wasm`: the wasm32 C ABI facade.
+- `dto` and `wasm_bindgen`: the wasm-bindgen `Core` facade and its serde DTOs.
 
 ## Commands
 
@@ -63,29 +63,17 @@ by `trybuild`.
 
 ## wasm32 ABI
 
-The facade is a plain C ABI so the adapter needs no generated glue. All
-functions use UTF-8 pointer/length pairs into wasm linear memory.
+The facade is a wasm-bindgen `Core` class. Arguments and frames cross the
+boundary as `JsValue` objects described by the serde DTOs in `src/dto.rs` and
+the generated TypeScript declarations in
+`research-core/src/adapter/bindings/`.
 
-- `aleph_core_version() -> u32`
-- `aleph_<name>_is_valid(ptr, len) -> u32` for program, issue, experiment,
-  ticket, benchmark_run, benchmark_spec, artifact, audit, trigger,
-  pipeline_run, session, actor and request identifiers, plus commit SHA,
-  spec hash and environment digest.
-- `aleph_stage_code(ptr, len) -> i32` returns -1 for an unknown stage name.
-- `aleph_stage_successor_mask(code) -> u32` returns a bitmask indexed by stage
-  code.
-- `aleph_stage_is_terminal(code) -> u32`
-- `aleph_stage_name_len(code) -> u32` and
-  `aleph_stage_name_write(code, ptr, capacity) -> u32`.
-- `aleph_stage_count() -> u32`
-- `aleph_policy_allows_retry(attempt, max_attempts) -> u32`
-- `aleph_bridge_version() -> u32`
-- `aleph_alloc(length) -> ptr` and `aleph_free(ptr, length)`
-- `aleph_start(ptr, len) -> u32` and `aleph_resume(ptr, len) -> u32`
-- `aleph_command_start(ptr, len) -> u32` and
-  `aleph_command_resume(ptr, len) -> u32`
-- `aleph_response_len() -> u32` and
-  `aleph_response_write(ptr, capacity) -> u32`
+- `new Core()`
+- `boundary_version() -> u32`
+- `start(input) -> frame`
+- `resume(input) -> frame`
+- `command_start(input) -> frame`
+- `command_resume(input) -> frame`
 
 The command entry points run `HostGate` and `CommandExecutor` inside wasm.
 Draft validation, capability, ownership, aggregate-state checks and audit
