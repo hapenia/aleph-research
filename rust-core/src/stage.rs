@@ -1,5 +1,7 @@
 use std::fmt;
 
+use getset::Getters;
+
 use crate::domain::{
     BenchmarkRecord, BenchmarkStatus, Environment, ResearchOutcome, ResearcherDecision,
 };
@@ -141,9 +143,11 @@ impl fmt::Display for StageName {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct PipelineRun {
+    #[getset(get = "pub")]
     id: PipelineRunId,
+    #[getset(get = "pub")]
     experiment_id: ExperimentId,
     stage: StageName,
     attempt: Attempt,
@@ -171,14 +175,6 @@ impl PipelineRun {
             state_version,
             updated_at,
         }
-    }
-
-    pub fn id(&self) -> &PipelineRunId {
-        &self.id
-    }
-
-    pub fn experiment_id(&self) -> &ExperimentId {
-        &self.experiment_id
     }
 
     pub const fn stage(&self) -> StageName {
@@ -219,10 +215,13 @@ impl StageIds {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getters)]
 pub struct IssueAssigned {
+    #[getset(get = "pub")]
     program_id: ProgramId,
+    #[getset(get = "pub")]
     issue_id: IssueId,
+    #[getset(get = "pub")]
     assignee: SessionId,
     assigned_at: Timestamp,
 }
@@ -242,28 +241,19 @@ impl IssueAssigned {
         }
     }
 
-    pub fn program_id(&self) -> &ProgramId {
-        &self.program_id
-    }
-
-    pub fn issue_id(&self) -> &IssueId {
-        &self.issue_id
-    }
-
-    pub fn assignee(&self) -> &SessionId {
-        &self.assignee
-    }
-
     pub const fn assigned_at(&self) -> Timestamp {
         self.assigned_at
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getters)]
 pub struct ExperimentProposed {
     ids: StageIds,
+    #[getset(get = "pub")]
     branch: BranchName,
+    #[getset(get = "pub")]
     base_commit: CommitSha,
+    #[getset(get = "pub")]
     environment: Environment,
 }
 
@@ -282,18 +272,6 @@ impl ExperimentProposed {
             base_commit,
             environment,
         }
-    }
-
-    pub fn branch(&self) -> &BranchName {
-        &self.branch
-    }
-
-    pub fn base_commit(&self) -> &CommitSha {
-        &self.base_commit
-    }
-
-    pub fn environment(&self) -> &Environment {
-        &self.environment
     }
 
     pub async fn deliver_trigger<P: Plugin>(
@@ -323,22 +301,16 @@ impl ExperimentProposed {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getters)]
 pub struct TriggerAccepted {
     ids: StageIds,
+    #[getset(get = "pub")]
     trigger_id: TriggerId,
+    #[getset(get = "pub")]
     environment: Environment,
 }
 
 impl TriggerAccepted {
-    pub fn trigger_id(&self) -> &TriggerId {
-        &self.trigger_id
-    }
-
-    pub fn environment(&self) -> &Environment {
-        &self.environment
-    }
-
     pub async fn open_ticket<P: Plugin>(
         self,
         context: &PipelineContext<'_, P>,
@@ -365,22 +337,16 @@ impl TriggerAccepted {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getters)]
 pub struct TicketOpened {
     ids: StageIds,
+    #[getset(get = "pub")]
     ticket_id: TicketId,
+    #[getset(get = "pub")]
     environment: Environment,
 }
 
 impl TicketOpened {
-    pub fn ticket_id(&self) -> &TicketId {
-        &self.ticket_id
-    }
-
-    pub fn environment(&self) -> &Environment {
-        &self.environment
-    }
-
     pub async fn start_worker<P: Plugin>(
         self,
         context: &PipelineContext<'_, P>,
@@ -407,27 +373,18 @@ impl TicketOpened {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getters)]
 pub struct WorkerStarted {
     ids: StageIds,
+    #[getset(get = "pub")]
     ticket_id: TicketId,
+    #[getset(get = "pub")]
     worker_session_id: SessionId,
+    #[getset(get = "pub")]
     environment: Environment,
 }
 
 impl WorkerStarted {
-    pub fn ticket_id(&self) -> &TicketId {
-        &self.ticket_id
-    }
-
-    pub fn worker_session_id(&self) -> &SessionId {
-        &self.worker_session_id
-    }
-
-    pub fn environment(&self) -> &Environment {
-        &self.environment
-    }
-
     pub async fn submit_commit<P: Plugin>(
         self,
         context: &PipelineContext<'_, P>,
@@ -455,27 +412,18 @@ impl WorkerStarted {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getters)]
 pub struct CommitSubmitted {
     ids: StageIds,
+    #[getset(get = "pub")]
     ticket_id: TicketId,
+    #[getset(get = "pub")]
     commit: CommitSha,
+    #[getset(get = "pub")]
     environment: Environment,
 }
 
 impl CommitSubmitted {
-    pub fn ticket_id(&self) -> &TicketId {
-        &self.ticket_id
-    }
-
-    pub fn commit(&self) -> &CommitSha {
-        &self.commit
-    }
-
-    pub fn environment(&self) -> &Environment {
-        &self.environment
-    }
-
     pub async fn build_environment<P: Plugin>(
         self,
         context: &PipelineContext<'_, P>,
@@ -505,33 +453,21 @@ impl CommitSubmitted {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getters)]
 pub struct EnvironmentBuilt {
     ids: StageIds,
+    #[getset(get = "pub")]
     ticket_id: TicketId,
+    #[getset(get = "pub")]
     commit: CommitSha,
+    #[getset(get = "pub")]
     environment: Environment,
+    #[getset(get = "pub")]
     environment_digest: EnvironmentDigest,
     attempt: Attempt,
 }
 
 impl EnvironmentBuilt {
-    pub fn ticket_id(&self) -> &TicketId {
-        &self.ticket_id
-    }
-
-    pub fn commit(&self) -> &CommitSha {
-        &self.commit
-    }
-
-    pub fn environment(&self) -> &Environment {
-        &self.environment
-    }
-
-    pub fn environment_digest(&self) -> &EnvironmentDigest {
-        &self.environment_digest
-    }
-
     pub const fn attempt(&self) -> Attempt {
         self.attempt
     }
@@ -626,17 +562,14 @@ impl BenchmarkOutcome {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getters)]
 pub struct BenchmarkPassed {
     ids: StageIds,
+    #[getset(get = "pub")]
     record: BenchmarkRecord,
 }
 
 impl BenchmarkPassed {
-    pub fn record(&self) -> &BenchmarkRecord {
-        &self.record
-    }
-
     pub fn record_result<P: Plugin>(
         self,
         _context: &PipelineContext<'_, P>,
@@ -648,17 +581,14 @@ impl BenchmarkPassed {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getters)]
 pub struct BenchmarkFailed {
     ids: StageIds,
+    #[getset(get = "pub")]
     record: BenchmarkRecord,
 }
 
 impl BenchmarkFailed {
-    pub fn record(&self) -> &BenchmarkRecord {
-        &self.record
-    }
-
     pub async fn close_failed<P: Plugin>(
         self,
         context: &PipelineContext<'_, P>,
@@ -674,35 +604,23 @@ impl BenchmarkFailed {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getters)]
 pub struct BenchmarkRetryable {
     ids: StageIds,
+    #[getset(get = "pub")]
     ticket_id: TicketId,
+    #[getset(get = "pub")]
     commit: CommitSha,
+    #[getset(get = "pub")]
     environment: Environment,
     attempt: Attempt,
+    #[getset(get = "pub")]
     record: BenchmarkRecord,
 }
 
 impl BenchmarkRetryable {
-    pub fn ticket_id(&self) -> &TicketId {
-        &self.ticket_id
-    }
-
-    pub fn commit(&self) -> &CommitSha {
-        &self.commit
-    }
-
-    pub fn environment(&self) -> &Environment {
-        &self.environment
-    }
-
     pub const fn attempt(&self) -> Attempt {
         self.attempt
-    }
-
-    pub fn record(&self) -> &BenchmarkRecord {
-        &self.record
     }
 
     pub fn can_retry<P: Plugin>(&self, context: &PipelineContext<'_, P>) -> bool {
@@ -767,17 +685,14 @@ impl BenchmarkRetryable {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getters)]
 pub struct ResultRecorded {
     ids: StageIds,
+    #[getset(get = "pub")]
     benchmark: BenchmarkRecord,
 }
 
 impl ResultRecorded {
-    pub fn benchmark(&self) -> &BenchmarkRecord {
-        &self.benchmark
-    }
-
     pub async fn review_result<P: Plugin>(
         self,
         context: &PipelineContext<'_, P>,
@@ -798,18 +713,15 @@ impl ResultRecorded {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Getters)]
 pub struct ReviewRecorded {
     ids: StageIds,
+    #[getset(get = "pub")]
     benchmark: BenchmarkRecord,
     decision: ResearcherDecision,
 }
 
 impl ReviewRecorded {
-    pub fn benchmark(&self) -> &BenchmarkRecord {
-        &self.benchmark
-    }
-
     pub const fn decision(&self) -> ResearcherDecision {
         self.decision
     }

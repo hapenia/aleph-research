@@ -1,5 +1,7 @@
 use std::fmt;
 
+use getset::{CopyGetters, Getters};
+
 use crate::id::{Attempt, ExperimentId, TicketId, Version};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,24 +62,18 @@ impl fmt::Display for IdReason {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error, Getters, CopyGetters)]
 #[error("{field} {reason}")]
 pub struct IdError {
+    #[getset(get_copy = "pub")]
     field: &'static str,
+    #[getset(get = "pub")]
     reason: IdReason,
 }
 
 impl IdError {
     pub fn new(field: &'static str, reason: IdReason) -> Self {
         Self { field, reason }
-    }
-
-    pub fn field(&self) -> &'static str {
-        self.field
-    }
-
-    pub fn reason(&self) -> &IdReason {
-        &self.reason
     }
 }
 

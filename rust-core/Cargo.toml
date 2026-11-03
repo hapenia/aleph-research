@@ -8,6 +8,7 @@ rust-version = "1.85"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+getset = "0.1.7"
 thiserror = "2"
 
 [dev-dependencies]
